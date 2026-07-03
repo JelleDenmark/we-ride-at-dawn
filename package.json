@@ -1,0 +1,12 @@
+{
+  "name": "wrad",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "test": "npm run test -w @wrad/core",
+    "dev": "npm run dev -w @wrad/app",
+    "build": "npm run build -w @wrad/app"
+  }
+}

@@ -1,0 +1,19 @@
+:root {
+  color-scheme: dark;
+  --bg: #0d0b09;
+  --panel: #17130f;
+  --ink: #d8cdb8;
+  --ink-dim: #8a7f6c;
+  --accent: #c4552e;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: Georgia, 'Times New Roman', serif;
+}
