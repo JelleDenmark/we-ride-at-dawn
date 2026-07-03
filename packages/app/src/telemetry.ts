@@ -1,9 +1,9 @@
 import type { BattleResult, Lineup } from '@wrad/core';
 
-// Filled in once the Supabase project exists. The anon key is designed to be
-// public (inserts only, enforced by row-level security on the server).
-const SUPABASE_URL = '';
-const SUPABASE_ANON_KEY = '';
+// The publishable key is designed to be public: row-level security on the
+// server allows inserts only — it cannot read, edit, or delete anything.
+const SUPABASE_URL = 'https://wvrllhiktnkvbpclmrpq.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_6S2kGgYAI2gRLhfRxXBY3A_E_mIgpAi';
 const APP_VERSION = '0.4.5';
 
 const OPT_OUT_KEY = 'wrad-telemetry-opt-out';
@@ -42,7 +42,6 @@ export function submitRun(args: {
       method: 'POST',
       headers: {
         apikey: SUPABASE_ANON_KEY,
-        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
         'Content-Type': 'application/json',
         Prefer: 'return=minimal',
       },
