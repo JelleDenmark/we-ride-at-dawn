@@ -4,6 +4,8 @@
     currentRideDate,
     dailySeed,
     generateGauntlet,
+    scoutReport,
+    ARCHETYPE_LABEL,
     simulate,
     TEST_HORDE,
     type BattleResult,
@@ -12,6 +14,10 @@
 
   const date = currentRideDate();
   const seed = dailySeed(date);
+  const tomorrow = new Date(Date.parse(`${date}T12:00:00Z`) + 86_400_000)
+    .toISOString()
+    .slice(0, 10);
+  const report = scoutReport(generateGauntlet(tomorrow));
 
   let stageEl: HTMLDivElement;
   let player: ReplayPlayer | undefined;
@@ -38,6 +44,17 @@
 <main>
   <h1>WE RIDE AT DAWN</h1>
   <p class="sub">gauntlet of {date} &middot; seed {seed.toString(16)}</p>
+  <div class="scout">
+    <div class="scout-label">scout report — tomorrow's gauntlet</div>
+    <p class="scout-flavor">&ldquo;{report.flavor}&rdquo;</p>
+    <div class="scout-chips">
+      {#each report.hints as hint}
+        <span class="chip">
+          {ARCHETYPE_LABEL[hint.archetype]}{hint.fromWave ? ` · wave ${hint.fromWave}+` : ''}
+        </span>
+      {/each}
+    </div>
+  </div>
   <div class="stage" bind:this={stageEl}></div>
   <button class="ride" onclick={ride} disabled={phase === 'riding'}>
     {phase === 'idle' ? 'The horde rides' : phase === 'riding' ? 'Riding…' : 'Ride again'}
@@ -72,6 +89,40 @@
     margin: 4px 0 16px;
     color: var(--ink-dim);
     font-size: 13px;
+  }
+
+  .scout {
+    max-width: 560px;
+    margin: 0 auto 16px;
+    padding: 10px 16px;
+    background: var(--panel);
+    border: 1px solid #4a3520;
+    border-radius: 8px;
+    text-align: left;
+  }
+
+  .scout-label {
+    font-size: 12px;
+    color: var(--ink-dim);
+  }
+
+  .scout-flavor {
+    margin: 5px 0 8px;
+    font-size: 14px;
+    font-style: italic;
+  }
+
+  .scout-chips {
+    display: flex;
+    gap: 6px;
+  }
+
+  .chip {
+    font-size: 12px;
+    padding: 3px 10px;
+    border-radius: 10px;
+    background: #2a2118;
+    color: #c9b891;
   }
 
   .stage :global(canvas) {

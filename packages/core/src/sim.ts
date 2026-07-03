@@ -1,7 +1,13 @@
 import type { Side, UnitDef, Ability, Lineup } from './data/units';
 import { UNIT_DEFS } from './data/units';
+import { ENEMY_POOL } from './data/enemies';
 import { RELIC_DEFS, type RelicDef } from './data/relics';
 import type { Gauntlet } from './gauntlet';
+
+const DEF_LOOKUP: Record<string, UnitDef> = {
+  ...UNIT_DEFS,
+  ...Object.fromEntries(ENEMY_POOL.map((e) => [e.id, e])),
+};
 
 export const BOARD_CAP = 5;
 export const SCORE_PER_WAVE = 100;
@@ -180,7 +186,7 @@ export function simulate(
     const effect = source.ability.effect;
     switch (effect.kind) {
       case 'summon': {
-        const def = UNIT_DEFS[effect.unitId];
+        const def = DEF_LOOKUP[effect.unitId];
         for (let i = 0; i < effect.count; i++) {
           if (board.length >= BOARD_CAP) break;
           const summoned = instantiate(def, source.side);
@@ -318,6 +324,9 @@ export function simulate(
     if (enemies.length === 0 && horde.length > 0) {
       wavesCleared++;
       events.push({ type: 'waveClear', wave: w + 1 });
+      // Antidote between waves: carried damage persists, poison does not —
+      // otherwise plague enemies would compound with attrition (tunable).
+      for (const unit of horde) unit.poison = 0;
     }
   }
 

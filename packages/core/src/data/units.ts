@@ -1,5 +1,7 @@
 export type Side = 'horde' | 'gauntlet';
 
+export type Archetype = 'swarm' | 'brute' | 'armored' | 'plague';
+
 export type Effect =
   | { kind: 'summon'; unitId: string; count: number }
   | { kind: 'buffBehind'; attack: number; health: number; all?: boolean }
@@ -19,6 +21,7 @@ export interface UnitDef {
   attack: number;
   health: number;
   cost: number;
+  archetype?: Archetype;
   ability?: Ability;
 }
 

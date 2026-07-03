@@ -12,7 +12,15 @@ export {
 } from './data/units';
 export { RELIC_DEFS, type RelicDef } from './data/relics';
 export { ENEMY_POOL } from './data/enemies';
-export { generateGauntlet, type Gauntlet, type EnemyWave, WAVE_COUNT } from './gauntlet';
+export type { Archetype } from './data/units';
+export {
+  generateGauntlet,
+  type Gauntlet,
+  type GauntletTheme,
+  type EnemyWave,
+  WAVE_COUNT,
+} from './gauntlet';
+export { scoutReport, ARCHETYPE_LABEL, type ScoutReport, type ScoutHint } from './scout';
 export {
   simulate,
   BOARD_CAP,
