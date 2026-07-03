@@ -67,7 +67,9 @@ wrad/
 2. ✅ *(2026-07-03)* **Full sim.** All 10 units / 6 relics, all trigger types, wave carry-over with persistent damage, poison, summons, revive. Golden-log regression tests + cross-run determinism tests.
 3. ✅ *(2026-07-03)* **Gauntlet generator + scouting.** Budgeted escalating waves from the daily seed, with waves tagged by archetype; scout-report extraction (archetype summary of a gauntlet). Sanity tests: monotonic difficulty, deterministic across runs, scout report consistent with the real gauntlet.
 4. ✅ *(2026-07-03)* **Shop.** Headless `core` economy first (tested), then the Svelte deckbuilder screen: buy/sell/reroll/freeze, three-of-a-kind combine, drag-to-reposition.
-5. **The daily loop.** 06:00 CET boundary, persistence keyed by date, lineup lock at dawn, lazy resolution of yesterday's lineup against the newly revealed gauntlet, scout report display for tomorrow, scoring.
+4.5 *(added 2026-07-03)* **Testing mode.** The milestone-4 "build today, ride now" loop is kept deliberately as the testing/practice mode — the dawn loop is on hold until the core game is tuned. Adds: a dev date picker (ride any date's theme), replay speed control (1×/2×/4× + skip to result), and a headless balance report (batch-simulate archetype lineups across many dates, print depth distributions). When milestone 5 lands, this mode becomes the player-facing practice ride (the pinned Test Ride, arrived early).
+
+5. ⏸ *(on hold 2026-07-03, pending balance testing)* **The daily loop.** 06:00 CET boundary, persistence keyed by date, lineup lock at dawn, lazy resolution of yesterday's lineup against the newly revealed gauntlet, scout report display for tomorrow, scoring.
 6. **Ship it.** Emoji share card, PWA manifest + install prompt, deploy to static hosting. Play it with friends; start the balance-tuning loop.
 
 ## 4. Later / explicitly out of MVP

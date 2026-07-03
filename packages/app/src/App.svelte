@@ -27,14 +27,16 @@
   import { ReplayPlayer } from './replay/ReplayPlayer';
   import { loadBuild, saveBuild } from './persistence';
 
-  const date = currentRideDate();
-  const seed = dailySeed(date);
-  const tomorrow = new Date(Date.parse(`${date}T12:00:00Z`) + 86_400_000)
-    .toISOString()
-    .slice(0, 10);
-  const report = scoutReport(generateGauntlet(tomorrow));
+  let selectedDate = $state(currentRideDate());
+  const seed = $derived(dailySeed(selectedDate));
+  const tomorrow = $derived(
+    new Date(Date.parse(`${selectedDate}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10)
+  );
+  const report = $derived(scoutReport(generateGauntlet(tomorrow)));
+  const theme = $derived(generateGauntlet(selectedDate).theme);
 
-  let build = $state<BuildState>(loadBuild(date) ?? newBuild(date));
+  let build = $state<BuildState>(loadBuild(currentRideDate()) ?? newBuild(currentRideDate()));
+  let speed = $state(1);
   let selected = $state<number | null>(null);
   let pendingRelic = $state<number | null>(null);
   let notice = $state('');
@@ -48,6 +50,38 @@
     player = new ReplayPlayer();
     await player.init(stageEl);
   });
+
+  function setDate(d: string) {
+    if (!d) return;
+    selectedDate = d;
+    build = loadBuild(d) ?? newBuild(d);
+    selected = null;
+    pendingRelic = null;
+    result = null;
+    notice = '';
+  }
+
+  function freshBuild() {
+    build = newBuild(selectedDate);
+    saveBuild(build);
+    selected = null;
+    pendingRelic = null;
+    notice = '';
+  }
+
+  function addScrap() {
+    build = { ...build, scrap: build.scrap + 10 };
+    saveBuild(build);
+  }
+
+  function setSpeed(s: number) {
+    speed = s;
+    if (player) player.speed = s;
+  }
+
+  function skipReplay() {
+    if (player) player.speed = 1e9;
+  }
 
   function apply(res: ActionResult): boolean {
     if (res.ok) {
@@ -111,7 +145,8 @@
     pendingRelic = null;
     phase = 'riding';
     result = null;
-    const outcome = simulate(lineupFromBuild(build), generateGauntlet(date));
+    player.speed = speed;
+    const outcome = simulate(lineupFromBuild(build), generateGauntlet(selectedDate));
     await player.play(outcome.events);
     result = outcome.result;
     phase = 'done';
@@ -120,7 +155,24 @@
 
 <main>
   <h1>WE RIDE AT DAWN</h1>
-  <p class="sub">gauntlet of {date} &middot; seed {seed.toString(16)}</p>
+  <p class="sub">gauntlet of {selectedDate} &middot; seed {seed.toString(16)}</p>
+
+  <div class="dev">
+    <span class="panel-label">testing</span>
+    <input
+      type="date"
+      value={selectedDate}
+      onchange={(e) => setDate(e.currentTarget.value)}
+    />
+    <button onclick={freshBuild}>fresh build</button>
+    <button onclick={addScrap}>+10 scrap</button>
+    <span class="dev-theme">theme: {theme.primary} + {theme.secondary} @ wave {theme.pivotWave}</span>
+    <span class="dev-sep">·</span>
+    {#each [1, 2, 4] as s}
+      <button class:active={speed === s} onclick={() => setSpeed(s)}>{s}×</button>
+    {/each}
+    <button onclick={skipReplay} disabled={phase !== 'riding'}>skip ⏭</button>
+  </div>
 
   <div class="scout">
     <div class="panel-label">scout report — tomorrow's gauntlet</div>
@@ -273,6 +325,60 @@
   .panel-label {
     font-size: 12px;
     color: var(--ink-dim);
+  }
+
+  .dev {
+    max-width: 620px;
+    margin: 0 auto 10px;
+    padding: 6px 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    border: 1px dashed #322820;
+    border-radius: 8px;
+    font-size: 12px;
+    color: var(--ink-dim);
+  }
+
+  .dev input[type='date'] {
+    background: #241a14;
+    border: 1px solid #4a3520;
+    border-radius: 6px;
+    color: var(--ink);
+    font-family: inherit;
+    font-size: 12px;
+    padding: 3px 6px;
+  }
+
+  .dev button {
+    padding: 3px 10px;
+    font-family: inherit;
+    font-size: 12px;
+    color: var(--ink);
+    background: #241a14;
+    border: 1px solid #4a3520;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+
+  .dev button.active {
+    border-color: var(--accent);
+    color: #f0e6d2;
+  }
+
+  .dev button:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+
+  .dev-theme {
+    color: #c9b891;
+  }
+
+  .dev-sep {
+    color: #4a3520;
   }
 
   .scout {

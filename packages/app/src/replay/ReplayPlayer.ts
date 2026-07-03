@@ -22,6 +22,12 @@ function tween(
   ms: number
 ): Promise<void> {
   const from = { x: target.x, y: target.y, alpha: target.alpha };
+  if (ms <= 0) {
+    if (to.x !== undefined) target.x = to.x;
+    if (to.y !== undefined) target.y = to.y;
+    if (to.alpha !== undefined) target.alpha = to.alpha;
+    return Promise.resolve();
+  }
   const start = performance.now();
   return new Promise((resolve) => {
     let done = false;
@@ -78,6 +84,8 @@ class UnitSprite {
 }
 
 export class ReplayPlayer {
+  /** Playback speed multiplier; set very high (1e9) to skip to the end. */
+  speed = 1;
   private app!: Application;
   private sprites = new Map<number, UnitSprite>();
   private stats = new Map<number, { attack: number; health: number }>();
@@ -95,6 +103,10 @@ export class ReplayPlayer {
     for (const event of events) await this.handle(event);
   }
 
+  private d(ms: number): number {
+    return this.speed >= 1e6 ? 0 : ms / this.speed;
+  }
+
   private reset(): void {
     this.app.stage.removeChildren();
     this.sprites.clear();
@@ -107,14 +119,14 @@ export class ReplayPlayer {
     switch (event.type) {
       case 'battleStart': {
         for (const unit of event.horde) this.spawn(unit, this.order.horde.length, -80);
-        await this.layout(280);
+        await this.layout(this.d(280));
         break;
       }
       case 'waveStart': {
         for (const unit of event.enemies) this.spawn(unit, this.order.gauntlet.length, W + 80);
         this.showBanner(`WAVE ${event.wave}`);
-        await this.layout(320);
-        await wait(300);
+        await this.layout(this.d(320));
+        await wait(this.d(300));
         break;
       }
       case 'clash': {
@@ -122,10 +134,10 @@ export class ReplayPlayer {
         const b = this.sprites.get(event.enemyId);
         if (!a || !b) break;
         await Promise.all([
-          tween(a.root, { x: a.root.x + 18 }, 110),
-          tween(b.root, { x: b.root.x - 18 }, 110),
+          tween(a.root, { x: a.root.x + 18 }, this.d(110)),
+          tween(b.root, { x: b.root.x - 18 }, this.d(110)),
         ]);
-        await this.layout(110);
+        await this.layout(this.d(110));
         break;
       }
       case 'damage': {
@@ -187,23 +199,23 @@ export class ReplayPlayer {
       case 'death': {
         const sprite = this.sprites.get(event.unitId);
         if (!sprite) break;
-        await tween(sprite.root, { alpha: 0, y: GROUND_Y + 24 }, 240);
+        await tween(sprite.root, { alpha: 0, y: GROUND_Y + 24 }, this.d(240));
         this.app.stage.removeChild(sprite.root);
         this.sprites.delete(event.unitId);
         this.stats.delete(event.unitId);
         this.order.horde = this.order.horde.filter((id) => id !== event.unitId);
         this.order.gauntlet = this.order.gauntlet.filter((id) => id !== event.unitId);
-        await this.layout(140);
+        await this.layout(this.d(140));
         break;
       }
       case 'summon': {
         this.spawn(event.unit, event.index, event.unit.side === 'horde' ? -80 : W + 80);
-        await this.layout(200);
+        await this.layout(this.d(200));
         break;
       }
       case 'waveClear': {
         this.showBanner(`WAVE ${event.wave} CLEARED — deeper into the city`);
-        await wait(650);
+        await wait(this.d(650));
         break;
       }
       case 'battleEnd': {
@@ -211,7 +223,7 @@ export class ReplayPlayer {
           `THE RIDE ENDS — DEPTH ${event.wavesCleared} · SCORE ${event.score}`,
           true
         );
-        await wait(400);
+        await wait(this.d(400));
         break;
       }
     }
@@ -252,7 +264,7 @@ export class ReplayPlayer {
     this.app.stage.addChild(this.banner);
     if (!persistent) {
       const banner = this.banner;
-      setTimeout(() => tween(banner, { alpha: 0 }, 400), 900);
+      setTimeout(() => tween(banner, { alpha: 0 }, this.d(400)), this.d(900));
     }
   }
 
@@ -265,7 +277,7 @@ export class ReplayPlayer {
     label.x = x;
     label.y = y;
     this.app.stage.addChild(label);
-    await tween(label, { y: y - 26, alpha: 0 }, 380);
+    await tween(label, { y: y - 26, alpha: 0 }, this.d(380));
     this.app.stage.removeChild(label);
   }
 }
