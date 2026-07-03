@@ -1,9 +1,12 @@
-import type { Ability, Side, UnitDef } from './data/units';
+import type { Side, UnitDef, Ability, Lineup } from './data/units';
 import { UNIT_DEFS } from './data/units';
+import { RELIC_DEFS, type RelicDef } from './data/relics';
 import type { Gauntlet } from './gauntlet';
 
 export const BOARD_CAP = 5;
 export const SCORE_PER_WAVE = 100;
+/** Stalemate guard (e.g. two healers out-sustaining each other): the wave is abandoned. */
+export const MAX_TICKS_PER_WAVE = 1000;
 
 export interface UnitView {
   instanceId: number;
@@ -19,9 +22,14 @@ export type BattleEvent =
   | { type: 'waveStart'; wave: number; enemies: UnitView[] }
   | { type: 'clash'; hordeId: number; enemyId: number }
   | { type: 'damage'; targetId: number; amount: number; remainingHealth: number }
+  | { type: 'poisonApplied'; targetId: number; stacks: number; totalStacks: number }
+  | { type: 'poisonTick'; targetId: number; amount: number; remainingHealth: number }
+  | { type: 'heal'; targetId: number; amount: number; newHealth: number }
   | { type: 'death'; unitId: number }
   | { type: 'summon'; side: Side; index: number; unit: UnitView }
+  | { type: 'revive'; side: Side; index: number; unit: UnitView }
   | { type: 'buff'; targetId: number; attack: number; health: number; newAttack: number; newHealth: number }
+  | { type: 'relicProc'; targetId: number; relicId: string; name: string }
   | { type: 'waveClear'; wave: number }
   | { type: 'battleEnd'; wavesCleared: number; score: number };
 
@@ -38,31 +46,62 @@ interface BattleUnit {
   name: string;
   attack: number;
   health: number;
+  maxHealth: number;
   side: Side;
   ability?: Ability;
+  relics: RelicDef[];
+  poison: number;
+  firstAttackDone: boolean;
+  tailCharmUsed: boolean;
 }
 
 /**
  * Pure and deterministic: same (lineup, gauntlet) always yields a
  * byte-identical event log. No unseeded randomness, no wall-clock,
  * no iteration over unordered collections.
+ *
+ * Tick order: heals -> simultaneous clash -> afterAttack triggers ->
+ * poison ticks -> death resolution (faint ability, faint relics,
+ * allyFaint listeners — horde before gauntlet, front to back).
  */
 export function simulate(
-  lineup: UnitDef[],
+  lineup: Lineup,
   gauntlet: Gauntlet
 ): { events: BattleEvent[]; result: BattleResult } {
   const events: BattleEvent[] = [];
   let nextInstanceId = 1;
 
-  const instantiate = (def: UnitDef, side: Side): BattleUnit => ({
-    instanceId: nextInstanceId++,
-    defId: def.id,
-    name: def.name,
-    attack: def.attack,
-    health: def.health,
-    side,
-    ability: def.ability,
-  });
+  const teamRelics = (lineup.teamRelicIds ?? [])
+    .map((id) => RELIC_DEFS[id])
+    .filter((r): r is RelicDef => r !== undefined && r.scope === 'team');
+  const teamAttack = teamRelics.reduce((s, r) => s + (r.attack ?? 0), 0);
+  const teamHealth = teamRelics.reduce((s, r) => s + (r.health ?? 0), 0);
+
+  const instantiate = (def: UnitDef, side: Side, relicIds: string[] = []): BattleUnit => {
+    const relics = relicIds
+      .map((id) => RELIC_DEFS[id])
+      .filter((r): r is RelicDef => r !== undefined && r.scope === 'unit');
+    let attack = def.attack + relics.reduce((s, r) => s + (r.attack ?? 0), 0);
+    let health = def.health + relics.reduce((s, r) => s + (r.health ?? 0), 0);
+    if (side === 'horde') {
+      attack += teamAttack;
+      health += teamHealth;
+    }
+    return {
+      instanceId: nextInstanceId++,
+      defId: def.id,
+      name: def.name,
+      attack,
+      health,
+      maxHealth: health,
+      side,
+      ability: def.ability,
+      relics,
+      poison: 0,
+      firstAttackDone: false,
+      tailCharmUsed: false,
+    };
+  };
 
   const view = (u: BattleUnit): UnitView => ({
     instanceId: u.instanceId,
@@ -73,46 +112,116 @@ export function simulate(
     side: u.side,
   });
 
-  const horde: BattleUnit[] = lineup.slice(0, BOARD_CAP).map((d) => instantiate(d, 'horde'));
+  const horde: BattleUnit[] = lineup.units
+    .slice(0, BOARD_CAP)
+    .map((u) => instantiate(UNIT_DEFS[u.defId], 'horde', u.relicIds));
+  let enemies: BattleUnit[] = [];
+  const fallen: Record<Side, BattleUnit[]> = { horde: [], gauntlet: [] };
+
+  const boardOf = (side: Side): BattleUnit[] => (side === 'horde' ? horde : enemies);
+  const opposing = (side: Side): BattleUnit[] => (side === 'horde' ? enemies : horde);
+
   events.push({ type: 'battleStart', horde: horde.map(view) });
 
-  const applyEffect = (source: BattleUnit, index: number, board: BattleUnit[]): void => {
-    if (!source.ability) return;
-    const effect = source.ability.effect;
-    if (effect.kind === 'summon') {
-      const def = UNIT_DEFS[effect.unitId];
-      for (let i = 0; i < effect.count; i++) {
-        if (board.length >= BOARD_CAP) break;
-        const summoned = instantiate(def, source.side);
-        board.splice(index, 0, summoned);
-        events.push({ type: 'summon', side: source.side, index, unit: view(summoned) });
+  const applyDamage = (unit: BattleUnit, amount: number, cause: 'attack' | 'poison'): void => {
+    unit.health -= amount;
+    let charmProc = false;
+    if (unit.health <= 0 && !unit.tailCharmUsed) {
+      const charm = unit.relics.find((r) => r.surviveLethal);
+      if (charm) {
+        unit.tailCharmUsed = true;
+        unit.health = 1;
+        charmProc = true;
       }
-    } else if (effect.kind === 'buffBehind') {
-      const target = board[index];
-      if (!target) return;
-      target.attack += effect.attack;
-      target.health += effect.health;
-      events.push({
-        type: 'buff',
-        targetId: target.instanceId,
-        attack: effect.attack,
-        health: effect.health,
-        newAttack: target.attack,
-        newHealth: target.health,
-      });
+    }
+    events.push({
+      type: cause === 'poison' ? 'poisonTick' : 'damage',
+      targetId: unit.instanceId,
+      amount,
+      remainingHealth: unit.health,
+    });
+    if (charmProc) {
+      events.push({ type: 'relicProc', targetId: unit.instanceId, relicId: 'tail-charm', name: 'Tail-Charm' });
     }
   };
 
-  const fireStartOfBattle = (board: BattleUnit[]): void => {
-    for (const unit of [...board]) {
-      if (unit.ability?.trigger !== 'startOfBattle') continue;
-      const index = board.findIndex((u) => u.instanceId === unit.instanceId);
-      if (index === -1) continue;
-      applyEffect(unit, index, board);
+  const applyPoisonStacks = (target: BattleUnit, stacks: number): void => {
+    target.poison += stacks;
+    events.push({
+      type: 'poisonApplied',
+      targetId: target.instanceId,
+      stacks,
+      totalStacks: target.poison,
+    });
+  };
+
+  const buff = (target: BattleUnit, attack: number, health: number): void => {
+    target.attack += attack;
+    target.health += health;
+    target.maxHealth += health;
+    events.push({
+      type: 'buff',
+      targetId: target.instanceId,
+      attack,
+      health,
+      newAttack: target.attack,
+      newHealth: target.health,
+    });
+  };
+
+  /**
+   * `index` is the source's current board index, or — when `removed` —
+   * the index it occupied before dying, which is where "behind" now starts
+   * and where summons/revives are inserted.
+   */
+  const applyEffect = (source: BattleUnit, index: number, removed: boolean): void => {
+    if (!source.ability) return;
+    const board = boardOf(source.side);
+    const effect = source.ability.effect;
+    switch (effect.kind) {
+      case 'summon': {
+        const def = UNIT_DEFS[effect.unitId];
+        for (let i = 0; i < effect.count; i++) {
+          if (board.length >= BOARD_CAP) break;
+          const summoned = instantiate(def, source.side);
+          board.splice(index, 0, summoned);
+          events.push({ type: 'summon', side: source.side, index, unit: view(summoned) });
+        }
+        break;
+      }
+      case 'buffBehind': {
+        const start = removed ? index : index + 1;
+        const targets = effect.all ? board.slice(start) : board.slice(start, start + 1);
+        for (const target of targets) buff(target, effect.attack, effect.health);
+        break;
+      }
+      case 'poisonFrontEnemy': {
+        const target = opposing(source.side)[0];
+        if (target) applyPoisonStacks(target, effect.stacks);
+        break;
+      }
+      case 'poisonTarget': {
+        const target = opposing(source.side)[0];
+        if (target && target.health > 0) applyPoisonStacks(target, effect.stacks);
+        break;
+      }
+      case 'gainStats': {
+        buff(source, effect.attack, effect.health);
+        break;
+      }
+      case 'revive': {
+        const corpse = fallen[source.side].shift();
+        if (!corpse || board.length >= BOARD_CAP) break;
+        corpse.health = effect.health;
+        corpse.poison = 0;
+        board.splice(index, 0, corpse);
+        events.push({ type: 'revive', side: source.side, index, unit: view(corpse) });
+        break;
+      }
     }
   };
 
-  const resolveDeaths = (enemies: BattleUnit[]): void => {
+  const resolveDeaths = (): void => {
     for (;;) {
       let dead: BattleUnit | undefined;
       let deadIndex = -1;
@@ -128,7 +237,26 @@ export function simulate(
       if (!dead || !deadBoard) return;
       deadBoard.splice(deadIndex, 1);
       events.push({ type: 'death', unitId: dead.instanceId });
-      if (dead.ability?.trigger === 'faint') applyEffect(dead, deadIndex, deadBoard);
+      fallen[dead.side].push(dead);
+
+      if (dead.ability?.trigger === 'faint') applyEffect(dead, deadIndex, true);
+      for (const relic of dead.relics) {
+        if (!relic.onFaintDamageAll) continue;
+        events.push({ type: 'relicProc', targetId: dead.instanceId, relicId: relic.id, name: relic.name });
+        for (const foe of [...opposing(dead.side)]) applyDamage(foe, relic.onFaintDamageAll, 'attack');
+      }
+      for (const ally of [...deadBoard]) {
+        if (ally.ability?.trigger === 'allyFaint' && ally.health > 0) applyEffect(ally, deadBoard.indexOf(ally), false);
+      }
+    }
+  };
+
+  const fireStartOfBattle = (board: BattleUnit[]): void => {
+    for (const unit of [...board]) {
+      if (unit.ability?.trigger !== 'startOfBattle') continue;
+      const index = board.findIndex((u) => u.instanceId === unit.instanceId);
+      if (index === -1) continue;
+      applyEffect(unit, index, false);
     }
   };
 
@@ -137,29 +265,56 @@ export function simulate(
   let damageThisWave = 0;
 
   for (let w = 0; w < gauntlet.waves.length && horde.length > 0; w++) {
-    const enemies = gauntlet.waves[w].units.map((d) => instantiate(d, 'gauntlet'));
+    enemies = gauntlet.waves[w].units.map((d) => instantiate(d, 'gauntlet'));
     events.push({ type: 'waveStart', wave: w + 1, enemies: enemies.map(view) });
     damageThisWave = 0;
 
     fireStartOfBattle(horde);
     fireStartOfBattle(enemies);
-    resolveDeaths(enemies);
+    resolveDeaths();
 
-    while (horde.length > 0 && enemies.length > 0) {
+    let ticks = 0;
+    while (horde.length > 0 && enemies.length > 0 && ticks++ < MAX_TICKS_PER_WAVE) {
+      for (const board of [horde, enemies]) {
+        for (const unit of board) {
+          const regen = unit.relics.reduce((s, r) => s + (r.healPerTick ?? 0), 0);
+          const amount = Math.min(regen, unit.maxHealth - unit.health);
+          if (amount > 0) {
+            unit.health += amount;
+            events.push({ type: 'heal', targetId: unit.instanceId, amount, newHealth: unit.health });
+          }
+        }
+      }
+
       const front = horde[0];
       const foe = enemies[0];
       events.push({ type: 'clash', hordeId: front.instanceId, enemyId: foe.instanceId });
 
-      foe.health -= front.attack;
-      events.push({ type: 'damage', targetId: foe.instanceId, amount: front.attack, remainingHealth: foe.health });
-      front.health -= foe.attack;
-      events.push({ type: 'damage', targetId: front.instanceId, amount: foe.attack, remainingHealth: front.health });
-      damageThisWave += front.attack;
+      const bonusOf = (u: BattleUnit): number =>
+        u.firstAttackDone ? 0 : u.relics.reduce((s, r) => s + (r.firstHitBonus ?? 0), 0);
+      const damageOut = front.attack + bonusOf(front);
+      const damageIn = foe.attack + bonusOf(foe);
+      front.firstAttackDone = true;
+      foe.firstAttackDone = true;
 
-      resolveDeaths(enemies);
+      applyDamage(foe, damageOut, 'attack');
+      applyDamage(front, damageIn, 'attack');
+      damageThisWave += damageOut;
+
+      if (front.ability?.trigger === 'afterAttack') applyEffect(front, 0, false);
+      if (foe.ability?.trigger === 'afterAttack') applyEffect(foe, 0, false);
+
+      for (const board of [horde, enemies]) {
+        for (const unit of [...board]) {
+          if (unit.poison > 0 && unit.health > 0) applyDamage(unit, unit.poison, 'poison');
+        }
+      }
+
+      resolveDeaths();
     }
 
     totalDamage += damageThisWave;
+    if (ticks > MAX_TICKS_PER_WAVE) break;
     if (enemies.length === 0 && horde.length > 0) {
       wavesCleared++;
       events.push({ type: 'waveClear', wave: w + 1 });

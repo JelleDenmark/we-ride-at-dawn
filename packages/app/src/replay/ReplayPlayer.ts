@@ -14,6 +14,8 @@ function wait(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+// Driven by rAF with a timer fallback: rAF stops in hidden tabs, and an
+// awaited tween that never resolves would freeze the replay forever.
 function tween(
   target: Container,
   to: { x?: number; y?: number; alpha?: number },
@@ -22,16 +24,26 @@ function tween(
   const from = { x: target.x, y: target.y, alpha: target.alpha };
   const start = performance.now();
   return new Promise((resolve) => {
-    const step = (now: number) => {
-      const t = Math.min(1, (now - start) / ms);
+    let done = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const step = () => {
+      if (done) return;
+      const t = Math.min(1, (performance.now() - start) / ms);
       const ease = 1 - (1 - t) ** 2;
       if (to.x !== undefined) target.x = from.x + (to.x - from.x) * ease;
       if (to.y !== undefined) target.y = from.y + (to.y - from.y) * ease;
       if (to.alpha !== undefined) target.alpha = from.alpha + (to.alpha - from.alpha) * ease;
-      if (t < 1) requestAnimationFrame(step);
-      else resolve();
+      if (t < 1) {
+        requestAnimationFrame(step);
+        clearTimeout(timer);
+        timer = setTimeout(step, 100);
+      } else {
+        done = true;
+        clearTimeout(timer);
+        resolve();
+      }
     };
-    requestAnimationFrame(step);
+    step();
   });
 }
 
@@ -123,6 +135,43 @@ export class ReplayPlayer {
         s.health = event.remainingHealth;
         sprite.setStats(s.attack, s.health);
         await this.floatText(sprite.root.x, sprite.root.y - 44, `-${event.amount}`, 0xd8452e);
+        break;
+      }
+      case 'poisonTick': {
+        const sprite = this.sprites.get(event.targetId);
+        const s = this.stats.get(event.targetId);
+        if (!sprite || !s) break;
+        s.health = event.remainingHealth;
+        sprite.setStats(s.attack, s.health);
+        await this.floatText(sprite.root.x, sprite.root.y - 44, `-${event.amount} ☠`, 0x9b59b6);
+        break;
+      }
+      case 'poisonApplied': {
+        const sprite = this.sprites.get(event.targetId);
+        if (!sprite) break;
+        await this.floatText(sprite.root.x, sprite.root.y - 44, `☠ poison ×${event.totalStacks}`, 0x9b59b6);
+        break;
+      }
+      case 'heal': {
+        const sprite = this.sprites.get(event.targetId);
+        const s = this.stats.get(event.targetId);
+        if (!sprite || !s) break;
+        s.health = event.newHealth;
+        sprite.setStats(s.attack, s.health);
+        await this.floatText(sprite.root.x, sprite.root.y - 44, `+${event.amount}`, 0x7fb069);
+        break;
+      }
+      case 'relicProc': {
+        const sprite = this.sprites.get(event.targetId);
+        if (!sprite) break;
+        await this.floatText(sprite.root.x, sprite.root.y - 58, `✦ ${event.name}`, 0xd4af37);
+        break;
+      }
+      case 'revive': {
+        this.spawn(event.unit, event.index, event.unit.side === 'horde' ? -80 : W + 80);
+        await this.layout(200);
+        const sprite = this.sprites.get(event.unit.instanceId);
+        if (sprite) await this.floatText(sprite.root.x, sprite.root.y - 58, 'RISEN', 0xd4af37);
         break;
       }
       case 'buff': {

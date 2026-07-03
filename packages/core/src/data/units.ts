@@ -2,10 +2,14 @@ export type Side = 'horde' | 'gauntlet';
 
 export type Effect =
   | { kind: 'summon'; unitId: string; count: number }
-  | { kind: 'buffBehind'; attack: number; health: number };
+  | { kind: 'buffBehind'; attack: number; health: number; all?: boolean }
+  | { kind: 'poisonFrontEnemy'; stacks: number }
+  | { kind: 'poisonTarget'; stacks: number }
+  | { kind: 'gainStats'; attack: number; health: number }
+  | { kind: 'revive'; health: number };
 
 export interface Ability {
-  trigger: 'startOfBattle' | 'faint';
+  trigger: 'startOfBattle' | 'faint' | 'afterAttack' | 'allyFaint';
   effect: Effect;
 }
 
@@ -18,7 +22,17 @@ export interface UnitDef {
   ability?: Ability;
 }
 
-/** Milestone-1 subset of the spec §5.4 roster. */
+export interface LineupUnit {
+  defId: string;
+  relicIds?: string[];
+}
+
+export interface Lineup {
+  units: LineupUnit[];
+  teamRelicIds?: string[];
+}
+
+/** Full spec §5.4 roster. Archetypes: Breed/Swarm, Plague, Sacrifice, Bruiser/Anchor. */
 export const UNIT_DEFS: Record<string, UnitDef> = {
   pup: { id: 'pup', name: 'Pup', attack: 1, health: 1, cost: 0 },
   'gutter-runt': { id: 'gutter-runt', name: 'Gutter Runt', attack: 1, health: 1, cost: 1 },
@@ -38,6 +52,22 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     cost: 3,
     ability: { trigger: 'faint', effect: { kind: 'summon', unitId: 'pup', count: 2 } },
   },
+  'plague-bearer': {
+    id: 'plague-bearer',
+    name: 'Plague-Bearer',
+    attack: 2,
+    health: 2,
+    cost: 2,
+    ability: { trigger: 'startOfBattle', effect: { kind: 'poisonFrontEnemy', stacks: 1 } },
+  },
+  'blight-witch': {
+    id: 'blight-witch',
+    name: 'Blight-Witch',
+    attack: 3,
+    health: 3,
+    cost: 3,
+    ability: { trigger: 'afterAttack', effect: { kind: 'poisonTarget', stacks: 1 } },
+  },
   gnawer: {
     id: 'gnawer',
     name: 'Gnawer',
@@ -46,14 +76,41 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     cost: 2,
     ability: { trigger: 'faint', effect: { kind: 'buffBehind', attack: 2, health: 0 } },
   },
+  'corpse-glutton': {
+    id: 'corpse-glutton',
+    name: 'Corpse-Glutton',
+    attack: 3,
+    health: 2,
+    cost: 3,
+    ability: { trigger: 'allyFaint', effect: { kind: 'gainStats', attack: 1, health: 1 } },
+  },
+  'bone-priest': {
+    id: 'bone-priest',
+    name: 'Bone-Priest',
+    attack: 1,
+    health: 4,
+    cost: 3,
+    ability: { trigger: 'faint', effect: { kind: 'revive', health: 1 } },
+  },
+  'warren-warden': {
+    id: 'warren-warden',
+    name: 'Warren-Warden',
+    attack: 2,
+    health: 6,
+    cost: 3,
+    ability: { trigger: 'startOfBattle', effect: { kind: 'buffBehind', attack: 1, health: 1, all: true } },
+  },
   'dire-rat': { id: 'dire-rat', name: 'Dire-Rat', attack: 4, health: 5, cost: 4 },
 };
 
-/** Hardcoded milestone-1 lineup, index 0 = front. */
-export const TEST_HORDE: UnitDef[] = [
-  UNIT_DEFS['gnawer'],
-  UNIT_DEFS['gutter-runt'],
-  UNIT_DEFS['rat-piper'],
-  UNIT_DEFS['brood-mother'],
-  UNIT_DEFS['dire-rat'],
-];
+/** Hardcoded showcase lineup until the shop lands (milestone 4). Index 0 = front. */
+export const TEST_HORDE: Lineup = {
+  units: [
+    { defId: 'gnawer', relicIds: ['rusted-nail'] },
+    { defId: 'plague-bearer' },
+    { defId: 'corpse-glutton', relicIds: ['fat-tick'] },
+    { defId: 'brood-mother' },
+    { defId: 'bone-priest', relicIds: ['tail-charm'] },
+  ],
+  teamRelicIds: ['filth-totem'],
+};
