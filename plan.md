@@ -19,6 +19,7 @@ Companion to [we-ride-at-dawn-spec.md](we-ride-at-dawn-spec.md). Records the dec
 | **Share card (v0)** | Emoji/text grid | Wordle-style paste-anywhere text ("🐀 WRAD #37 — Wave 12"). Image card is a possible fast-follow. |
 | **Sequencing** | Thin visual slice first | Milestone 1 is a watchable battle in the browser, not a headless library. Determinism tests ride along from day one. |
 | **Sim authority (v1 social)** | Deferred | No backend in MVP. Default when it comes: server re-simulation using the same TS `core`. |
+| **Run telemetry** *(2026-07-03)* | Supabase (free tier) | Anonymous balance telemetry: each ride POSTs `(ride_date, device_id, lineup, waves_cleared, score, dev, version)` to a `runs` table via the public anon key (insert-only under RLS). Dev rides (date picker / +10 scrap) are flagged. Opt-out toggle in the app; random UUID device id, no accounts. Scores can be re-verified by re-simulation (same anti-cheat muscle as the future leaderboard). |
 | **Economy escalation** | Deferred — start flat | Fixed daily scrap budget for MVP; growing budget is a tunable later. |
 
 ### The daily loop (revised for "ride into the unknown")

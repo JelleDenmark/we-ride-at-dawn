@@ -26,6 +26,12 @@
   } from '@wrad/core';
   import { ReplayPlayer } from './replay/ReplayPlayer';
   import { loadBuild, saveBuild } from './persistence';
+  import {
+    submitRun,
+    telemetryConfigured,
+    telemetryEnabled,
+    setTelemetryEnabled,
+  } from './telemetry';
 
   let selectedDate = $state(currentRideDate());
   const seed = $derived(dailySeed(selectedDate));
@@ -37,6 +43,7 @@
 
   let build = $state<BuildState>(loadBuild(currentRideDate()) ?? newBuild(currentRideDate()));
   let speed = $state(1);
+  let telemetry = $state(telemetryEnabled());
   let selected = $state<number | null>(null);
   let pendingRelic = $state<number | null>(null);
   let notice = $state('');
@@ -72,6 +79,8 @@
   function addScrap() {
     build = { ...build, scrap: build.scrap + 10 };
     saveBuild(build);
+    // Boosted-scrap builds are not representative — mark the day as dev.
+    localStorage.setItem(`wrad-devscrap:${selectedDate}`, '1');
   }
 
   function setSpeed(s: number) {
@@ -146,7 +155,16 @@
     phase = 'riding';
     result = null;
     player.speed = speed;
-    const outcome = simulate(lineupFromBuild(build), generateGauntlet(selectedDate));
+    const lineup = lineupFromBuild(build);
+    const outcome = simulate(lineup, generateGauntlet(selectedDate));
+    submitRun({
+      rideDate: selectedDate,
+      lineup,
+      result: outcome.result,
+      dev:
+        selectedDate !== currentRideDate() ||
+        localStorage.getItem(`wrad-devscrap:${selectedDate}`) === '1',
+    });
     await player.play(outcome.events);
     result = outcome.result;
     phase = 'done';
@@ -298,6 +316,19 @@
         ? `${result.survivors.length} rats crawled home`
         : 'the horde was wiped out'}
     </p>
+  {/if}
+  {#if telemetryConfigured}
+    <label class="telemetry">
+      <input
+        type="checkbox"
+        checked={telemetry}
+        onchange={(e) => {
+          telemetry = e.currentTarget.checked;
+          setTelemetryEnabled(telemetry);
+        }}
+      />
+      share anonymous run data to help balance the game
+    </label>
   {/if}
 </main>
 
@@ -590,5 +621,15 @@
   .result {
     margin-top: 14px;
     font-size: 15px;
+  }
+
+  .telemetry {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 18px;
+    font-size: 12px;
+    color: var(--ink-dim);
+    cursor: pointer;
   }
 </style>
