@@ -1,0 +1,18 @@
+name: Supabase keep-alive
+
+# The free tier pauses projects after ~a week without API activity.
+# Two pings a week keep the telemetry database awake forever.
+on:
+  schedule:
+    - cron: '17 6 * * 1,4'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase REST API
+        run: |
+          curl -sf "https://wvrllhiktnkvbpclmrpq.supabase.co/rest/v1/runs?select=id&limit=1" \
+            -H "apikey: sb_publishable_6S2kGgYAI2gRLhfRxXBY3A_E_mIgpAi" > /dev/null
+          echo "Supabase pinged."

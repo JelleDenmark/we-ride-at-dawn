@@ -1,10 +1,11 @@
 import type { BattleResult, Lineup } from '@wrad/core';
+import { CHANNEL } from './env';
 
 // The publishable key is designed to be public: row-level security on the
 // server allows inserts only — it cannot read, edit, or delete anything.
 const SUPABASE_URL = 'https://wvrllhiktnkvbpclmrpq.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_6S2kGgYAI2gRLhfRxXBY3A_E_mIgpAi';
-const APP_VERSION = '0.4.5';
+const APP_VERSION = `0.4.5${CHANNEL === 'dev' ? '-dev' : ''}`;
 
 const OPT_OUT_KEY = 'wrad-telemetry-opt-out';
 const DEVICE_KEY = 'wrad-device-id';
@@ -37,6 +38,8 @@ export function submitRun(args: {
   dev: boolean;
 }): void {
   if (!telemetryEnabled()) return;
+  // Runs from dev builds are never representative balance data.
+  const dev = args.dev || CHANNEL === 'dev';
   try {
     fetch(`${SUPABASE_URL}/rest/v1/runs`, {
       method: 'POST',
@@ -51,7 +54,7 @@ export function submitRun(args: {
         lineup: args.lineup,
         waves_cleared: args.result.wavesCleared,
         score: args.result.score,
-        dev: args.dev,
+        dev,
         version: APP_VERSION,
       }),
       keepalive: true,

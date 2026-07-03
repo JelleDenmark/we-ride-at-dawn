@@ -2,7 +2,7 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [master]
+    branches: [master, dev]
   workflow_dispatch:
 
 permissions:
@@ -19,18 +19,41 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: master
+          path: prod
+      - uses: actions/checkout@v4
+        with:
+          ref: dev
+          path: dev
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: npm
+          node-version: 22
       - uses: actions/configure-pages@v5
         with:
           enablement: true
-      - run: npm ci
-      - run: npm run build
+      - name: Build prod (master)
+        working-directory: prod
+        env:
+          VITE_CHANNEL: prod
+        run: |
+          npm ci
+          npm run build
+      - name: Build dev (dev branch)
+        working-directory: dev
+        env:
+          VITE_CHANNEL: dev
+        run: |
+          npm ci
+          npm run build
+      - name: Assemble site (prod at /, dev at /dev/)
+        run: |
+          mkdir -p site/dev
+          cp -r prod/packages/app/dist/. site/
+          cp -r dev/packages/app/dist/. site/dev/
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: packages/app/dist
+          path: site
 
   deploy:
     needs: build

@@ -1,6 +1,9 @@
 import type { BuildState } from '@wrad/core';
+import { CHANNEL } from './env';
 
-const KEY = 'wrad-build';
+// Channel-namespaced so a dev build never clobbers the prod build state
+// on the same origin.
+const KEY = CHANNEL === 'prod' ? 'wrad-build' : 'wrad-build-dev';
 
 export function saveBuild(build: BuildState): void {
   try {

@@ -25,6 +25,7 @@
     type BuildState,
   } from '@wrad/core';
   import { ReplayPlayer } from './replay/ReplayPlayer';
+  import { CHANNEL } from './env';
   import { loadBuild, saveBuild } from './persistence';
   import {
     submitRun,
@@ -173,8 +174,11 @@
 
 <main>
   <h1>WE RIDE AT DAWN</h1>
-  <p class="sub">gauntlet of {selectedDate} &middot; seed {seed.toString(16)}</p>
+  <p class="sub">
+    gauntlet of {selectedDate} &middot; seed {seed.toString(16)}{CHANNEL === 'dev' ? ' · dev build' : ''}
+  </p>
 
+  {#if CHANNEL === 'dev'}
   <div class="dev">
     <span class="panel-label">testing</span>
     <input
@@ -191,6 +195,7 @@
     {/each}
     <button onclick={skipReplay} disabled={phase !== 'riding'}>skip ⏭</button>
   </div>
+  {/if}
 
   <div class="scout">
     <div class="panel-label">scout report — tomorrow's gauntlet</div>

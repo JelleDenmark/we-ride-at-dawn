@@ -62,6 +62,20 @@ wrad/
 - All randomness in the sim flows through the seeded PRNG in fixed consumption order — no `Math.random`, no wall clock, no object-key iteration order.
 - The replay player consumes the event log only; it must be able to render any battle it has never simulated.
 
+## 2.5 Environments (added 2026-07-03)
+
+One repo, one GitHub Pages site, two channels:
+
+| | prod | dev |
+|---|---|---|
+| Branch | `master` | `dev` |
+| URL | `…github.io/we-ride-at-dawn/` | `…github.io/we-ride-at-dawn/dev/` |
+| Testing toolbar | hidden | visible |
+| localStorage | `wrad-build:*` | `wrad-build-dev:*` (no collisions on the shared origin) |
+| Telemetry | real balance data | always flagged `dev`, version suffixed `-dev` |
+
+The deploy workflow builds both branches on every push to either and assembles prod at the site root with dev under `/dev/`. Channel is baked at build time via `VITE_CHANNEL` (anything not `prod` — including local `npm run dev` — behaves as dev). Flow: changes land on `dev` → tested at the /dev/ URL → merged to `master` for players. A scheduled keep-alive workflow pings Supabase twice weekly so the free-tier project never pauses.
+
 ## 3. Milestones
 
 1. ✅ *(2026-07-03)* **Walking skeleton (the early view).** `core`: PRNG, dailySeed, data tables for ~3 units, minimal sim (attack ticks, deaths, one `onFaint` trigger). `app`: static page, hardcoded lineup vs wave 1 of today's real seeded gauntlet, rendered as labeled rectangles sliding into each other with damage numbers. Determinism test: same input ⇒ byte-identical event log. *Everything downstream is filling in, not re-plumbing.*
