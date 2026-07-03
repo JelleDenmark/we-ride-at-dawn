@@ -66,7 +66,7 @@ wrad/
 1. ✅ *(2026-07-03)* **Walking skeleton (the early view).** `core`: PRNG, dailySeed, data tables for ~3 units, minimal sim (attack ticks, deaths, one `onFaint` trigger). `app`: static page, hardcoded lineup vs wave 1 of today's real seeded gauntlet, rendered as labeled rectangles sliding into each other with damage numbers. Determinism test: same input ⇒ byte-identical event log. *Everything downstream is filling in, not re-plumbing.*
 2. ✅ *(2026-07-03)* **Full sim.** All 10 units / 6 relics, all trigger types, wave carry-over with persistent damage, poison, summons, revive. Golden-log regression tests + cross-run determinism tests.
 3. ✅ *(2026-07-03)* **Gauntlet generator + scouting.** Budgeted escalating waves from the daily seed, with waves tagged by archetype; scout-report extraction (archetype summary of a gauntlet). Sanity tests: monotonic difficulty, deterministic across runs, scout report consistent with the real gauntlet.
-4. **Shop.** Headless `core` economy first (tested), then the Svelte deckbuilder screen: buy/sell/reroll/freeze, three-of-a-kind combine, drag-to-reposition.
+4. ✅ *(2026-07-03)* **Shop.** Headless `core` economy first (tested), then the Svelte deckbuilder screen: buy/sell/reroll/freeze, three-of-a-kind combine, drag-to-reposition.
 5. **The daily loop.** 06:00 CET boundary, persistence keyed by date, lineup lock at dawn, lazy resolution of yesterday's lineup against the newly revealed gauntlet, scout report display for tomorrow, scoring.
 6. **Ship it.** Emoji share card, PWA manifest + install prompt, deploy to static hosting. Play it with friends; start the balance-tuning loop.
 

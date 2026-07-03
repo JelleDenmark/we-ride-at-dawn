@@ -2,6 +2,8 @@ export interface RelicDef {
   id: string;
   name: string;
   scope: 'unit' | 'team';
+  cost: number;
+  desc: string;
   attack?: number;
   health?: number;
   /** Extra damage on the unit's first attack of the battle (Glass Shard). */
@@ -15,10 +17,28 @@ export interface RelicDef {
 }
 
 export const RELIC_DEFS: Record<string, RelicDef> = {
-  'rusted-nail': { id: 'rusted-nail', name: 'Rusted Nail', scope: 'unit', attack: 2 },
-  'glass-shard': { id: 'glass-shard', name: 'Glass Shard', scope: 'unit', firstHitBonus: 3 },
-  'weeping-boil': { id: 'weeping-boil', name: 'Weeping Boil', scope: 'unit', onFaintDamageAll: 2 },
-  'fat-tick': { id: 'fat-tick', name: 'Fat Tick', scope: 'unit', attack: 1, health: 2, healPerTick: 1 },
-  'tail-charm': { id: 'tail-charm', name: 'Tail-Charm', scope: 'unit', surviveLethal: true },
-  'filth-totem': { id: 'filth-totem', name: 'Filth Totem', scope: 'team', health: 1 },
+  'rusted-nail': {
+    id: 'rusted-nail', name: 'Rusted Nail', scope: 'unit', cost: 2,
+    desc: '+2 attack', attack: 2,
+  },
+  'glass-shard': {
+    id: 'glass-shard', name: 'Glass Shard', scope: 'unit', cost: 2,
+    desc: '+3 dmg on first hit', firstHitBonus: 3,
+  },
+  'weeping-boil': {
+    id: 'weeping-boil', name: 'Weeping Boil', scope: 'unit', cost: 2,
+    desc: 'faint: 2 dmg to all foes', onFaintDamageAll: 2,
+  },
+  'fat-tick': {
+    id: 'fat-tick', name: 'Fat Tick', scope: 'unit', cost: 3,
+    desc: '+1/+2, heals 1 each tick', attack: 1, health: 2, healPerTick: 1,
+  },
+  'tail-charm': {
+    id: 'tail-charm', name: 'Tail-Charm', scope: 'unit', cost: 3,
+    desc: 'survive one lethal hit', surviveLethal: true,
+  },
+  'filth-totem': {
+    id: 'filth-totem', name: 'Filth Totem', scope: 'team', cost: 3,
+    desc: 'all rats +0/+1', health: 1,
+  },
 };

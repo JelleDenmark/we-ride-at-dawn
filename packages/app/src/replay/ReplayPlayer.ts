@@ -57,7 +57,7 @@ class UnitSprite {
       .fill(SIDE_COLOR[view.side])
       .stroke({ color: 0x000000, width: 2 });
     const name = new Text({
-      text: view.name,
+      text: view.tier > 1 ? `${view.name} ★${view.tier}` : view.name,
       style: { fill: 0xd8cdb8, fontSize: 11, fontFamily: 'Georgia' },
     });
     name.anchor.set(0.5);

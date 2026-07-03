@@ -22,6 +22,26 @@ export {
 } from './gauntlet';
 export { scoutReport, ARCHETYPE_LABEL, type ScoutReport, type ScoutHint } from './scout';
 export {
+  newBuild,
+  rollOfferings,
+  buyUnit,
+  buyRelic,
+  sellUnit,
+  sellRefund,
+  rerollShop,
+  toggleFreeze,
+  moveUnit,
+  lineupFromBuild,
+  unitStats,
+  DAILY_SCRAP,
+  REROLL_COST,
+  MAX_TIER,
+  type BuildState,
+  type BoardUnit,
+  type ShopSlot,
+  type ActionResult,
+} from './shop';
+export {
   simulate,
   BOARD_CAP,
   SCORE_PER_WAVE,

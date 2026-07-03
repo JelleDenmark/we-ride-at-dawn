@@ -20,6 +20,7 @@ export interface UnitView {
   name: string;
   attack: number;
   health: number;
+  tier: number;
   side: Side;
 }
 
@@ -53,6 +54,7 @@ interface BattleUnit {
   attack: number;
   health: number;
   maxHealth: number;
+  tier: number;
   side: Side;
   ability?: Ability;
   relics: RelicDef[];
@@ -83,12 +85,12 @@ export function simulate(
   const teamAttack = teamRelics.reduce((s, r) => s + (r.attack ?? 0), 0);
   const teamHealth = teamRelics.reduce((s, r) => s + (r.health ?? 0), 0);
 
-  const instantiate = (def: UnitDef, side: Side, relicIds: string[] = []): BattleUnit => {
+  const instantiate = (def: UnitDef, side: Side, relicIds: string[] = [], tier = 1): BattleUnit => {
     const relics = relicIds
       .map((id) => RELIC_DEFS[id])
       .filter((r): r is RelicDef => r !== undefined && r.scope === 'unit');
-    let attack = def.attack + relics.reduce((s, r) => s + (r.attack ?? 0), 0);
-    let health = def.health + relics.reduce((s, r) => s + (r.health ?? 0), 0);
+    let attack = def.attack * tier + relics.reduce((s, r) => s + (r.attack ?? 0), 0);
+    let health = def.health * tier + relics.reduce((s, r) => s + (r.health ?? 0), 0);
     if (side === 'horde') {
       attack += teamAttack;
       health += teamHealth;
@@ -100,6 +102,7 @@ export function simulate(
       attack,
       health,
       maxHealth: health,
+      tier,
       side,
       ability: def.ability,
       relics,
@@ -115,12 +118,13 @@ export function simulate(
     name: u.name,
     attack: u.attack,
     health: u.health,
+    tier: u.tier,
     side: u.side,
   });
 
   const horde: BattleUnit[] = lineup.units
     .slice(0, BOARD_CAP)
-    .map((u) => instantiate(UNIT_DEFS[u.defId], 'horde', u.relicIds));
+    .map((u) => instantiate(UNIT_DEFS[u.defId], 'horde', u.relicIds, u.tier ?? 1));
   let enemies: BattleUnit[] = [];
   const fallen: Record<Side, BattleUnit[]> = { horde: [], gauntlet: [] };
 
@@ -180,14 +184,17 @@ export function simulate(
    * the index it occupied before dying, which is where "behind" now starts
    * and where summons/revives are inserted.
    */
+  // Ability magnitudes scale with the source's tier (a tier-2 Brood-Mother
+  // births 4 pups, a tier-2 Gnawer grants +4 attack).
   const applyEffect = (source: BattleUnit, index: number, removed: boolean): void => {
     if (!source.ability) return;
     const board = boardOf(source.side);
     const effect = source.ability.effect;
+    const tier = source.tier;
     switch (effect.kind) {
       case 'summon': {
         const def = DEF_LOOKUP[effect.unitId];
-        for (let i = 0; i < effect.count; i++) {
+        for (let i = 0; i < effect.count * tier; i++) {
           if (board.length >= BOARD_CAP) break;
           const summoned = instantiate(def, source.side);
           board.splice(index, 0, summoned);
@@ -198,27 +205,27 @@ export function simulate(
       case 'buffBehind': {
         const start = removed ? index : index + 1;
         const targets = effect.all ? board.slice(start) : board.slice(start, start + 1);
-        for (const target of targets) buff(target, effect.attack, effect.health);
+        for (const target of targets) buff(target, effect.attack * tier, effect.health * tier);
         break;
       }
       case 'poisonFrontEnemy': {
         const target = opposing(source.side)[0];
-        if (target) applyPoisonStacks(target, effect.stacks);
+        if (target) applyPoisonStacks(target, effect.stacks * tier);
         break;
       }
       case 'poisonTarget': {
         const target = opposing(source.side)[0];
-        if (target && target.health > 0) applyPoisonStacks(target, effect.stacks);
+        if (target && target.health > 0) applyPoisonStacks(target, effect.stacks * tier);
         break;
       }
       case 'gainStats': {
-        buff(source, effect.attack, effect.health);
+        buff(source, effect.attack * tier, effect.health * tier);
         break;
       }
       case 'revive': {
         const corpse = fallen[source.side].shift();
         if (!corpse || board.length >= BOARD_CAP) break;
-        corpse.health = effect.health;
+        corpse.health = effect.health * tier;
         corpse.poison = 0;
         board.splice(index, 0, corpse);
         events.push({ type: 'revive', side: source.side, index, unit: view(corpse) });
