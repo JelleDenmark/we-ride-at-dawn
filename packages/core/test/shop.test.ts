@@ -52,9 +52,40 @@ describe('shop basics', () => {
     expect(buyUnit(broke, unitSlot(s)).ok).toBe(false);
     const full = {
       ...s,
-      board: Array.from({ length: 5 }, () => ({ defId: 'gutter-runt', tier: 1, relicIds: [] })),
+      board: [
+        { defId: 'dire-rat', tier: 1, relicIds: [] },
+        { defId: 'gnawer', tier: 1, relicIds: [] },
+        { defId: 'rat-piper', tier: 1, relicIds: [] },
+        { defId: 'brood-mother', tier: 1, relicIds: [] },
+        { defId: 'bone-priest', tier: 1, relicIds: [] },
+      ],
     };
     expect(buyUnit(full, unitSlot(s)).ok).toBe(false);
+  });
+
+  it('allows a buy from a full board when it completes a combine', () => {
+    const base = newBuild('2026-07-03');
+    const s = {
+      ...base,
+      scrap: 20,
+      board: [
+        { defId: 'gutter-runt', tier: 1, relicIds: [] },
+        { defId: 'gutter-runt', tier: 1, relicIds: [] },
+        { defId: 'dire-rat', tier: 1, relicIds: [] },
+        { defId: 'gnawer', tier: 1, relicIds: [] },
+        { defId: 'bone-priest', tier: 1, relicIds: [] },
+      ],
+      shop: {
+        ...base.shop,
+        slots: [{ kind: 'unit' as const, defId: 'gutter-runt' }, ...base.shop.slots.slice(1)],
+      },
+    };
+    const res = buyUnit(s, 0);
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.state.board.length).toBe(4);
+      expect(res.state.board.find((u) => u.defId === 'gutter-runt')?.tier).toBe(2);
+    }
   });
 
   it('selling refunds half cost (min 1), scaled by tier', () => {

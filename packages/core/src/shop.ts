@@ -94,14 +94,21 @@ export function buyUnit(state: BuildState, slotIndex: number): ActionResult {
   if (!slot || slot.kind !== 'unit') return fail('nothing to recruit there');
   const def = UNIT_DEFS[slot.defId];
   if (state.scrap < def.cost) return fail('not enough scrap');
-  if (state.board.length >= BOARD_CAP) return fail('the warren is full');
   const s = clone(state);
   s.scrap -= def.cost;
   s.board.push({ defId: def.id, tier: 1, relicIds: [] });
+  combineAll(s);
+  // The cap check runs *after* the combine: buying a third-of-a-kind onto a
+  // full board is allowed, since the merge nets fewer units than we started.
+  if (s.board.length > BOARD_CAP) return fail('the warren is full');
   s.shop.slots[slotIndex] = { kind: 'empty' };
   s.shop.frozen[slotIndex] = false;
-  combineAll(s);
   return { ok: true, state: s };
+}
+
+/** Would recruiting this slot succeed (afford + fits or completes a combine)? */
+export function canRecruit(state: BuildState, slotIndex: number): boolean {
+  return buyUnit(state, slotIndex).ok;
 }
 
 export function buyRelic(state: BuildState, slotIndex: number, targetIndex?: number): ActionResult {

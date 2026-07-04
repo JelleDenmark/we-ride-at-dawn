@@ -11,6 +11,7 @@
     RELIC_DEFS,
     newBuild,
     buyUnit,
+    canRecruit,
     buyRelic,
     sellUnit,
     sellRefund,
@@ -260,6 +261,7 @@
       {#if notice}<span class="notice">{notice}</span>{/if}
     </div>
 
+    <div class="horde-panel">
     <div class="panel-label row-label">
       <span>your horde</span>
       <span>front → into the drains</span>
@@ -297,7 +299,9 @@
         team: {build.teamRelicIds.map((r) => RELIC_DEFS[r].name).join(', ')}
       </div>
     {/if}
+    </div>
 
+    <div class="shop-panel">
     <div class="panel-label row-label">
       <span>the scrap-market</span>
       <span>❄ keeps a stall for later</span>
@@ -351,8 +355,12 @@
     <div class="market-actions">
       <button onclick={() => apply(rerollShop(build))}>↻ reroll · {REROLL_COST} scrap</button>
     </div>
+    </div>
   </div>
 
+  <div class="phase-divider"><span>the ride</span></div>
+
+  <div class="battle-panel">
   <div class="stage" bind:this={stageEl}></div>
   <button class="ride" onclick={ride} disabled={phase === 'riding'}>
     {phase === 'idle' ? 'The horde rides' : phase === 'riding' ? 'Riding…' : 'Ride again'}
@@ -366,6 +374,8 @@
         : 'the horde was wiped out'}
     </p>
   {/if}
+  </div>
+
   {#if telemetryConfigured}
     <label class="telemetry">
       <input
@@ -389,7 +399,7 @@
           {#if slot.kind === 'unit'}
             {@const def = UNIT_DEFS[slot.defId]}
             {@const afford = build.scrap >= def.cost}
-            {@const room = build.board.length < 5}
+            {@const recruitable = canRecruit(build, ins.index)}
             <div class="card-head">
               {#if ART_URL[def.id]}<img class="card-portrait" src={ART_URL[def.id]} alt="" />{/if}
               <div>
@@ -402,13 +412,14 @@
             </div>
             <p class="card-ability">{abilitySentence(def.id)}</p>
             <div class="card-actions">
-              <button class="primary" disabled={!afford || !room} onclick={() => recruitFromCard(ins.index)}>
+              <button class="primary" disabled={!recruitable} onclick={() => recruitFromCard(ins.index)}>
                 Recruit · ⚙ {def.cost}
               </button>
               <button onclick={() => (inspect = null)}>close</button>
             </div>
             {#if !afford}<div class="card-warn">not enough scrap</div>
-            {:else if !room}<div class="card-warn">the warren is full</div>{/if}
+            {:else if !recruitable}<div class="card-warn">the warren is full</div>
+            {:else if build.board.length >= 5}<div class="card-warn">buying will merge three into one</div>{/if}
           {:else if slot.kind === 'relic'}
             {@const relic = RELIC_DEFS[slot.relicId]}
             {@const afford = build.scrap >= relic.cost}
@@ -576,7 +587,50 @@
     display: flex;
     justify-content: space-between;
     align-items: baseline;
-    margin-bottom: 6px;
+    margin-bottom: 10px;
+  }
+
+  .horde-panel {
+    padding: 10px 12px 12px;
+    border: 1.5px solid #6b4a2a;
+    border-radius: 10px;
+    background: #1c150f;
+  }
+
+  .shop-panel {
+    margin-top: 14px;
+    padding: 10px 12px 12px;
+    border: 1px solid #322820;
+    border-radius: 10px;
+  }
+
+  .phase-divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    max-width: 620px;
+    margin: 26px auto 14px;
+    color: var(--accent);
+    font-size: 13px;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+  }
+
+  .phase-divider::before,
+  .phase-divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: #4a3520;
+  }
+
+  .battle-panel {
+    max-width: 620px;
+    margin: 0 auto;
+    padding: 14px;
+    border: 1px solid #322820;
+    border-radius: 10px;
+    background: #100d0a;
   }
 
   .scrap {

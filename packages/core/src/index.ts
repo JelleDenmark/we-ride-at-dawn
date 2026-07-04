@@ -25,6 +25,7 @@ export {
   newBuild,
   rollOfferings,
   buyUnit,
+  canRecruit,
   buyRelic,
   sellUnit,
   sellRefund,
