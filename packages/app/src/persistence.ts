@@ -25,6 +25,7 @@ export function loadPending(): BuildState | null {
 
 export interface LastRide {
   date: string;
+  day: number;
   lineup: Lineup;
   result: BattleResult;
 }

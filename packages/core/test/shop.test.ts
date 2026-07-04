@@ -8,12 +8,16 @@ import {
   toggleFreeze,
   moveUnit,
   lineupFromBuild,
+  advanceAfterDawn,
+  boardCapForDay,
+  SEASON_DAYS,
   DAILY_SCRAP,
   REROLL_COST,
   type BuildState,
 } from '../src/shop';
 import { UNIT_DEFS } from '../src/data/units';
 import { simulate } from '../src/sim';
+import { generateGauntlet, difficultyForDay } from '../src/gauntlet';
 
 const unitSlot = (s: BuildState): number => s.shop.slots.findIndex((x) => x.kind === 'unit');
 const relicSlot = (s: BuildState): number => s.shop.slots.findIndex((x) => x.kind === 'relic');
@@ -170,6 +174,86 @@ describe('combining', () => {
     const merged = after.board.find((u) => u.defId === 'gutter-runt')!;
     expect(merged.tier).toBe(2);
     expect(merged.relicIds.sort()).toEqual(['rusted-nail', 'tail-charm']);
+  });
+});
+
+describe('expedition', () => {
+  it('carries the horde and relics into the next day, with a fresh shop and scrap', () => {
+    const day1 = {
+      ...newBuild('2026-07-04', 1),
+      scrap: 3,
+      board: [
+        { defId: 'gnawer', tier: 2, relicIds: ['rusted-nail'] },
+        { defId: 'dire-rat', tier: 1, relicIds: [] },
+      ],
+      teamRelicIds: ['filth-totem'],
+    };
+    const day2 = advanceAfterDawn(day1, '2026-07-05');
+    expect(day2.day).toBe(2);
+    expect(day2.date).toBe('2026-07-05');
+    expect(day2.board).toEqual(day1.board);
+    expect(day2.board).not.toBe(day1.board);
+    expect(day2.teamRelicIds).toEqual(['filth-totem']);
+    expect(day2.scrap).toBe(DAILY_SCRAP);
+  });
+
+  it('ends the expedition after the final day and starts fresh', () => {
+    const lastDay = {
+      ...newBuild('2026-07-10', SEASON_DAYS),
+      board: [{ defId: 'dire-rat', tier: 3, relicIds: [] }],
+      teamRelicIds: ['filth-totem'],
+    };
+    const next = advanceAfterDawn(lastDay, '2026-07-11');
+    expect(next.day).toBe(1);
+    expect(next.board).toEqual([]);
+    expect(next.teamRelicIds).toEqual([]);
+  });
+
+  it('board cap grows across the expedition and never exceeds the hard cap', () => {
+    const caps = [1, 2, 3, 4, 5, 6, 7].map(boardCapForDay);
+    expect(caps).toEqual([5, 5, 6, 6, 7, 7, 8]);
+    expect(boardCapForDay(99)).toBe(8);
+  });
+
+  it('lets the board grow past 5 on later days', () => {
+    const base = newBuild('2026-07-04', 6);
+    const s = {
+      ...base,
+      scrap: 99,
+      // Six distinct rats (no three-of-a-kind, so no merge on the next buy).
+      board: [
+        { defId: 'dire-rat', tier: 1, relicIds: [] },
+        { defId: 'gnawer', tier: 1, relicIds: [] },
+        { defId: 'rat-piper', tier: 1, relicIds: [] },
+        { defId: 'brood-mother', tier: 1, relicIds: [] },
+        { defId: 'bone-priest', tier: 1, relicIds: [] },
+        { defId: 'plague-bearer', tier: 1, relicIds: [] },
+      ],
+      shop: {
+        ...base.shop,
+        slots: [{ kind: 'unit' as const, defId: 'warren-warden' }, ...base.shop.slots.slice(1)],
+      },
+    };
+    const res = buyUnit(s, 0);
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.state.board.length).toBe(7);
+  });
+});
+
+describe('difficulty escalation', () => {
+  it('later expedition days field costlier gauntlets from the same date', () => {
+    const spend = (day: number) =>
+      generateGauntlet('2026-07-04', day).waves.reduce(
+        (s, w) => s + w.units.reduce((a, u) => a + u.cost, 0),
+        0
+      );
+    expect(difficultyForDay(1)).toBe(1);
+    expect(difficultyForDay(7)).toBeGreaterThan(1);
+    expect(spend(7)).toBeGreaterThan(spend(1));
+  });
+
+  it('keeps the same theme regardless of day', () => {
+    expect(generateGauntlet('2026-07-04', 7).theme).toEqual(generateGauntlet('2026-07-04', 1).theme);
   });
 });
 

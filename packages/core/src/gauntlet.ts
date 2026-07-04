@@ -38,7 +38,17 @@ function weightedPick<T>(rng: Rng, items: T[], weight: (item: T) => number): T {
   return items[items.length - 1];
 }
 
-export function generateGauntlet(date: string): Gauntlet {
+/** Difficulty multiplier for a given expedition day (day 1 = baseline). */
+export function difficultyForDay(day: number): number {
+  return 1 + (day - 1) * 0.35;
+}
+
+/**
+ * `day` scales every wave's budget so later expedition days field tougher
+ * gauntlets. The theme (archetype composition) is derived before the waves,
+ * so it stays a pure function of the date regardless of difficulty.
+ */
+export function generateGauntlet(date: string, day = 1): Gauntlet {
   const seed = dailySeed(date);
   const rng = xorshift128(seed);
 
@@ -54,10 +64,11 @@ export function generateGauntlet(date: string): Gauntlet {
   // player actually meets. The secondary never appears before its pivot.
   const PRIMARY_SHARE = 0.6;
   const SECONDARY_SHARE = 0.25;
+  const scale = difficultyForDay(day);
 
   const waves: EnemyWave[] = [];
   for (let i = 0; i < WAVE_COUNT; i++) {
-    const waveBudget = WAVE_BUDGET_BASE + i * WAVE_BUDGET_GROWTH;
+    const waveBudget = Math.round((WAVE_BUDGET_BASE + i * WAVE_BUDGET_GROWTH) * scale);
     let budget = waveBudget;
     const units: UnitDef[] = [];
 

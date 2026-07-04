@@ -9,6 +9,12 @@ export const REROLL_COST = 1;
 export const SHOP_UNIT_SLOTS = 4;
 export const SHOP_RELIC_SLOTS = 2;
 export const MAX_TIER = 3;
+export const SEASON_DAYS = 7;
+
+/** Buildable board size grows over the expedition: 5,5,6,6,7,7,8 (day 1–7). */
+export function boardCapForDay(day: number): number {
+  return Math.min(BOARD_CAP, 4 + Math.ceil(day / 2));
+}
 
 export type ShopSlot =
   | { kind: 'unit'; defId: string }
@@ -23,6 +29,8 @@ export interface BoardUnit {
 
 export interface BuildState {
   date: string;
+  /** Expedition day, 1..SEASON_DAYS. */
+  day: number;
   scrap: number;
   board: BoardUnit[];
   teamRelicIds: string[];
@@ -51,15 +59,29 @@ export function rollOfferings(date: string, roll: number): ShopSlot[] {
   return slots;
 }
 
-export function newBuild(date: string): BuildState {
+export function newBuild(date: string, day = 1): BuildState {
   const slots = rollOfferings(date, 0);
   return {
     date,
+    day,
     scrap: DAILY_SCRAP,
     board: [],
     teamRelicIds: [],
     shop: { slots, frozen: slots.map(() => false), rolls: 0 },
   };
+}
+
+/**
+ * The build for the dawn after `build` rode. Within a 7-day expedition the
+ * horde (roster, tiers, relics) carries forward with a fresh shop and scrap
+ * stipend; after the final day the expedition ends and a fresh one begins.
+ */
+export function advanceAfterDawn(build: BuildState, nextDate: string): BuildState {
+  if (build.day >= SEASON_DAYS) return newBuild(nextDate, 1);
+  const next = newBuild(nextDate, build.day + 1);
+  next.board = build.board.map((u) => ({ ...u, relicIds: [...u.relicIds] }));
+  next.teamRelicIds = [...build.teamRelicIds];
+  return next;
 }
 
 const clone = (state: BuildState): BuildState => JSON.parse(JSON.stringify(state));
@@ -100,7 +122,7 @@ export function buyUnit(state: BuildState, slotIndex: number): ActionResult {
   combineAll(s);
   // The cap check runs *after* the combine: buying a third-of-a-kind onto a
   // full board is allowed, since the merge nets fewer units than we started.
-  if (s.board.length > BOARD_CAP) return fail('the warren is full');
+  if (s.board.length > boardCapForDay(s.day)) return fail('the warren is full');
   s.shop.slots[slotIndex] = { kind: 'empty' };
   s.shop.frozen[slotIndex] = false;
   return { ok: true, state: s };

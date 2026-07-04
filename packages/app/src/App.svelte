@@ -10,6 +10,9 @@
     UNIT_DEFS,
     RELIC_DEFS,
     newBuild,
+    advanceAfterDawn,
+    boardCapForDay,
+    SEASON_DAYS,
     buyUnit,
     canRecruit,
     buyRelic,
@@ -73,7 +76,7 @@
   }
 
   // build.date is the target ride date — the next dawn this horde rides.
-  let build = $state<BuildState>(loadPending() ?? newBuild(addDay(currentRideDate())));
+  let build = $state<BuildState>(loadPending() ?? newBuild(addDay(currentRideDate()), 1));
   let lastRide = $state<LastRide | null>(loadLastRide());
   let nowTick = $state(Date.now());
   let practiceMode = $state(false);
@@ -148,13 +151,13 @@
     if (build.date <= today) {
       const lineup = lineupFromBuild(build);
       if (lineup.units.length > 0) {
-        const outcome = simulate(lineup, generateGauntlet(build.date));
-        const ride: LastRide = { date: build.date, lineup, result: outcome.result };
+        const outcome = simulate(lineup, generateGauntlet(build.date, build.day));
+        const ride: LastRide = { date: build.date, day: build.day, lineup, result: outcome.result };
         saveLastRide(ride);
         lastRide = ride;
         submitRun({ rideDate: build.date, lineup, result: outcome.result, dev: CHANNEL === 'dev' });
       }
-      build = newBuild(addDay(today));
+      build = advanceAfterDawn(build, addDay(today));
       saveBuild(build);
     }
   });
@@ -179,12 +182,12 @@
       notice = 'recruit some rats first';
       return;
     }
-    const outcome = simulate(lineup, generateGauntlet(build.date));
-    const ride: LastRide = { date: build.date, lineup, result: outcome.result };
+    const outcome = simulate(lineup, generateGauntlet(build.date, build.day));
+    const ride: LastRide = { date: build.date, day: build.day, lineup, result: outcome.result };
     saveLastRide(ride);
     lastRide = ride;
     submitRun({ rideDate: build.date, lineup, result: outcome.result, dev: true });
-    build = newBuild(addDay(build.date));
+    build = advanceAfterDawn(build, addDay(build.date));
     saveBuild(build);
     inspect = null;
     pendingRelic = null;
@@ -274,7 +277,7 @@
     result = null;
     player.speed = speed;
     const today = currentRideDate(new Date(nowTick));
-    const outcome = simulate(lineupFromBuild(build), generateGauntlet(today));
+    const outcome = simulate(lineupFromBuild(build), generateGauntlet(today, build.day));
     await player.play(outcome.events);
     result = outcome.result;
     phase = 'done';
@@ -287,7 +290,7 @@
     phase = 'riding';
     result = null;
     player.speed = speed;
-    const outcome = simulate(lastRide.lineup, generateGauntlet(lastRide.date));
+    const outcome = simulate(lastRide.lineup, generateGauntlet(lastRide.date, lastRide.day));
     await player.play(outcome.events);
     result = outcome.result;
     phase = 'done';
@@ -302,7 +305,9 @@
 <main>
   <h1>WE RIDE AT DAWN</h1>
   <p class="sub">
-    building for the dawn of {targetDate}{CHANNEL === 'dev' ? ' · dev build' : ''}
+    expedition day {build.day}/{SEASON_DAYS} · building for the dawn of {targetDate}{CHANNEL === 'dev'
+      ? ' · dev build'
+      : ''}
   </p>
 
   {#if CHANNEL === 'dev'}
@@ -340,11 +345,11 @@
 
     <div class="horde-panel">
     <div class="panel-label row-label">
-      <span>your horde</span>
+      <span>your horde · {build.board.length}/{boardCapForDay(build.day)}</span>
       <span>front → into the drains</span>
     </div>
     <div class="board horde-board">
-      {#each Array.from({ length: 5 - build.board.length }) as _}
+      {#each Array.from({ length: Math.max(0, boardCapForDay(build.day) - build.board.length) }) as _}
         <div class="tile empty-tile">empty</div>
       {/each}
       {#each build.board.slice().reverse() as unit, di}
@@ -456,7 +461,10 @@
       </button>
     {:else}
       <div class="muster">
-        <p class="muster-line">The horde is mustered. It rides at the next dawn — <strong>06:00 CET</strong>.</p>
+        <p class="muster-line">
+          Your horde is mustered — it rides at the next dawn (<strong>06:00 CET</strong>) and carries on
+          through the {SEASON_DAYS}-day expedition.
+        </p>
         <p class="countdown">next ride in {formatCountdown(countdownSec)}</p>
         <button class="practice" onclick={practiceRide}>practice ride · doesn't count</button>
       </div>

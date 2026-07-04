@@ -9,7 +9,9 @@ const DEF_LOOKUP: Record<string, UnitDef> = {
   ...Object.fromEntries(ENEMY_POOL.map((e) => [e.id, e])),
 };
 
-export const BOARD_CAP = 5;
+/** Hard maximum board size (incl. battle summons). The shop's per-day
+ * buildable cap (boardCapForDay) grows toward this over an expedition. */
+export const BOARD_CAP = 8;
 export const SCORE_PER_WAVE = 100;
 /** Stalemate guard (e.g. two healers out-sustaining each other): the wave is abandoned. */
 export const MAX_TICKS_PER_WAVE = 1000;

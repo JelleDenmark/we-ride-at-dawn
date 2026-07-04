@@ -15,6 +15,7 @@ export { ENEMY_POOL } from './data/enemies';
 export type { Archetype } from './data/units';
 export {
   generateGauntlet,
+  difficultyForDay,
   type Gauntlet,
   type GauntletTheme,
   type EnemyWave,
@@ -23,6 +24,9 @@ export {
 export { scoutReport, ARCHETYPE_LABEL, type ScoutReport, type ScoutHint } from './scout';
 export {
   newBuild,
+  advanceAfterDawn,
+  boardCapForDay,
+  SEASON_DAYS,
   rollOfferings,
   buyUnit,
   canRecruit,
