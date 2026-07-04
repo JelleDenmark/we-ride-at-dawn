@@ -90,7 +90,13 @@ Key insight: a meaningful leaderboard needs a **shared week** so scores are comp
 
 **Phase C — Anti-cheat (later).** Supabase Edge Function re-simulates the submitted lineup vs the (season, day) gauntlet using the TS `core` (the whole reason core is engine-agnostic) and rejects mismatches. v0 trusts the client.
 
-**Open forks (to confirm before finalizing):** score metric; latecomer handling; global vs friends scope. Build all on the `dev` branch first.
+**Decisions (2026-07-04):** score = **deepest depth reached during the week** (headline, "ride deep"). Latecomers **join cold at the current day** — empty horde at that day's difficulty, behind until Monday's reset (no catch-up; the weekly reset equalizes). Scope = **global weekly board** first; friend groups later.
+
+**Build order (all on `dev` first):**
+1. *(A)* Clock-derive `seasonId` (ISO week, Mon 06:00 CET) + `dayInSeason` 1–7; replace rolling `advanceAfterDawn`/`build.date` with clock-derived day. Horde keyed by seasonId → auto-reset Monday. Track best depth this season.
+2. *(B)* Supabase `scores` table + RLS (anon insert/upsert, public read) + ranked view/RPC.
+3. *(B)* One-time name entry (name + existing device UUID); submit season-best depth on improvement; fetch + render top-N leaderboard panel + "your rank".
+4. *(C, later)* Edge-function re-sim anti-cheat.
 
 ## 2.6 Expedition model — the core loop (designed 2026-07-04, v1 built on dev 2026-07-04)
 
