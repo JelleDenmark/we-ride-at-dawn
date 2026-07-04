@@ -80,6 +80,18 @@ The deploy workflow builds both branches on every push to either and assembles p
 
 Chose to fix "not enough happens per day" by pivoting to an **idle auto-battler** (user decision, over my recommendation to keep the daily anchor — accepted the loss of the shared-daily-puzzle + starving-economy pillars). The horde rides **hourly** for scrap = depth cleared + **TFT-style interest** (10% floored, capped at 5 — the cap is the anti-snowball safeguard). Income accrues live and offline (≤24h/visit, compounds within a catch-up batch). Depth/income update live as you build. Expedition day still steps difficulty each dawn + resets after 7; scrap now carries across days. UI: idle panel (depth now / scrap-per-hour / next-ride countdown / while-away / watch-the-ride) replaces the dawn muster. NOT merged to prod. **Open:** tune income vs unit costs (1/depth may be too generous), whether hourly is the right cadence, leaderboard meaning in an idle world.
 
+## 2.8 Leaderboard + synchronized weeks (planning 2026-07-04 — build on dev)
+
+Key insight: a meaningful leaderboard needs a **shared week** so scores are comparable, so synchronization comes first (or together). Phased:
+
+**Phase A — Synchronized weekly seasons (client-only, no backend).** Replace rolling-personal timing with a global anchor: weeks start **Monday 06:00 CET**. `seasonId` = ISO-week string; `dayInSeason` (1–7) derived from the calendar, not first-open. Everyone on the same day faces the same difficulty (theme still per-date). Horde state keyed by seasonId → auto-resets each Monday. Removes the `advanceAfterDawn`/rolling-day logic in favour of clock-derived day. *(Latecomer handling = FORK below.)*
+
+**Phase B — Leaderboard backend (Supabase, we have it).** New `scores` table `(season_id, player_id uuid, name, depth, day, lineup jsonb, updated_at)`; RLS = anon insert + **public read** (unlike insert-only telemetry) with upsert of best-per-player-per-season, exposed via a ranked view/RPC. Client: one-time **name entry** (no accounts — name + existing device UUID), submit weekly best on each dawn/improvement, fetch + render top N. *(Score metric + scope = FORKs below.)*
+
+**Phase C — Anti-cheat (later).** Supabase Edge Function re-simulates the submitted lineup vs the (season, day) gauntlet using the TS `core` (the whole reason core is engine-agnostic) and rejects mismatches. v0 trusts the client.
+
+**Open forks (to confirm before finalizing):** score metric; latecomer handling; global vs friends scope. Build all on the `dev` branch first.
+
 ## 2.6 Expedition model — the core loop (designed 2026-07-04, v1 built on dev 2026-07-04)
 
 **Built (v1, dev):** horde persists across a 7-day expedition (`advanceAfterDawn` carries roster/tiers/relics with a fresh shop + scrap each dawn); board cap grows 5→8 (`boardCapForDay`); gauntlet difficulty scales with the day (`difficultyForDay`, theme unchanged); after day 7 a fresh expedition begins. **Deviation from below:** currently a *rolling personal* expedition (day 1 = whenever you start), not synchronized weekly — chosen because there's no leaderboard yet and it lets a solo tester feel the whole arc. Switch to synchronized weeks when the leaderboard lands. **Not yet:** weekly leaderboard, expedition-complete summary screen, tuning of the difficulty/cap/scrap curves.
