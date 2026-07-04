@@ -1,0 +1,78 @@
+<svg viewBox="0 0 820 1160" xmlns="http://www.w3.org/2000/svg" font-family="Georgia, 'Times New Roman', serif">
+  <rect width="820" height="1160" fill="#0d0b09"/>
+  <rect x="16" y="16" width="788" height="1128" fill="none" stroke="#4a3520" stroke-width="2"/>
+  <rect x="22" y="22" width="776" height="1116" fill="none" stroke="#2a2118" stroke-width="1"/>
+
+  <text x="410" y="82" text-anchor="middle" fill="#d4af37" font-size="42" letter-spacing="4">THE SCRAP ECONOMY</text>
+  <text x="410" y="114" text-anchor="middle" fill="#8a7f6c" font-size="15" font-style="italic">A starving purse, by design — scrap is scarce, and idle riches are kept in check.</text>
+  <line x1="150" y1="136" x2="670" y2="136" stroke="#4a3520" stroke-width="1"/>
+
+  <!-- EARN -->
+  <text x="410" y="176" text-anchor="middle" fill="#c4552e" font-size="22" letter-spacing="4">HOW YOU EARN</text>
+
+  <rect x="70" y="196" width="330" height="150" fill="#1c150f" stroke="#4a3520" rx="8"/>
+  <text x="235" y="234" text-anchor="middle" fill="#d4af37" font-size="34">⚙ +1</text>
+  <text x="235" y="262" text-anchor="middle" fill="#d8cdb8" font-size="17">per depth, every hour</text>
+  <text x="235" y="294" text-anchor="middle" fill="#8a7f6c" font-size="14">Your horde rides the drains hourly and</text>
+  <text x="235" y="314" text-anchor="middle" fill="#8a7f6c" font-size="14">hauls back 1 scrap for every wave it</text>
+  <text x="235" y="334" text-anchor="middle" fill="#8a7f6c" font-size="14">clears — even while you're away.</text>
+
+  <rect x="420" y="196" width="330" height="150" fill="#1c150f" stroke="#4a3520" rx="8"/>
+  <text x="585" y="234" text-anchor="middle" fill="#d4af37" font-size="34">⚙ +5%</text>
+  <text x="585" y="262" text-anchor="middle" fill="#d8cdb8" font-size="17">interest, banked at dawn</text>
+  <text x="585" y="294" text-anchor="middle" fill="#8a7f6c" font-size="14">Hold scrap and it earns 5% once a day</text>
+  <text x="585" y="314" text-anchor="middle" fill="#8a7f6c" font-size="14">at dawn — but never more than +5, so</text>
+  <text x="585" y="334" text-anchor="middle" fill="#8a7f6c" font-size="14">the purse can't snowball out of reach.</text>
+
+  <!-- SPEND -->
+  <text x="410" y="402" text-anchor="middle" fill="#c4552e" font-size="22" letter-spacing="4">WHERE IT GOES</text>
+
+  <g font-size="15">
+    <rect x="70" y="424" width="680" height="46" fill="#1d1713" stroke="#322820" rx="6"/>
+    <text x="90" y="453" fill="#d8cdb8"><tspan fill="#d4af37">Recruit a rat</tspan><tspan fill="#8a7f6c"> — 2 to 8 scrap, scaled so every purchase is a real choice</tspan></text>
+    <text x="730" y="453" text-anchor="end" fill="#d4af37">⚙ 2–8</text>
+
+    <rect x="70" y="480" width="680" height="46" fill="#1d1713" stroke="#322820" rx="6"/>
+    <text x="90" y="509" fill="#d8cdb8"><tspan fill="#d4af37">Merge three alike</tspan><tspan fill="#8a7f6c"> — three of a kind fuse into one, a tier stronger</tspan></text>
+    <text x="730" y="509" text-anchor="end" fill="#8a7f6c">free</text>
+
+    <rect x="70" y="536" width="680" height="46" fill="#1d1713" stroke="#322820" rx="6"/>
+    <text x="90" y="565" fill="#d8cdb8"><tspan fill="#d4af37">Pin a relic</tspan><tspan fill="#8a7f6c"> — bolt a trinket onto a rat for a permanent edge</tspan></text>
+    <text x="730" y="565" text-anchor="end" fill="#d4af37">⚙ 4–6</text>
+
+    <rect x="70" y="592" width="680" height="46" fill="#1d1713" stroke="#322820" rx="6"/>
+    <text x="90" y="621" fill="#d8cdb8"><tspan fill="#d4af37">Reroll the shop</tspan><tspan fill="#8a7f6c"> — fresh offerings when nothing tempts you</tspan></text>
+    <text x="730" y="621" text-anchor="end" fill="#d4af37">⚙ 1</text>
+  </g>
+
+  <line x1="150" y1="672" x2="670" y2="672" stroke="#4a3520" stroke-width="1"/>
+
+  <!-- BALANCE -->
+  <text x="410" y="712" text-anchor="middle" fill="#d4af37" font-size="22" letter-spacing="4">WHY IT STAYS TENSE</text>
+
+  <g font-size="15">
+    <circle cx="96" cy="750" r="4" fill="#c4552e"/>
+    <text x="116" y="748" fill="#d8cdb8">Costs are scaled so a pile of idle scrap only buys a handful of rats —</text>
+    <text x="116" y="768" fill="#8a7f6c">hoarding never trivialises the warren.</text>
+
+    <circle cx="96" cy="802" r="4" fill="#c4552e"/>
+    <text x="116" y="800" fill="#d8cdb8">Interest is daily and capped, not hourly — a gentle nudge, not a snowball</text>
+    <text x="116" y="820" fill="#8a7f6c">(the difference between +35 and +840 over a week).</text>
+
+    <circle cx="96" cy="854" r="4" fill="#c4552e"/>
+    <text x="116" y="852" fill="#d8cdb8">The gauntlet toughens each dawn, so a horde left untended rides shallower</text>
+    <text x="116" y="872" fill="#8a7f6c">and earns less — standing still means falling behind.</text>
+  </g>
+
+  <!-- worked example -->
+  <rect x="70" y="906" width="680" height="86" fill="#241a14" stroke="#4a3520" rx="8"/>
+  <text x="410" y="936" text-anchor="middle" fill="#d4af37" font-size="14" letter-spacing="2">A DAY IN THE DRAINS</text>
+  <text x="410" y="962" text-anchor="middle" fill="#d8cdb8" font-size="15">Day 3, your horde clears depth 4 → ⚙4 an hour ≈ a fresh rat every couple hours.</text>
+  <text x="410" y="982" text-anchor="middle" fill="#8a7f6c" font-size="14">⚙55 in the purse earns +2 at the next dawn. Spend, or bank for a bigger buy.</text>
+
+  <!-- CTA -->
+  <rect x="70" y="1016" width="680" height="112" fill="#1d1713" stroke="#c4552e" stroke-width="1.5" rx="4"/>
+  <text x="410" y="1052" text-anchor="middle" fill="#d4af37" font-size="19" letter-spacing="2">▸ DOES THE PURSE FEEL RIGHT?</text>
+  <text x="410" y="1080" text-anchor="middle" fill="#d8cdb8" font-size="15">jelledenmark.github.io/we-ride-at-dawn</text>
+  <text x="410" y="1106" text-anchor="middle" fill="#8a7f6c" font-size="14" font-style="italic">Feedback wanted: too rich, too stingy, or just starving enough?</text>
+</svg>

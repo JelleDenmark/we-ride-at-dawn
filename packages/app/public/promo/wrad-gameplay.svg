@@ -1,0 +1,76 @@
+<svg viewBox="0 0 820 1160" xmlns="http://www.w3.org/2000/svg" font-family="Georgia, 'Times New Roman', serif">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1a1410"/>
+      <stop offset="1" stop-color="#0d0b09"/>
+    </linearGradient>
+  </defs>
+  <rect width="820" height="1160" fill="url(#sky)"/>
+  <rect x="16" y="16" width="788" height="1128" fill="none" stroke="#4a3520" stroke-width="2"/>
+  <rect x="22" y="22" width="776" height="1116" fill="none" stroke="#2a2118" stroke-width="1"/>
+
+  <text x="410" y="86" text-anchor="middle" fill="#d8cdb8" font-size="46" letter-spacing="6">WE RIDE AT DAWN</text>
+  <text x="410" y="120" text-anchor="middle" fill="#c4552e" font-size="18" letter-spacing="3">a grimy idle auto-battler</text>
+  <text x="410" y="150" text-anchor="middle" fill="#8a7f6c" font-size="15" font-style="italic">Build a horde of rats. It rides the drains for scrap — with or without you.</text>
+  <line x1="150" y1="172" x2="670" y2="172" stroke="#4a3520" stroke-width="1"/>
+
+  <text x="410" y="212" text-anchor="middle" fill="#d4af37" font-size="22" letter-spacing="4">THE LOOP</text>
+
+  <circle cx="90" cy="270" r="26" fill="#1c150f" stroke="#c4552e" stroke-width="2"/>
+  <text x="90" y="279" text-anchor="middle" fill="#c4552e" font-size="26">1</text>
+  <text x="140" y="262" fill="#d8cdb8" font-size="22">Build the horde</text>
+  <text x="140" y="288" fill="#8a7f6c" font-size="15">Spend scrap in the shop: recruit rats, merge</text>
+  <text x="140" y="308" fill="#8a7f6c" font-size="15">three-of-a-kind to tier up, pin relics, and set</text>
+  <text x="140" y="328" fill="#8a7f6c" font-size="15">the marching order, front to back.</text>
+
+  <circle cx="90" cy="392" r="26" fill="#1c150f" stroke="#c4552e" stroke-width="2"/>
+  <text x="90" y="401" text-anchor="middle" fill="#c4552e" font-size="26">2</text>
+  <text x="140" y="384" fill="#d8cdb8" font-size="22">It rides every hour</text>
+  <text x="140" y="410" fill="#8a7f6c" font-size="15">The horde auto-battles a gauntlet each hour</text>
+  <text x="140" y="430" fill="#8a7f6c" font-size="15">and hauls back scrap by how deep it pushed.</text>
+  <text x="140" y="450" fill="#8a7f6c" font-size="15">You never fight live — you built the outcome.</text>
+
+  <circle cx="90" cy="514" r="26" fill="#1c150f" stroke="#c4552e" stroke-width="2"/>
+  <text x="90" y="523" text-anchor="middle" fill="#c4552e" font-size="26">3</text>
+  <text x="140" y="506" fill="#d8cdb8" font-size="22">Tune it, or leave it</text>
+  <text x="140" y="532" fill="#8a7f6c" font-size="15">Deepen your horde to earn more — or walk</text>
+  <text x="140" y="552" fill="#8a7f6c" font-size="15">away and let it grind. Scrap piles up while</text>
+  <text x="140" y="572" fill="#8a7f6c" font-size="15">you're gone. A minute a day is plenty.</text>
+
+  <circle cx="90" cy="636" r="26" fill="#1c150f" stroke="#c4552e" stroke-width="2"/>
+  <text x="90" y="645" text-anchor="middle" fill="#c4552e" font-size="26">4</text>
+  <text x="140" y="628" fill="#d8cdb8" font-size="22">Each dawn, harder</text>
+  <text x="140" y="654" fill="#8a7f6c" font-size="15">Every dawn the gauntlet toughens and your</text>
+  <text x="140" y="674" fill="#8a7f6c" font-size="15">horde grows — a 7-day expedition, then the</text>
+  <text x="140" y="694" fill="#8a7f6c" font-size="15">warren resets and everyone rides anew.</text>
+
+  <circle cx="700" cy="470" r="42" fill="none" stroke="#c4552e" stroke-width="1.5" opacity="0.5"/>
+  <circle cx="700" cy="470" r="26" fill="#c4552e" opacity="0.25"/>
+  <line x1="700" y1="404" x2="700" y2="424" stroke="#c4552e" stroke-width="1.5" opacity="0.5"/>
+  <line x1="640" y1="470" x2="660" y2="470" stroke="#c4552e" stroke-width="1.5" opacity="0.5"/>
+  <line x1="740" y1="470" x2="760" y2="470" stroke="#c4552e" stroke-width="1.5" opacity="0.5"/>
+
+  <line x1="150" y1="730" x2="670" y2="730" stroke="#4a3520" stroke-width="1"/>
+  <text x="410" y="772" text-anchor="middle" fill="#d4af37" font-size="22" letter-spacing="4">THE 7-DAY EXPEDITION</text>
+  <text x="410" y="800" text-anchor="middle" fill="#8a7f6c" font-size="15">Your horde persists and grows all week — board 5 → 8, tougher foes each dawn — then resets.</text>
+
+  <g>
+    <rect x="120" y="880" width="60" height="30" fill="#7a4128" stroke="#201209"/>
+    <rect x="205" y="866" width="60" height="44" fill="#7a4128" stroke="#201209"/>
+    <rect x="290" y="850" width="60" height="60" fill="#8a4b2f" stroke="#201209"/>
+    <rect x="375" y="832" width="60" height="78" fill="#8a4b2f" stroke="#201209"/>
+    <rect x="460" y="812" width="60" height="98" fill="#9c5738" stroke="#201209"/>
+    <rect x="545" y="790" width="60" height="120" fill="#9c5738" stroke="#201209"/>
+    <rect x="630" y="762" width="60" height="148" fill="#c4552e" stroke="#201209"/>
+    <text x="150" y="930" text-anchor="middle" fill="#8a7f6c" font-size="13">Day 1</text>
+    <text x="320" y="930" text-anchor="middle" fill="#8a7f6c" font-size="13">Day 3</text>
+    <text x="490" y="930" text-anchor="middle" fill="#8a7f6c" font-size="13">Day 5</text>
+    <text x="660" y="930" text-anchor="middle" fill="#d4af37" font-size="13">Day 7</text>
+  </g>
+  <text x="410" y="962" text-anchor="middle" fill="#8a7f6c" font-size="14">◂ bigger horde, deeper rides, higher stakes ▸</text>
+
+  <rect x="70" y="1000" width="680" height="112" fill="#1d1713" stroke="#c4552e" stroke-width="1.5" rx="4"/>
+  <text x="410" y="1036" text-anchor="middle" fill="#d4af37" font-size="19" letter-spacing="2">▸ THE ALPHA IS OPEN — RIDE WITH ME</text>
+  <text x="410" y="1064" text-anchor="middle" fill="#d8cdb8" font-size="15">jelledenmark.github.io/we-ride-at-dawn</text>
+  <text x="410" y="1090" text-anchor="middle" fill="#8a7f6c" font-size="14" font-style="italic">Feedback wanted: does the hourly rhythm feel rewarding without demanding you play all day?</text>
+</svg>
