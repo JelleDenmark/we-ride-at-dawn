@@ -22,6 +22,7 @@ A grimy dark-fantasy **idle auto-battler**. Build a horde of rats; it auto-rides
 - **3 promo infographics** hosted at `…/we-ride-at-dawn/promo/` (gameplay, minions/relics, economy) + gallery `index.html`.
 
 ## Key decisions
+- **Relics: one of each per carrier** *(2026-07-05)* — a rat carries each trinket once, the horde carries each team relic once; merges pool relics but dedupe. Chosen over single-slot/2-slot caps: kills degenerate Rusted-Nail stacking and the no-op duplicate Tail-Charm while keeping combos (Nail+Shard+Charm). Enforced in `core` `buyRelic`/`combineAll` with tests.
 - **Genre:** pivoted from a daily-dawn puzzle to an **idle auto-battler** (dropped the "shared daily puzzle" + "starving economy" pillars — user's call).
 - **Leaderboard score = deepest depth reached during the week** (headline).
 - **Synchronized weeks:** Monday 06:00 CET → Sunday. Expedition day = ISO weekday; `seasonId` = that week's Monday. **Latecomers join cold** at the current day's difficulty (empty horde), equalized by Monday reset.
