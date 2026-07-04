@@ -46,9 +46,46 @@
   let build = $state<BuildState>(loadBuild(currentRideDate()) ?? newBuild(currentRideDate()));
   let speed = $state(1);
   let telemetry = $state(telemetryEnabled());
-  let selected = $state<number | null>(null);
   let pendingRelic = $state<number | null>(null);
+  let inspect = $state<{ area: 'shop' | 'board'; index: number } | null>(null);
   let notice = $state('');
+
+  const TRIGGER_WHEN: Record<string, string> = {
+    startOfBattle: 'At the start of battle,',
+    faint: 'When it faints,',
+    afterAttack: 'After it attacks,',
+    allyFaint: 'Whenever a friendly rat faints,',
+  };
+
+  function abilitySentence(defId: string): string {
+    const def = UNIT_DEFS[defId];
+    if (!def?.ability) return 'No special trick — just a body to swell the ranks.';
+    const e = def.ability.effect;
+    let what = '';
+    switch (e.kind) {
+      case 'summon': {
+        const name = UNIT_DEFS[e.unitId]?.name ?? e.unitId;
+        what = `summons ${e.count} ${name}${e.count > 1 ? 's' : ''} in front`;
+        break;
+      }
+      case 'buffBehind':
+        what = `grants +${e.attack}/+${e.health} to ${e.all ? 'every rat behind it' : 'the rat behind it'}`;
+        break;
+      case 'poisonFrontEnemy':
+        what = `applies ${e.stacks} poison to the frontmost enemy`;
+        break;
+      case 'poisonTarget':
+        what = `applies ${e.stacks} poison to whatever it just struck`;
+        break;
+      case 'gainStats':
+        what = `gains +${e.attack}/+${e.health}`;
+        break;
+      case 'revive':
+        what = `revives your first fallen rat at ${e.health} health`;
+        break;
+    }
+    return `${TRIGGER_WHEN[def.ability.trigger]} it ${what}. Effects scale with tier.`;
+  }
 
   let stageEl: HTMLDivElement;
   let player: ReplayPlayer | undefined;
@@ -64,7 +101,7 @@
     if (!d) return;
     selectedDate = d;
     build = loadBuild(d) ?? newBuild(d);
-    selected = null;
+    inspect = null;
     pendingRelic = null;
     result = null;
     notice = '';
@@ -73,7 +110,7 @@
   function freshBuild() {
     build = newBuild(selectedDate);
     saveBuild(build);
-    selected = null;
+    inspect = null;
     pendingRelic = null;
     notice = '';
   }
@@ -105,21 +142,11 @@
     return false;
   }
 
+  // Tapping a stall opens its inspect card; the card houses the buy/pin
+  // action, so nothing is spent by accident.
   function clickShopSlot(i: number) {
-    const slot = build.shop.slots[i];
-    if (slot.kind === 'unit') {
-      selected = null;
-      pendingRelic = null;
-      apply(buyUnit(build, i));
-    } else if (slot.kind === 'relic') {
-      if (RELIC_DEFS[slot.relicId].scope === 'team') {
-        pendingRelic = null;
-        apply(buyRelic(build, i));
-      } else {
-        pendingRelic = pendingRelic === i ? null : i;
-        notice = pendingRelic === null ? '' : 'pick a rat to carry it';
-      }
-    }
+    if (build.shop.slots[i].kind === 'empty') return;
+    inspect = { area: 'shop', index: i };
   }
 
   function clickBoardUnit(boardIndex: number) {
@@ -127,18 +154,35 @@
       if (apply(buyRelic(build, pendingRelic, boardIndex))) pendingRelic = null;
       return;
     }
-    selected = selected === boardIndex ? null : boardIndex;
+    inspect = { area: 'board', index: boardIndex };
   }
 
-  function move(delta: number) {
-    if (selected === null) return;
-    const to = selected + delta;
-    if (apply(moveUnit(build, selected, to))) selected = to;
+  function recruitFromCard(i: number) {
+    if (apply(buyUnit(build, i))) inspect = null;
   }
 
-  function sell() {
-    if (selected === null) return;
-    if (apply(sellUnit(build, selected))) selected = null;
+  function pinRelicFromCard(i: number) {
+    const slot = build.shop.slots[i];
+    if (slot.kind !== 'relic') return;
+    if (RELIC_DEFS[slot.relicId].scope === 'team') {
+      if (apply(buyRelic(build, i))) inspect = null;
+    } else {
+      // Unit relics need a target: close the card, arm the pick-a-rat mode.
+      pendingRelic = i;
+      inspect = null;
+      notice = 'pick a rat to carry it';
+    }
+  }
+
+  function moveFromCard(delta: number) {
+    if (inspect?.area !== 'board') return;
+    const to = inspect.index + delta;
+    if (apply(moveUnit(build, inspect.index, to))) inspect = { area: 'board', index: to };
+  }
+
+  function sellFromCard() {
+    if (inspect?.area !== 'board') return;
+    if (apply(sellUnit(build, inspect.index))) inspect = null;
   }
 
   function freeze(i: number, e: Event) {
@@ -152,7 +196,7 @@
       notice = 'recruit some rats first';
       return;
     }
-    selected = null;
+    inspect = null;
     pendingRelic = null;
     phase = 'riding';
     result = null;
@@ -229,7 +273,7 @@
         {@const stats = unitStats(unit)}
         <button
           class="tile unit-tile"
-          class:selected={selected === bi}
+          class:selected={inspect?.area === 'board' && inspect.index === bi}
           class:pin-target={pendingRelic !== null}
           onclick={() => clickBoardUnit(bi)}
         >
@@ -248,13 +292,6 @@
         </button>
       {/each}
     </div>
-    {#if selected !== null && build.board[selected]}
-      <div class="unit-actions">
-        <button onclick={() => move(1)} disabled={selected >= build.board.length - 1}>◀ back</button>
-        <button onclick={sell}>sell · +{sellRefund(build.board[selected])}</button>
-        <button onclick={() => move(-1)} disabled={selected === 0}>front ▶</button>
-      </div>
-    {/if}
     {#if build.teamRelicIds.length > 0}
       <div class="team-relics">
         team: {build.teamRelicIds.map((r) => RELIC_DEFS[r].name).join(', ')}
@@ -341,6 +378,82 @@
       />
       share anonymous run data to help balance the game
     </label>
+  {/if}
+
+  {#if inspect}
+    {@const ins = inspect}
+    <div class="sheet-backdrop" role="presentation" onclick={() => (inspect = null)}>
+      <div class="sheet" role="dialog" aria-modal="true" onclick={(e) => e.stopPropagation()}>
+        {#if ins.area === 'shop'}
+          {@const slot = build.shop.slots[ins.index]}
+          {#if slot.kind === 'unit'}
+            {@const def = UNIT_DEFS[slot.defId]}
+            {@const afford = build.scrap >= def.cost}
+            {@const room = build.board.length < 5}
+            <div class="card-head">
+              {#if ART_URL[def.id]}<img class="card-portrait" src={ART_URL[def.id]} alt="" />{/if}
+              <div>
+                <div class="card-name">{def.name}</div>
+                <div class="card-stats">
+                  {def.attack}/{def.health}
+                  <span class="card-tier">★2 {def.attack * 2}/{def.health * 2} · ★3 {def.attack * 3}/{def.health * 3}</span>
+                </div>
+              </div>
+            </div>
+            <p class="card-ability">{abilitySentence(def.id)}</p>
+            <div class="card-actions">
+              <button class="primary" disabled={!afford || !room} onclick={() => recruitFromCard(ins.index)}>
+                Recruit · ⚙ {def.cost}
+              </button>
+              <button onclick={() => (inspect = null)}>close</button>
+            </div>
+            {#if !afford}<div class="card-warn">not enough scrap</div>
+            {:else if !room}<div class="card-warn">the warren is full</div>{/if}
+          {:else if slot.kind === 'relic'}
+            {@const relic = RELIC_DEFS[slot.relicId]}
+            {@const afford = build.scrap >= relic.cost}
+            <div class="card-head">
+              <div class="card-relic-icon">✦</div>
+              <div>
+                <div class="card-name">{relic.name}</div>
+                <div class="card-sub">{relic.scope === 'team' ? 'whole team' : 'pin to one rat'}</div>
+              </div>
+            </div>
+            <p class="card-ability">{relic.desc}.</p>
+            <div class="card-actions">
+              <button class="primary" disabled={!afford} onclick={() => pinRelicFromCard(ins.index)}>
+                {relic.scope === 'team' ? 'Add' : 'Pin'} · ⚙ {relic.cost}
+              </button>
+              <button onclick={() => (inspect = null)}>close</button>
+            </div>
+            {#if !afford}<div class="card-warn">not enough scrap</div>{/if}
+          {/if}
+        {:else}
+          {@const unit = build.board[ins.index]}
+          {#if unit}
+            {@const def = UNIT_DEFS[unit.defId]}
+            {@const stats = unitStats(unit)}
+            <div class="card-head">
+              {#if ART_URL[unit.defId]}<img class="card-portrait" src={ART_URL[unit.defId]} alt="" />{/if}
+              <div>
+                <div class="card-name">{def.name}{unit.tier > 1 ? ` ★${unit.tier}` : ''}</div>
+                <div class="card-stats">{stats.attack}/{stats.health}</div>
+              </div>
+            </div>
+            <p class="card-ability">{abilitySentence(unit.defId)}</p>
+            {#if unit.relicIds.length > 0}
+              <p class="card-relics">✦ {unit.relicIds.map((r) => RELIC_DEFS[r].name).join(', ')}</p>
+            {/if}
+            <div class="card-actions">
+              <button disabled={ins.index === 0} onclick={() => moveFromCard(-1)}>front ▶</button>
+              <button disabled={ins.index >= build.board.length - 1} onclick={() => moveFromCard(1)}>◀ back</button>
+              <button onclick={sellFromCard}>sell · +{sellRefund(unit)}</button>
+              <button onclick={() => (inspect = null)}>close</button>
+            </div>
+          {/if}
+        {/if}
+      </div>
+    </div>
   {/if}
 </main>
 
@@ -583,7 +696,6 @@
     opacity: 1;
   }
 
-  .unit-actions,
   .market-actions {
     display: flex;
     justify-content: center;
@@ -591,7 +703,6 @@
     margin-top: 8px;
   }
 
-  .unit-actions button,
   .market-actions button {
     padding: 6px 14px;
     font-family: inherit;
@@ -603,9 +714,126 @@
     cursor: pointer;
   }
 
-  .unit-actions button:disabled {
+  .sheet-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    z-index: 50;
+  }
+
+  .sheet {
+    width: 100%;
+    max-width: 480px;
+    background: #1a140f;
+    border: 1px solid #4a3520;
+    border-bottom: none;
+    border-radius: 14px 14px 0 0;
+    padding: 18px 18px 26px;
+    text-align: left;
+  }
+
+  .card-head {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .card-portrait {
+    width: 72px;
+    height: 72px;
+    object-fit: contain;
+    background: #241a14;
+    border: 1px solid #4a3520;
+    border-radius: 10px;
+  }
+
+  .card-relic-icon {
+    width: 72px;
+    height: 72px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 34px;
+    color: #d4af37;
+    background: #241a14;
+    border: 1px solid #4a3520;
+    border-radius: 10px;
+  }
+
+  .card-name {
+    font-size: 19px;
+    color: var(--ink);
+  }
+
+  .card-stats {
+    margin-top: 3px;
+    font-size: 17px;
+    font-weight: bold;
+    color: #f0e6d2;
+  }
+
+  .card-tier {
+    font-size: 11px;
+    font-weight: normal;
+    color: var(--ink-dim);
+    margin-left: 6px;
+  }
+
+  .card-sub {
+    margin-top: 3px;
+    font-size: 12px;
+    color: var(--ink-dim);
+  }
+
+  .card-ability {
+    margin: 14px 0 4px;
+    font-size: 14px;
+    line-height: 1.45;
+    color: #c9b891;
+  }
+
+  .card-relics {
+    margin: 2px 0 0;
+    font-size: 13px;
+    color: #d4af37;
+  }
+
+  .card-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 16px;
+  }
+
+  .card-actions button {
+    padding: 9px 16px;
+    font-family: inherit;
+    font-size: 14px;
+    color: var(--ink);
+    background: #241a14;
+    border: 1px solid #4a3520;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+
+  .card-actions button.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #f7ede0;
+  }
+
+  .card-actions button:disabled {
     opacity: 0.4;
     cursor: default;
+  }
+
+  .card-warn {
+    margin-top: 8px;
+    font-size: 12px;
+    color: #d8452e;
   }
 
   .team-relics {
