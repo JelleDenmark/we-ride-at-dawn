@@ -1,0 +1,16 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <!-- Blight-Witch: ragged hood, gnarled claws, poison drip (poisons what it hits) -->
+  <path d="M17 51 Q5 50 7 37 Q7 31 12 30" fill="none" stroke="#3a2b3f" stroke-width="2.4" stroke-linecap="round"/>
+  <path d="M17 51 C13 42 17 32 28 30 C36 29 42 33 45 39 L54 44 C55.3 45 54.4 46.4 53 46.4 L46 46.5 C43 51 35 54 27 54 C20 54 18.5 53.5 17 51 Z" fill="#6a5560" stroke="#201209" stroke-width="1.5" stroke-linejoin="round"/>
+  <!-- ragged hood over head/back -->
+  <path d="M16 46 C12 34 18 22 33 22 C42 22 47 27 48 33 L44 38 C42 30 34 27 27 30 C21 33 20 42 22 48 Z" fill="#3a2b3f" stroke="#201209" stroke-width="1.3" stroke-linejoin="round"/>
+  <path d="M22 48 L19 53 L24 50 L26 55 L29 50 L33 54 L34 49" fill="#3a2b3f" stroke="none"/>
+  <!-- gnarled snout poking from hood -->
+  <path d="M44 38 L54 44 C55.3 45 54.4 46.4 53 46.4 L46 46.5 Z" fill="#6a5560" stroke="#201209" stroke-width="1.3" stroke-linejoin="round"/>
+  <circle cx="46" cy="41" r="1.9" fill="#9a5fb0"/>
+  <circle cx="53" cy="45" r="1.2" fill="#9a5fb0"/>
+  <!-- poison drip from claw -->
+  <path d="M40 52 Q40 56 42 58 Q44 56 44 52" fill="#6fae3a"/>
+  <rect x="21" y="52" width="4.5" height="7" rx="1.8" fill="#3a2b3f"/>
+  <rect x="34" y="51" width="4.5" height="7" rx="1.8" fill="#3a2b3f"/>
+</svg>

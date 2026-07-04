@@ -1,0 +1,21 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <!-- Midden-Hag: hunched hooded crone with a gnarled staff (poisons) -->
+  <!-- gnarled staff, forward -->
+  <path d="M44 52 L48 14 Q49 10 45 9" fill="none" stroke="#4e4234" stroke-width="3" stroke-linecap="round"/>
+  <!-- sickly-green wisp at staff top -->
+  <circle cx="46" cy="10" r="4" fill="#7a9a4e" stroke="#1a222b" stroke-width="1.2"/>
+  <circle cx="46" cy="10" r="1.6" fill="#5c7838"/>
+  <!-- feet peeking -->
+  <path d="M20 53 L26 53 L25 58 L21 58 Z" fill="#232c34"/>
+  <!-- hunched hooded body -->
+  <path d="M18 32 C16 24 24 18 32 20 C40 22 40 30 42 40 L44 53 C44 55 16 55 16 52 Z" fill="#46586e" stroke="#1a222b" stroke-width="1.6" stroke-linejoin="round"/>
+  <!-- hunch/back shade -->
+  <path d="M20 30 C18 24 24 20 30 21 C25 22 22 26 23 33 Z" fill="#33414f"/>
+  <!-- bony arm gripping staff -->
+  <rect x="36" y="34" width="8" height="4" rx="2" fill="#8f9a8a" stroke="#1a222b" stroke-width="1"/>
+  <!-- deep hood, face in shadow, pointing right -->
+  <path d="M22 26 C20 16 34 12 40 20 C42 24 38 28 34 28 C30 30 24 30 22 26 Z" fill="#33414f" stroke="#1a222b" stroke-width="1.5" stroke-linejoin="round"/>
+  <!-- hooked nose + glinting eye -->
+  <path d="M36 22 L41 25 L36 26 Z" fill="#8f9a8a"/>
+  <circle cx="34" cy="22" r="1.2" fill="#7a9a4e"/>
+</svg>

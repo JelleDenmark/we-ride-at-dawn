@@ -1,0 +1,12 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <!-- Gutter Runt: small, scrawny, ribs showing -->
+  <path d="M15 47 Q3 46 5 33 Q5 27 10 26" fill="none" stroke="#4e4234" stroke-width="2" stroke-linecap="round"/>
+  <path d="M15 47 C12 38 18 28 29 27 C36 26.5 42 30 46 35 L56 41 C57.4 41.9 56.5 43.3 55.2 43.3 L46 44 C43 49 36 51.5 29 51.5 C21 51.5 16.5 51 15 47 Z" fill="#756552" stroke="#201209" stroke-width="1.5" stroke-linejoin="round"/>
+  <path d="M22 33 Q21 39 23 45 M28 32 Q27 38 29 44 M34 32 Q33 38 35 43" fill="none" stroke="#4e4234" stroke-width="1.3"/>
+  <circle cx="38" cy="28" r="4.4" fill="#756552" stroke="#201209" stroke-width="1.5"/>
+  <circle cx="38" cy="28" r="2" fill="#b4715a"/>
+  <circle cx="45" cy="36" r="1.7" fill="#201209"/>
+  <circle cx="55.4" cy="41.8" r="1.2" fill="#b4715a"/>
+  <rect x="20" y="50" width="4" height="7" rx="1.6" fill="#4e4234"/>
+  <rect x="38" y="48" width="4" height="8" rx="1.6" fill="#4e4234"/>
+</svg>

@@ -1,0 +1,17 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <!-- Corpse-Glutton: grossly bloated and fat (grows when allies die) -->
+  <path d="M12 53 Q2 51 5 40 Q6 35 11 35" fill="none" stroke="#5e3120" stroke-width="2.8" stroke-linecap="round"/>
+  <!-- enormous round belly -->
+  <ellipse cx="30" cy="41" rx="21" ry="16" fill="#8a4b2f" stroke="#201209" stroke-width="1.5"/>
+  <path d="M22 30 C14 34 12 46 18 54 C13 48 12 38 18 32 Z" fill="#7a4128"/>
+  <!-- fat rolls -->
+  <path d="M16 42 Q26 46 20 52 M42 34 Q49 40 44 47" fill="none" stroke="#6e3a20" stroke-width="1.4"/>
+  <!-- small head sunk into fat -->
+  <path d="M45 32 C44 26 50 23 55 25 L60 31 C61 32.2 60 34 58.5 33.8 L51 34 C48 35 46 34 45 32 Z" fill="#8a4b2f" stroke="#201209" stroke-width="1.5" stroke-linejoin="round"/>
+  <circle cx="48" cy="26" r="3.6" fill="#8a4b2f" stroke="#201209" stroke-width="1.5"/>
+  <circle cx="48" cy="26" r="1.6" fill="#b4715a"/>
+  <circle cx="56" cy="31" r="1.6" fill="#201209"/>
+  <!-- stubby feet -->
+  <rect x="20" y="54" width="5" height="6" rx="2" fill="#5e3120"/>
+  <rect x="36" y="54" width="5" height="6" rx="2" fill="#5e3120"/>
+</svg>

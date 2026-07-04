@@ -1,0 +1,15 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <!-- Bone-Priest: skull mask + bone staff (revives the fallen) -->
+  <path d="M17 51 Q5 50 7 37 Q7 31 12 30" fill="none" stroke="#4e4234" stroke-width="2.4" stroke-linecap="round"/>
+  <path d="M17 51 C13 42 17 32 28 30 C35 29 41 32 44 38 L51 43 C52.3 44 51.4 45.4 50 45.4 L44 45.5 C41 50 34 53 26 53 C19 53 18.5 53.5 17 51 Z" fill="#756552" stroke="#201209" stroke-width="1.5" stroke-linejoin="round"/>
+  <!-- skull mask over head -->
+  <path d="M40 38 C38 30 44 25 51 27 C57 29 58 37 53 41 C48 45 42 44 40 38 Z" fill="#e8e2cf" stroke="#201209" stroke-width="1.4" stroke-linejoin="round"/>
+  <circle cx="50" cy="34" r="1.9" fill="#201209"/>
+  <path d="M46 41 L47 44 M50 41 L51 44 M54 40 L55 43" stroke="#201209" stroke-width="1.1"/>
+  <!-- bone staff held aloft, ends knobbed like a femur -->
+  <path d="M22 12 L28 46" stroke="#e8e2cf" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="21" cy="11" r="2.4" fill="#e8e2cf" stroke="#201209" stroke-width="1"/>
+  <circle cx="24" cy="13" r="2.1" fill="#e8e2cf" stroke="#201209" stroke-width="1"/>
+  <rect x="21" y="51" width="4.5" height="7" rx="1.8" fill="#4e4234"/>
+  <rect x="34" y="51" width="4.5" height="7" rx="1.8" fill="#4e4234"/>
+</svg>

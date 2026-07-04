@@ -1,0 +1,18 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <!-- Dire-Rat: huge, scarred, brutish (pure muscle) -->
+  <path d="M11 50 Q1 47 4 36 Q5 30 11 30" fill="none" stroke="#4a2916" stroke-width="3.2" stroke-linecap="round"/>
+  <!-- massive hunched body -->
+  <path d="M11 51 C6 40 11 26 27 24 C39 23 47 28 51 36 L60 42 C61.3 43 60.4 44.6 59 44.6 L50 44.5 C46 50 37 54 25 54 C16 54 13 53 11 51 Z" fill="#7a4128" stroke="#201209" stroke-width="1.7" stroke-linejoin="round"/>
+  <!-- shoulder hump / muscle shading -->
+  <path d="M20 30 C15 34 14 44 20 51 C14 44 14 34 20 30 Z" fill="#8a4b2f"/>
+  <path d="M30 28 Q40 30 44 40" fill="none" stroke="#5e3120" stroke-width="1.6"/>
+  <!-- brutish head -->
+  <path d="M46 34 C44 27 51 23 57 25 L63 32 C64 33.3 63 35 61.5 34.8 L54 35 C50 36 47 35 46 34 Z" fill="#7a4128" stroke="#201209" stroke-width="1.7" stroke-linejoin="round"/>
+  <circle cx="49" cy="25" r="4" fill="#7a4128" stroke="#201209" stroke-width="1.6"/>
+  <circle cx="49" cy="25" r="1.7" fill="#9c5738"/>
+  <circle cx="58" cy="32" r="1.7" fill="#201209"/>
+  <!-- scars -->
+  <path d="M34 34 L40 40 M43 33 L47 38" stroke="#4a2916" stroke-width="1.4" stroke-linecap="round"/>
+  <rect x="18" y="52" width="5.5" height="8" rx="2.2" fill="#4a2916"/>
+  <rect x="34" y="51" width="5.5" height="9" rx="2.2" fill="#4a2916"/>
+</svg>

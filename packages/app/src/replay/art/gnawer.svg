@@ -1,0 +1,16 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <!-- Gnawer: huge front teeth (buffs the rat behind on death) -->
+  <path d="M16 49 Q4 48 6 35 Q6 29 11 28" fill="none" stroke="#5e3120" stroke-width="2.4" stroke-linecap="round"/>
+  <path d="M16 49 C12 40 16 31 27 29 C34 28 40 31 43 36 L48 39 C44 33 36 31 30 33 Z" fill="#8a4b2f" stroke="none"/>
+  <path d="M16 49 C12 40 16 30 28 28 C36 27 42 31 45 37 C47 41 45 47 38 51 C31 54 22 54 18 51 Z" fill="#8a4b2f" stroke="#201209" stroke-width="1.5" stroke-linejoin="round"/>
+  <!-- big head thrust forward -->
+  <path d="M40 30 C38 24 44 20 50 22 L57 30 C58 31.2 57 33 55.5 32.8 L47 33 C44 34 41 33 40 30 Z" fill="#8a4b2f" stroke="#201209" stroke-width="1.5" stroke-linejoin="round"/>
+  <circle cx="43" cy="21" r="3.8" fill="#8a4b2f" stroke="#201209" stroke-width="1.5"/>
+  <circle cx="43" cy="21" r="1.7" fill="#b4715a"/>
+  <circle cx="52" cy="28" r="1.6" fill="#201209"/>
+  <!-- HUGE buck teeth -->
+  <path d="M53 32 L54 44 L50 40 L49 32 Z" fill="#e8e2cf" stroke="#201209" stroke-width="1.1" stroke-linejoin="round"/>
+  <path d="M49 32 L50 42 L46 39 L45.5 32 Z" fill="#e8e2cf" stroke="#201209" stroke-width="1.1" stroke-linejoin="round"/>
+  <rect x="22" y="50" width="4.5" height="7" rx="1.8" fill="#5e3120"/>
+  <rect x="34" y="50" width="4.5" height="7" rx="1.8" fill="#5e3120"/>
+</svg>

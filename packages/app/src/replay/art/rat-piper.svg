@@ -1,0 +1,16 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <!-- Rat-Piper: sits upright, playing a little gold pipe (summons pups) -->
+  <path d="M20 55 Q6 55 8 42 Q8 37 13 36" fill="none" stroke="#5e3120" stroke-width="2.6" stroke-linecap="round"/>
+  <path d="M17 50 C13 40 16 29 26 25 C29 24 32 24 34 26 C39 30 39 36 36 40 C40 46 36 54 27 56 C21 57 18 54 17 50 Z" fill="#8a4b2f" stroke="#201209" stroke-width="1.5" stroke-linejoin="round"/>
+  <path d="M26 24 C24 16 30 10 37 12 L47 19 C48.8 20.3 48 22.6 46 22.8 L37 24 C33 27 28 27 26 24 Z" fill="#8a4b2f" stroke="#201209" stroke-width="1.5" stroke-linejoin="round"/>
+  <circle cx="29" cy="11" r="4.2" fill="#8a4b2f" stroke="#201209" stroke-width="1.5"/>
+  <circle cx="29" cy="11" r="1.9" fill="#b4715a"/>
+  <circle cx="39" cy="17" r="1.7" fill="#201209"/>
+  <!-- pipe -->
+  <path d="M46 21 L61 26" stroke="#d4af37" stroke-width="3.6" stroke-linecap="round" fill="none"/>
+  <circle cx="52" cy="23" r="0.9" fill="#201209"/>
+  <circle cx="56" cy="24.3" r="0.9" fill="#201209"/>
+  <circle cx="49" cy="23" r="2.6" fill="#5e3120"/>
+  <rect x="19" y="54" width="5" height="6" rx="2" fill="#5e3120"/>
+  <rect x="28" y="55" width="5" height="6" rx="2" fill="#5e3120"/>
+</svg>

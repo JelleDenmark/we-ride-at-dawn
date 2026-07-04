@@ -1,4 +1,4 @@
-import { Application, Container, Graphics, Text } from 'pixi.js';
+import { Application, Assets, Container, Graphics, Sprite, Text, Texture } from 'pixi.js';
 import type { BattleEvent, Side, UnitView } from '@wrad/core';
 
 const W = 900;
@@ -9,6 +9,15 @@ const SPACING = 84;
 const UNIT_SIZE = 64;
 
 const SIDE_COLOR: Record<Side, number> = { horde: 0x8a4b2f, gauntlet: 0x46586e };
+
+// defId -> bundled SVG url, resolved at build time by Vite.
+const ART_URL: Record<string, string> = Object.fromEntries(
+  Object.entries(
+    import.meta.glob('./art/*.svg', { eager: true, query: '?url', import: 'default' })
+  ).map(([path, url]) => [path.split('/').pop()!.replace('.svg', ''), url as string])
+);
+// Populated once by ReplayPlayer.init(); unknown ids fall back to a plain rect.
+const ART_TEXTURE = new Map<string, Texture>();
 
 function wait(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -58,10 +67,22 @@ class UnitSprite {
   private statsText: Text;
 
   constructor(view: UnitView) {
-    const body = new Graphics()
-      .roundRect(-UNIT_SIZE / 2, -UNIT_SIZE / 2, UNIT_SIZE, UNIT_SIZE, 8)
-      .fill(SIDE_COLOR[view.side])
-      .stroke({ color: 0x000000, width: 2 });
+    const texture = ART_TEXTURE.get(view.defId);
+    let body: Container;
+    if (texture) {
+      const sprite = new Sprite(texture);
+      sprite.anchor.set(0.5);
+      const scale = UNIT_SIZE / Math.max(texture.width, texture.height);
+      // Sprites are drawn facing right; mirror the gauntlet side to face
+      // the horde. Text stays a separate, unmirrored child of root.
+      sprite.scale.set(view.side === 'gauntlet' ? -scale : scale, scale);
+      body = sprite;
+    } else {
+      body = new Graphics()
+        .roundRect(-UNIT_SIZE / 2, -UNIT_SIZE / 2, UNIT_SIZE, UNIT_SIZE, 8)
+        .fill(SIDE_COLOR[view.side])
+        .stroke({ color: 0x000000, width: 2 });
+    }
     const name = new Text({
       text: view.tier > 1 ? `${view.name} ★${view.tier}` : view.name,
       style: { fill: 0xd8cdb8, fontSize: 11, fontFamily: 'Georgia' },
@@ -96,6 +117,23 @@ export class ReplayPlayer {
     this.app = new Application();
     await this.app.init({ width: W, height: H, background: 0x120f0c, antialias: true });
     el.appendChild(this.app.canvas);
+    await ReplayPlayer.loadArt();
+  }
+
+  // Rasterize every unit SVG to a texture up front so play() never awaits a
+  // load mid-replay. Failures leave the id absent, falling back to a rect.
+  private static loadArt(): Promise<void> {
+    if (ART_TEXTURE.size > 0) return Promise.resolve();
+    return Promise.all(
+      Object.entries(ART_URL).map(async ([id, url]) => {
+        try {
+          const texture = await Assets.load<Texture>({ src: url, data: { resolution: 2 } });
+          ART_TEXTURE.set(id, texture);
+        } catch {
+          // Leave unset; UnitSprite draws its fallback rect.
+        }
+      })
+    ).then(() => undefined);
   }
 
   async play(events: BattleEvent[]): Promise<void> {

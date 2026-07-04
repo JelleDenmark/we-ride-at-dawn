@@ -8,4 +8,9 @@ export default defineConfig({
   plugins: [svelte()],
   server: { port: 5173, strictPort: true },
   optimizeDeps: { exclude: ['@wrad/core'] },
+  build: {
+    // Keep unit SVGs as real files (never inline as data: URLs) so PixiJS's
+    // extension-based SVG detection works on the production build.
+    assetsInlineLimit: (file: string) => (file.endsWith('.svg') ? false : undefined),
+  },
 });
