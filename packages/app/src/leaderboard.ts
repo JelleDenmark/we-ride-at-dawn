@@ -1,5 +1,13 @@
 import type { Lineup } from '@wrad/core';
 import { SUPABASE_URL, SUPABASE_ANON_KEY, deviceId } from './telemetry';
+import { CHANNEL } from './env';
+
+// Dev builds ride a parallel, prefixed season so testing (and dev-toolbar
+// inflated depths) never touch the public prod board. The UI still shows the
+// real week date; only the stored/queried key differs.
+function boardSeason(seasonId: string): string {
+  return CHANNEL === 'dev' ? `dev-${seasonId}` : seasonId;
+}
 
 // One shared themed default so a fresh player always has a name to ride
 // under; they can rename it. Collisions are harmless (device id is the key).
@@ -56,7 +64,7 @@ export async function submitScore(args: {
       method: 'POST',
       headers: { ...HEADERS, Prefer: 'return=minimal' },
       body: JSON.stringify({
-        p_season: args.seasonId,
+        p_season: boardSeason(args.seasonId),
         p_device: deviceId(),
         p_name: args.name,
         p_depth: args.depth,
@@ -74,7 +82,7 @@ export async function submitScore(args: {
 export async function fetchTop(seasonId: string, limit = 20): Promise<BoardRow[]> {
   try {
     const url =
-      `${SUPABASE_URL}/rest/v1/scores?season_id=eq.${encodeURIComponent(seasonId)}` +
+      `${SUPABASE_URL}/rest/v1/scores?season_id=eq.${encodeURIComponent(boardSeason(seasonId))}` +
       `&order=depth.desc,updated_at.asc&limit=${limit}&select=name,depth,day,device_id`;
     const res = await fetch(url, { headers: HEADERS });
     if (!res.ok) return [];
@@ -92,7 +100,7 @@ export async function fetchRank(seasonId: string, depth: number): Promise<number
   if (depth <= 0) return null;
   try {
     const url =
-      `${SUPABASE_URL}/rest/v1/scores?season_id=eq.${encodeURIComponent(seasonId)}` +
+      `${SUPABASE_URL}/rest/v1/scores?season_id=eq.${encodeURIComponent(boardSeason(seasonId))}` +
       `&depth=gt.${depth}&select=device_id`;
     const res = await fetch(url, {
       headers: { ...HEADERS, Prefer: 'count=exact' },

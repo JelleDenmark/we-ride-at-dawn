@@ -490,11 +490,7 @@
       <span>front → into the drains</span>
     </div>
     <div class="board horde-board">
-      {#each Array.from({ length: Math.max(0, boardCapForDay(build.day) - build.board.length) }) as _}
-        <div class="tile empty-tile">empty</div>
-      {/each}
-      {#each build.board.slice().reverse() as unit, di}
-        {@const bi = build.board.length - 1 - di}
+      {#each build.board as unit, bi}
         {@const stats = unitStats(unit)}
         <button
           class="tile unit-tile"
@@ -515,6 +511,9 @@
             {/if}
           </span>
         </button>
+      {/each}
+      {#each Array.from({ length: Math.max(0, boardCapForDay(build.day) - build.board.length) }) as _}
+        <div class="tile empty-tile">empty</div>
       {/each}
     </div>
     {#if build.teamRelicIds.length > 0}
@@ -607,7 +606,7 @@
           <div class="stat"><span class="stat-big">{formatCountdown(secondsToNextHour)}</span><span class="stat-lbl">next ride</span></div>
         </div>
         <p class="idle-note">
-          {currentDepth}/hr from depth · +{interestFor(build.scrap)} interest banked each dawn · harder every dawn
+          +{SCRAP_PER_DEPTH} scrap per depth cleared, every hour · +{interestFor(build.scrap)} interest banked each dawn · harder every dawn
         </p>
         <button class="watch" onclick={watchRide}>watch the ride</button>
         <p class="season-best">deepest ride this week: <strong>wave {Math.max(seasonBest, currentDepth)}</strong> · resets Monday</p>
@@ -952,6 +951,13 @@
 
   .horde-board {
     grid-template-columns: repeat(5, 1fr);
+    /* Fill right-to-left so the front rat (index 0) sits top-right and stays
+       in the first row when the horde grows past 5 and wraps. */
+    direction: rtl;
+  }
+
+  .horde-board .tile {
+    direction: ltr;
   }
 
   .tile {
