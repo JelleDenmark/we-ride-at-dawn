@@ -26,6 +26,7 @@
   } from '@wrad/core';
   import { ReplayPlayer } from './replay/ReplayPlayer';
   import { CHANNEL } from './env';
+  import { ART_URL } from './art';
   import { loadBuild, saveBuild } from './persistence';
   import {
     submitRun,
@@ -232,6 +233,9 @@
           class:pin-target={pendingRelic !== null}
           onclick={() => clickBoardUnit(bi)}
         >
+          {#if ART_URL[unit.defId]}
+            <img class="portrait" src={ART_URL[unit.defId]} alt="" />
+          {/if}
           <span class="tile-name">{UNIT_DEFS[unit.defId].name}{unit.tier > 1 ? ` ★${unit.tier}` : ''}</span>
           <span class="tile-stats">{stats.attack}/{stats.health}</span>
           <span class="tile-sub">
@@ -270,6 +274,9 @@
             class:frozen={build.shop.frozen[i]}
             onclick={() => clickShopSlot(i)}
           >
+            {#if ART_URL[def.id]}
+              <img class="portrait" src={ART_URL[def.id]} alt="" />
+            {/if}
             <span class="tile-name">{def.name}</span>
             <span class="tile-stats">{def.attack}/{def.health}</span>
             <span class="tile-sub">{def.desc ?? ''}</span>
@@ -508,6 +515,14 @@
     color: #5f564a;
     justify-content: center;
     cursor: default;
+  }
+
+  .portrait {
+    width: 40px;
+    height: 40px;
+    object-fit: contain;
+    image-rendering: auto;
+    pointer-events: none;
   }
 
   .tile-name {

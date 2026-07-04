@@ -1,5 +1,6 @@
 import { Application, Assets, Container, Graphics, Sprite, Text, Texture } from 'pixi.js';
 import type { BattleEvent, Side, UnitView } from '@wrad/core';
+import { ART_URL } from '../art';
 
 const W = 900;
 const H = 420;
@@ -10,12 +11,6 @@ const UNIT_SIZE = 64;
 
 const SIDE_COLOR: Record<Side, number> = { horde: 0x8a4b2f, gauntlet: 0x46586e };
 
-// defId -> bundled SVG url, resolved at build time by Vite.
-const ART_URL: Record<string, string> = Object.fromEntries(
-  Object.entries(
-    import.meta.glob('./art/*.svg', { eager: true, query: '?url', import: 'default' })
-  ).map(([path, url]) => [path.split('/').pop()!.replace('.svg', ''), url as string])
-);
 // Populated once by ReplayPlayer.init(); unknown ids fall back to a plain rect.
 const ART_TEXTURE = new Map<string, Texture>();
 
