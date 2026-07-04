@@ -76,6 +76,19 @@ One repo, one GitHub Pages site, two channels:
 
 The deploy workflow builds both branches on every push to either and assembles prod at the site root with dev under `/dev/`. Channel is baked at build time via `VITE_CHANNEL` (anything not `prod` — including local `npm run dev` — behaves as dev). Flow: changes land on `dev` → tested at the /dev/ URL → merged to `master` for players. A scheduled keep-alive workflow pings Supabase twice weekly so the free-tier project never pauses.
 
+## 2.6 Expedition model — the core loop (designed 2026-07-04)
+
+A day is the atom; a **week-long expedition** is the molecule. Same shop/scout/ride mechanics as a single day, plus three things layered on top: the horde **persists**, the board cap **grows**, and the gauntlet **escalates** across the seven days. This reconciles the two pillars that fight in a single day — each day stays *starving* (small scrap stipend, hard choices) while the *army* compounds into the deep, unique horde the "a lot of rats" pillar promises.
+
+- **Synchronized weekly seasons.** Everyone starts a fresh horde Monday, faces the same 7 escalating daily gauntlets, leaderboard = cumulative depth, wiped Sunday. Synchronized (not rolling-per-player) preserves the shared puzzle + comparable leaderboard; the weekly wipe is what keeps power carryover *fair* (snowball resets every 7 days).
+- **What carries between days:** roster, tiers, relics. Rats **heal to full** each dawn (only the building persists, not battle damage).
+- **Board cap grows** across the week (e.g. 5 → 8) — the lever that delivers the horde-size payoff.
+- **Daily scrap = equal stipend** for everyone. Deliberately *not* score-based (would snowball the leader out of reach within the week).
+  - *Future tunable (not now):* +1 scrap per depth reached, as a mild performance reward. Parked at Jesper's request 2026-07-04.
+- **Shop rerolls are already equal across players** and stay that way: offerings are `rollOfferings(date, rollNumber)`, a pure seeded function, so everyone who rerolls N times walks the same N+1 shops. Freezing lets players diverge by *choice*, not luck. In the expedition, seed per expedition-day.
+- **Latecomers:** play the single-day "quick ride" (the current loop) until Sunday, then join Monday's fresh season with everyone. The single-day loop becomes onboarding/practice, not throwaway.
+- **New work vs. reuse:** shop/scout/sim/replay all reused unchanged. New: multi-day expedition persistence (will want the Supabase backend for cross-device horde state — already provisioned), the escalation curve, growing board cap, weekly-season leaderboard. Supersedes the old milestone 5 "daily loop."
+
 ## 3. Milestones
 
 1. ✅ *(2026-07-03)* **Walking skeleton (the early view).** `core`: PRNG, dailySeed, data tables for ~3 units, minimal sim (attack ticks, deaths, one `onFaint` trigger). `app`: static page, hardcoded lineup vs wave 1 of today's real seeded gauntlet, rendered as labeled rectangles sliding into each other with damage numbers. Determinism test: same input ⇒ byte-identical event log. *Everything downstream is filling in, not re-plumbing.*
@@ -86,6 +99,14 @@ The deploy workflow builds both branches on every push to either and assembles p
 
 5. ⏸ *(on hold 2026-07-03, pending balance testing)* **The daily loop.** 06:00 CET boundary, persistence keyed by date, lineup lock at dawn, lazy resolution of yesterday's lineup against the newly revealed gauntlet, scout report display for tomorrow, scoring.
 6. **Ship it.** Emoji share card, PWA manifest + install prompt, deploy to static hosting. Play it with friends; start the balance-tuning loop.
+
+## 3.5 Teaching the rats (designed 2026-07-03, not yet built)
+
+Three layers of progressive disclosure, all app-layer:
+1. **Tap-to-inspect card** — bottom-sheet for any unit/relic/enemy: portrait, archetype, stats incl. ★2/★3 preview, ability as a full sentence with the trigger explained. Shop stalls become tap-to-inspect with a buy button inside the card (also fixes accidental instant-buys). Build first.
+2. **Warren Codex** — bestiary screen (rats by strategy archetype, relics, defenders by their archetypes). Scout-report chips deep-link into it, making the report a strategic instrument. Build second.
+3. **Replay callouts** — ability procs named in float text; one-time-per-device mechanic explainers (poison, revive, combine). Build third.
+Explicitly rejected: tutorial flows, stat tables, hover tooltips (mobile-first).
 
 ## 4. Later / explicitly out of MVP
 
