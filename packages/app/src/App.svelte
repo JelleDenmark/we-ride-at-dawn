@@ -44,6 +44,8 @@
     loadLastIncomeHour,
     saveSeasonBest,
     loadSeasonBest,
+    savePlayerName,
+    loadPlayerName,
     type LastRide,
   } from './persistence';
   import {
@@ -52,6 +54,14 @@
     telemetryEnabled,
     setTelemetryEnabled,
   } from './telemetry';
+  import {
+    submitScore,
+    fetchTop,
+    fetchRank,
+    defaultName,
+    isMe,
+    type BoardRow,
+  } from './leaderboard';
 
   function addDay(date: string): string {
     return new Date(Date.parse(`${date}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
@@ -108,6 +118,61 @@
   const scrapPerHour = $derived(currentDepth * SCRAP_PER_DEPTH);
   const secondsToNextHour = $derived(3600 - (Math.floor(nowTick / 1000) % 3600));
   let telemetry = $state(telemetryEnabled());
+
+  // Leaderboard identity: a themed default until the player names their
+  // warlord (keyed by the anonymous device id, renameable).
+  let playerName = $state(loadPlayerName() ?? '');
+  let nameEntryOpen = $state(loadPlayerName() === null);
+  let nameDraft = $state(playerName || defaultName());
+  let board = $state<BoardRow[]>([]);
+  let myRank = $state<number | null>(null);
+  let boardBusy = $state(false);
+
+  async function refreshBoard() {
+    boardBusy = true;
+    try {
+      const [rows, rank] = await Promise.all([
+        fetchTop(build.seasonId, 20),
+        fetchRank(build.seasonId, seasonBest),
+      ]);
+      board = rows;
+      myRank = rank;
+    } finally {
+      boardBusy = false;
+    }
+  }
+
+  // Guard so an unchanged best/name/day doesn't re-POST on every rebuild.
+  let lastSubmit = '';
+  async function submitBest() {
+    if (!playerName || seasonBest <= 0) return;
+    const sig = `${build.seasonId}|${playerName}|${seasonBest}|${build.day}`;
+    if (sig === lastSubmit) return;
+    lastSubmit = sig;
+    await submitScore({
+      seasonId: build.seasonId,
+      name: playerName,
+      depth: seasonBest,
+      day: build.day,
+      lineup: lineupFromBuild(build),
+    });
+    await refreshBoard();
+  }
+
+  function confirmName() {
+    const n = nameDraft.trim().slice(0, 24) || defaultName();
+    playerName = n;
+    savePlayerName(n);
+    nameEntryOpen = false;
+    lastSubmit = ''; // force a resubmit so the board shows the new name
+    void submitBest();
+  }
+
+  function openRename() {
+    nameDraft = playerName;
+    nameEntryOpen = true;
+  }
+
   let pendingRelic = $state<number | null>(null);
   let inspect = $state<{ area: 'shop' | 'board'; index: number } | null>(null);
   let notice = $state('');
@@ -159,11 +224,17 @@
     // from here on (without this, each reload would reset the baseline).
     if (loadLastIncomeHour() === null) saveLastIncomeHour(lastIncomeHour);
     const id = setInterval(() => (nowTick = Date.now()), 1000);
+    // Load the board now, then keep it loosely fresh while the tab is open.
+    void refreshBoard();
+    const boardId = setInterval(() => void refreshBoard(), 60_000);
     void (async () => {
       player = new ReplayPlayer();
       await player.init(stageEl);
     })();
-    return () => clearInterval(id);
+    return () => {
+      clearInterval(id);
+      clearInterval(boardId);
+    };
   });
 
   // Idle heartbeat: advance the expedition day at each dawn (a difficulty
@@ -229,11 +300,15 @@
       bestSeasonId = build.seasonId;
       seasonBest = 0;
       saveSeasonBest(build.seasonId, 0);
+      void refreshBoard(); // new week → pull the fresh (empty) board
     }
     if (currentDepth > seasonBest) {
       seasonBest = currentDepth;
       saveSeasonBest(build.seasonId, seasonBest);
     }
+    // Auto-submit the season-best on any improvement (guarded so an
+    // unchanged score never re-POSTs).
+    void submitBest();
   });
 
   function freshBuild() {
@@ -543,6 +618,35 @@
     {/if}
   </div>
 
+  <div class="leaderboard">
+    <div class="lb-head">
+      <span class="panel-label">deepest riders · week of {build.seasonId}</span>
+      <button class="lb-refresh" onclick={() => void refreshBoard()} disabled={boardBusy}>
+        {boardBusy ? '…' : '↻'}
+      </button>
+    </div>
+    {#if board.length === 0}
+      <p class="lb-empty">{boardBusy ? 'reading the war-drums…' : 'no riders yet this week — be the first'}</p>
+    {:else}
+      <ol class="lb-rows">
+        {#each board as row, i}
+          <li class="lb-row" class:me={isMe(row)}>
+            <span class="lb-rank">{i + 1}</span>
+            <span class="lb-name">{row.name}{isMe(row) ? ' · you' : ''}</span>
+            <span class="lb-depth">wave {row.depth}</span>
+          </li>
+        {/each}
+      </ol>
+    {/if}
+    {#if myRank !== null && myRank > board.length}
+      <p class="lb-myrank">your rank: <strong>#{myRank}</strong> · wave {seasonBest}</p>
+    {/if}
+    <p class="lb-you">
+      riding as <strong>{playerName || '—'}</strong>
+      <button class="lb-rename" onclick={openRename}>rename</button>
+    </p>
+  </div>
+
   {#if telemetryConfigured}
     <label class="telemetry">
       <input
@@ -630,6 +734,30 @@
             </div>
           {/if}
         {/if}
+      </div>
+    </div>
+  {/if}
+
+  {#if nameEntryOpen}
+    <div class="sheet-backdrop" role="presentation">
+      <div class="sheet name-sheet" role="dialog" aria-modal="true">
+        <div class="card-name">name your warlord</div>
+        <p class="card-sub">This is how you'll ride on the weekly leaderboard. Rename it any time.</p>
+        <input
+          class="name-input"
+          type="text"
+          maxlength="24"
+          bind:value={nameDraft}
+          placeholder="Gutter-Warlord"
+          onkeydown={(e) => e.key === 'Enter' && confirmName()}
+        />
+        <div class="card-actions">
+          <button class="primary" onclick={confirmName}>ride out</button>
+          <button onclick={() => (nameDraft = defaultName())}>↻ new name</button>
+          {#if playerName}
+            <button onclick={() => (nameEntryOpen = false)}>cancel</button>
+          {/if}
+        </div>
       </div>
     </div>
   {/if}
@@ -1175,5 +1303,137 @@
     font-size: 12px;
     color: var(--ink-dim);
     cursor: pointer;
+  }
+
+  .leaderboard {
+    max-width: 620px;
+    margin: 18px auto 0;
+    padding: 12px 14px 14px;
+    border: 1px solid #322820;
+    border-radius: 10px;
+    background: #14100c;
+    text-align: left;
+  }
+
+  .lb-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .lb-refresh {
+    padding: 2px 10px;
+    font-family: inherit;
+    font-size: 13px;
+    color: var(--ink);
+    background: #241a14;
+    border: 1px solid #4a3520;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+
+  .lb-refresh:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  .lb-empty {
+    margin: 10px 0 4px;
+    font-size: 13px;
+    color: var(--ink-dim);
+  }
+
+  .lb-rows {
+    list-style: none;
+    margin: 10px 0 0;
+    padding: 0;
+  }
+
+  .lb-row {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 5px 8px;
+    border-radius: 6px;
+    font-size: 14px;
+  }
+
+  .lb-row:nth-child(odd) {
+    background: #1a140f;
+  }
+
+  .lb-row.me {
+    background: #2c2415;
+    color: #f0e6d2;
+  }
+
+  .lb-rank {
+    min-width: 24px;
+    color: var(--ink-dim);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .lb-row.me .lb-rank {
+    color: #d4af37;
+  }
+
+  .lb-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .lb-depth {
+    color: #d4af37;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .lb-myrank {
+    margin: 8px 0 0;
+    padding-top: 8px;
+    border-top: 1px solid #2a221a;
+    font-size: 13px;
+    color: #c9b891;
+  }
+
+  .lb-you {
+    margin: 10px 0 0;
+    font-size: 12px;
+    color: var(--ink-dim);
+  }
+
+  .lb-rename {
+    margin-left: 8px;
+    padding: 2px 8px;
+    font-family: inherit;
+    font-size: 12px;
+    color: var(--ink);
+    background: #241a14;
+    border: 1px solid #4a3520;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+
+  .name-sheet {
+    align-self: center;
+  }
+
+  .name-input {
+    width: 100%;
+    box-sizing: border-box;
+    margin-top: 14px;
+    padding: 10px 12px;
+    font-family: inherit;
+    font-size: 16px;
+    color: var(--ink);
+    background: #241a14;
+    border: 1px solid #4a3520;
+    border-radius: 8px;
+  }
+
+  .name-input:focus {
+    outline: none;
+    border-color: var(--accent);
   }
 </style>

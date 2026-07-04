@@ -66,6 +66,24 @@ export function loadLastIncomeHour(): number | null {
   }
 }
 
+/** The player's chosen leaderboard name (device-scoped, renameable). Not
+ * channel-namespaced: a player is the same warlord on prod and dev. */
+export function savePlayerName(name: string): void {
+  try {
+    localStorage.setItem('wrad:name', name);
+  } catch {
+    // Non-fatal — falls back to a fresh themed default next load.
+  }
+}
+
+export function loadPlayerName(): string | null {
+  try {
+    return localStorage.getItem('wrad:name');
+  } catch {
+    return null;
+  }
+}
+
 /** Best depth reached this season (headline leaderboard score). */
 export function saveSeasonBest(seasonId: string, best: number): void {
   try {
