@@ -47,3 +47,21 @@ export function loadLastRide(): LastRide | null {
     return null;
   }
 }
+
+/** The last hour-bucket for which idle income was credited. */
+export function saveLastIncomeHour(hour: number): void {
+  try {
+    localStorage.setItem(`${NS}:incomehour`, String(hour));
+  } catch {
+    // Non-fatal.
+  }
+}
+
+export function loadLastIncomeHour(): number | null {
+  try {
+    const raw = localStorage.getItem(`${NS}:incomehour`);
+    return raw ? Number(raw) : null;
+  } catch {
+    return null;
+  }
+}

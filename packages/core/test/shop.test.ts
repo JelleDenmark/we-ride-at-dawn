@@ -11,6 +11,9 @@ import {
   advanceAfterDawn,
   boardCapForDay,
   SEASON_DAYS,
+  interestFor,
+  rideIncome,
+  INTEREST_CAP,
   DAILY_SCRAP,
   REROLL_COST,
   type BuildState,
@@ -194,7 +197,8 @@ describe('expedition', () => {
     expect(day2.board).toEqual(day1.board);
     expect(day2.board).not.toBe(day1.board);
     expect(day2.teamRelicIds).toEqual(['filth-totem']);
-    expect(day2.scrap).toBe(DAILY_SCRAP);
+    // Accumulated idle scrap carries across days.
+    expect(day2.scrap).toBe(3);
   });
 
   it('ends the expedition after the final day and starts fresh', () => {
@@ -237,6 +241,23 @@ describe('expedition', () => {
     const res = buyUnit(s, 0);
     expect(res.ok).toBe(true);
     if (res.ok) expect(res.state.board.length).toBe(7);
+  });
+});
+
+describe('idle economy', () => {
+  it('interest is 10% floored and capped, never on a tiny bank', () => {
+    expect(interestFor(0)).toBe(0);
+    expect(interestFor(9)).toBe(0);
+    expect(interestFor(10)).toBe(1);
+    expect(interestFor(37)).toBe(3);
+    expect(interestFor(50)).toBe(INTEREST_CAP);
+    expect(interestFor(9999)).toBe(INTEREST_CAP);
+  });
+
+  it('an hourly ride earns scrap per depth plus interest', () => {
+    expect(rideIncome(0, 4)).toBe(4);
+    expect(rideIncome(30, 5)).toBe(5 + 3);
+    expect(rideIncome(100, 0)).toBe(INTEREST_CAP);
   });
 });
 

@@ -12,6 +12,8 @@
     newBuild,
     advanceAfterDawn,
     boardCapForDay,
+    rideIncome,
+    interestFor,
     SEASON_DAYS,
     buyUnit,
     canRecruit,
@@ -36,6 +38,8 @@
     loadPending,
     saveLastRide,
     loadLastRide,
+    saveLastIncomeHour,
+    loadLastIncomeHour,
     type LastRide,
   } from './persistence';
   import {
@@ -63,29 +67,38 @@
     return p[0] * 3600 + p[1] * 60 + p[2];
   }
 
-  function secondsUntilDawn(now: Date): number {
-    const d = 6 * 3600 - copenhagenSeconds(now);
-    return d <= 0 ? d + 86_400 : d;
-  }
-
   function formatCountdown(sec: number): string {
     const h = Math.floor(sec / 3600);
     const m = Math.floor((sec % 3600) / 60);
     const s = sec % 60;
-    return `${h}h ${String(m).padStart(2, '0')}m ${String(s).padStart(2, '0')}s`;
+    return h > 0
+      ? `${h}h ${String(m).padStart(2, '0')}m`
+      : `${m}m ${String(s).padStart(2, '0')}s`;
   }
 
-  // build.date is the target ride date — the next dawn this horde rides.
-  let build = $state<BuildState>(loadPending() ?? newBuild(addDay(currentRideDate()), 1));
+  const HOUR_MS = 3_600_000;
+  const OFFLINE_RIDE_CAP = 24; // credit at most a day of missed skirmishes at once
+
+  // build.date is the current expedition day's date; the horde rides its
+  // gauntlet every hour for scrap.
+  let build = $state<BuildState>(loadPending() ?? newBuild(currentRideDate(), 1));
   let lastRide = $state<LastRide | null>(loadLastRide());
+  let lastIncomeHour = $state<number>(loadLastIncomeHour() ?? Math.floor(Date.now() / HOUR_MS));
+  let awaySummary = $state<{ rides: number; scrap: number } | null>(null);
   let nowTick = $state(Date.now());
-  let practiceMode = $state(false);
   let speed = $state(1);
 
-  const targetDate = $derived(build.date);
-  const report = $derived(scoutReport(generateGauntlet(targetDate)));
-  const theme = $derived(generateGauntlet(targetDate).theme);
-  const countdownSec = $derived(secondsUntilDawn(new Date(nowTick)));
+  const currentGauntlet = $derived(generateGauntlet(build.date, build.day));
+  const report = $derived(scoutReport(currentGauntlet));
+  const theme = $derived(currentGauntlet.theme);
+  // Live outcome of the current horde on the current gauntlet — updates as
+  // you build, so you see your depth (and income) change in real time.
+  const currentOutcome = $derived(
+    build.board.length > 0 ? simulate(lineupFromBuild(build), currentGauntlet) : null
+  );
+  const currentDepth = $derived(currentOutcome ? currentOutcome.result.wavesCleared : 0);
+  const scrapPerHour = $derived(rideIncome(build.scrap, currentDepth));
+  const secondsToNextHour = $derived(3600 - (Math.floor(nowTick / 1000) % 3600));
   let telemetry = $state(telemetryEnabled());
   let pendingRelic = $state<number | null>(null);
   let inspect = $state<{ area: 'shop' | 'board'; index: number } | null>(null);
@@ -134,6 +147,9 @@
   let result: BattleResult | null = $state(null);
 
   onMount(() => {
+    // Persist the income clock on first ever load so offline hours accrue
+    // from here on (without this, each reload would reset the baseline).
+    if (loadLastIncomeHour() === null) saveLastIncomeHour(lastIncomeHour);
     const id = setInterval(() => (nowTick = Date.now()), 1000);
     void (async () => {
       player = new ReplayPlayer();
@@ -142,13 +158,16 @@
     return () => clearInterval(id);
   });
 
-  // When a dawn passes, the pending horde locks and rides its target
-  // gauntlet; the result is stored and a fresh horde is started for the
-  // next dawn. Runs on load and each tick, but only acts on a boundary.
+  // Idle heartbeat: advance the expedition day at each dawn (a difficulty
+  // step, reset after day 7), then credit the hourly skirmishes since the
+  // last visit. Runs on load and each tick, but only acts on a boundary.
   $effect(() => {
     void nowTick;
-    const today = currentRideDate(new Date(nowTick));
-    if (build.date <= today) {
+    const now = new Date(nowTick);
+
+    let advanced = false;
+    let guard = 0;
+    while (currentRideDate(now) > build.date && guard++ < 40) {
       const lineup = lineupFromBuild(build);
       if (lineup.units.length > 0) {
         const outcome = simulate(lineup, generateGauntlet(build.date, build.day));
@@ -157,7 +176,24 @@
         lastRide = ride;
         submitRun({ rideDate: build.date, lineup, result: outcome.result, dev: CHANNEL === 'dev' });
       }
-      build = advanceAfterDawn(build, addDay(today));
+      build = advanceAfterDawn(build, addDay(build.date));
+      advanced = true;
+    }
+
+    const nowHour = Math.floor(nowTick / HOUR_MS);
+    const elapsed = Math.min(nowHour - lastIncomeHour, OFFLINE_RIDE_CAP);
+    if (elapsed > 0) {
+      const depth = currentDepth;
+      let earned = 0;
+      for (let i = 0; i < elapsed; i++) earned += rideIncome(build.scrap + earned, depth);
+      lastIncomeHour = nowHour;
+      saveLastIncomeHour(nowHour);
+      if (earned > 0) {
+        build = { ...build, scrap: build.scrap + earned };
+        awaySummary = { rides: elapsed, scrap: earned };
+      }
+      saveBuild(build);
+    } else if (advanced) {
       saveBuild(build);
     }
   });
@@ -175,23 +211,31 @@
     saveBuild(build);
   }
 
-  // Dev: pretend the next dawn arrived — resolve the current horde now.
+  // Dev: advance one expedition day (a difficulty step; resets after day 7).
   function simulateDawn() {
     const lineup = lineupFromBuild(build);
-    if (lineup.units.length === 0) {
-      notice = 'recruit some rats first';
-      return;
+    if (lineup.units.length > 0) {
+      const outcome = simulate(lineup, generateGauntlet(build.date, build.day));
+      const ride: LastRide = { date: build.date, day: build.day, lineup, result: outcome.result };
+      saveLastRide(ride);
+      lastRide = ride;
+      submitRun({ rideDate: build.date, lineup, result: outcome.result, dev: true });
     }
-    const outcome = simulate(lineup, generateGauntlet(build.date, build.day));
-    const ride: LastRide = { date: build.date, day: build.day, lineup, result: outcome.result };
-    saveLastRide(ride);
-    lastRide = ride;
-    submitRun({ rideDate: build.date, lineup, result: outcome.result, dev: true });
     build = advanceAfterDawn(build, addDay(build.date));
     saveBuild(build);
     inspect = null;
     pendingRelic = null;
     notice = '';
+  }
+
+  // Dev: credit some hours of idle income without waiting.
+  function devSkipHours(h: number) {
+    const depth = currentDepth;
+    let earned = 0;
+    for (let i = 0; i < h; i++) earned += rideIncome(build.scrap + earned, depth);
+    build = { ...build, scrap: build.scrap + earned };
+    awaySummary = { rides: h, scrap: earned };
+    saveBuild(build);
   }
 
   function setSpeed(s: number) {
@@ -262,37 +306,20 @@
     apply(toggleFreeze(build, i));
   }
 
-  // Practice against today's already-revealed gauntlet — never tomorrow's
-  // (that stays a surprise until dawn). Doesn't count, isn't submitted.
-  async function practiceRide() {
-    if (!player || phase === 'riding') return;
-    if (build.board.length === 0) {
-      notice = 'recruit some rats first';
+  // Watch the current horde ride this hour's gauntlet (the same fight that
+  // earns idle scrap). Deterministic — just a look at what your horde does.
+  async function watchRide() {
+    if (!player || phase === 'riding' || !currentOutcome) {
+      if (build.board.length === 0) notice = 'recruit some rats first';
       return;
     }
     inspect = null;
     pendingRelic = null;
-    practiceMode = true;
     phase = 'riding';
     result = null;
     player.speed = speed;
-    const today = currentRideDate(new Date(nowTick));
-    const outcome = simulate(lineupFromBuild(build), generateGauntlet(today, build.day));
-    await player.play(outcome.events);
-    result = outcome.result;
-    phase = 'done';
-  }
-
-  async function watchLastDawn() {
-    if (!player || phase === 'riding' || !lastRide) return;
-    inspect = null;
-    practiceMode = false;
-    phase = 'riding';
-    result = null;
-    player.speed = speed;
-    const outcome = simulate(lastRide.lineup, generateGauntlet(lastRide.date, lastRide.day));
-    await player.play(outcome.events);
-    result = outcome.result;
+    await player.play(currentOutcome.events);
+    result = currentOutcome.result;
     phase = 'done';
   }
 
@@ -305,7 +332,7 @@
 <main>
   <h1>WE RIDE AT DAWN</h1>
   <p class="sub">
-    expedition day {build.day}/{SEASON_DAYS} · building for the dawn of {targetDate}{CHANNEL === 'dev'
+    expedition day {build.day}/{SEASON_DAYS} · the horde rides hourly{CHANNEL === 'dev'
       ? ' · dev build'
       : ''}
   </p>
@@ -313,10 +340,11 @@
   {#if CHANNEL === 'dev'}
   <div class="dev">
     <span class="panel-label">testing</span>
-    <button onclick={simulateDawn}>⏭ simulate dawn</button>
+    <button onclick={() => devSkipHours(6)}>⏩ +6h income</button>
+    <button onclick={simulateDawn}>⏭ next day</button>
     <button onclick={freshBuild}>fresh build</button>
     <button onclick={addScrap}>+10 scrap</button>
-    <span class="dev-theme">tomorrow: {theme.primary} + {theme.secondary} @ wave {theme.pivotWave}</span>
+    <span class="dev-theme">theme: {theme.primary} + {theme.secondary} @ wave {theme.pivotWave}</span>
     <span class="dev-sep">·</span>
     {#each [1, 2, 4] as s}
       <button class:active={speed === s} onclick={() => setSpeed(s)}>{s}×</button>
@@ -326,7 +354,7 @@
   {/if}
 
   <div class="scout">
-    <div class="panel-label">scout report — tomorrow's gauntlet</div>
+    <div class="panel-label">the drains right now — what your horde fights</div>
     <p class="scout-flavor">&ldquo;{report.flavor}&rdquo;</p>
     <div class="chips">
       {#each report.hints as hint}
@@ -448,36 +476,31 @@
     {#if phase !== 'idle'}
       {#if result}
         <p class="result">
-          {practiceMode ? 'Practice — ' : 'Dawn ride — '}
-          depth <strong>wave {result.wavesCleared}</strong>
-          &middot; score <strong>{result.score}</strong>
+          Your horde rode to depth <strong>wave {result.wavesCleared}</strong>
           &middot; {result.survivors.length > 0
             ? `${result.survivors.length} rats crawled home`
-            : 'the horde was wiped out'}
+            : 'wiped out at the end'}
         </p>
       {/if}
       <button class="ride" onclick={backToWarren} disabled={phase === 'riding'}>
         {phase === 'riding' ? 'Riding…' : '← back to the warren'}
       </button>
     {:else}
-      <div class="muster">
-        <p class="muster-line">
-          Your horde is mustered — it rides at the next dawn (<strong>06:00 CET</strong>) and carries on
-          through the {SEASON_DAYS}-day expedition.
-        </p>
-        <p class="countdown">next ride in {formatCountdown(countdownSec)}</p>
-        <button class="practice" onclick={practiceRide}>practice ride · doesn't count</button>
-      </div>
-
-      {#if lastRide}
-        <div class="lastdawn">
-          <div class="panel-label">last dawn ride · {lastRide.date}</div>
-          <p class="lastdawn-line">
-            rode to <strong>wave {lastRide.result.wavesCleared}</strong> · score {lastRide.result.score}
-          </p>
-          <button class="watch" onclick={watchLastDawn}>watch the replay</button>
+      <div class="idle">
+        <p class="muster-line">Your horde rides the drains <strong>every hour</strong>, hauling back scrap by how deep it pushes.</p>
+        <div class="idle-stats">
+          <div class="stat"><span class="stat-big">{currentDepth}</span><span class="stat-lbl">depth now</span></div>
+          <div class="stat"><span class="stat-big">+{scrapPerHour}</span><span class="stat-lbl">scrap / hour</span></div>
+          <div class="stat"><span class="stat-big">{formatCountdown(secondsToNextHour)}</span><span class="stat-lbl">next ride</span></div>
         </div>
-      {/if}
+        <p class="idle-note">
+          {currentDepth} depth + {interestFor(build.scrap)} interest each hour · difficulty rises every dawn
+        </p>
+        <button class="watch" onclick={watchRide}>watch the ride</button>
+        {#if awaySummary}
+          <p class="away">While you were away: {awaySummary.rides} rides · <strong>+{awaySummary.scrap} scrap</strong>.</p>
+        {/if}
+      </div>
     {/if}
   </div>
 
@@ -1011,46 +1034,58 @@
     display: none;
   }
 
-  .muster {
+  .idle {
     text-align: center;
     padding: 6px 0 2px;
   }
 
   .muster-line {
-    margin: 0 0 6px;
+    margin: 0 0 14px;
     font-size: 15px;
     color: var(--ink);
   }
 
-  .countdown {
-    margin: 0 0 14px;
-    font-size: 22px;
-    letter-spacing: 1px;
+  .idle-stats {
+    display: flex;
+    justify-content: center;
+    gap: 14px;
+    margin-bottom: 10px;
+  }
+
+  .stat {
+    display: flex;
+    flex-direction: column;
+    min-width: 96px;
+    padding: 10px 6px;
+    background: #1d1713;
+    border: 1px solid #322820;
+    border-radius: 8px;
+  }
+
+  .stat-big {
+    font-size: 24px;
     color: var(--accent);
     font-variant-numeric: tabular-nums;
   }
 
-  .practice {
-    padding: 8px 18px;
-    font-family: inherit;
-    font-size: 13px;
-    color: var(--ink);
-    background: #241a14;
-    border: 1px solid #4a3520;
-    border-radius: 6px;
-    cursor: pointer;
+  .stat-lbl {
+    font-size: 12px;
+    color: var(--ink-dim);
+    margin-top: 2px;
   }
 
-  .lastdawn {
-    margin-top: 16px;
-    padding-top: 14px;
+  .idle-note {
+    margin: 0 0 14px;
+    font-size: 12px;
+    color: var(--ink-dim);
+  }
+
+  .away {
+    margin: 14px 0 0;
+    padding-top: 12px;
     border-top: 1px solid #2a221a;
-    text-align: center;
-  }
-
-  .lastdawn-line {
-    margin: 5px 0 10px;
-    font-size: 15px;
+    font-size: 14px;
+    color: #c9b891;
   }
 
   .watch {

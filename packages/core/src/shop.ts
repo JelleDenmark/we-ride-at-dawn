@@ -11,6 +11,22 @@ export const SHOP_RELIC_SLOTS = 2;
 export const MAX_TIER = 3;
 export const SEASON_DAYS = 7;
 
+// Idle economy: the horde skirmishes hourly, earning scrap by depth plus
+// TFT-style interest (10% of held scrap, capped) — the cap is what keeps
+// the bank from snowballing out of reach.
+export const SCRAP_PER_DEPTH = 1;
+export const INTEREST_RATE = 0.1;
+export const INTEREST_CAP = 5;
+
+export function interestFor(scrap: number): number {
+  return Math.min(INTEREST_CAP, Math.floor(scrap * INTEREST_RATE));
+}
+
+/** Scrap earned by one hourly skirmish: depth cleared + interest on the bank. */
+export function rideIncome(scrap: number, depth: number): number {
+  return depth * SCRAP_PER_DEPTH + interestFor(scrap);
+}
+
 /** Buildable board size grows over the expedition: 5,5,6,6,7,7,8 (day 1–7). */
 export function boardCapForDay(day: number): number {
   return Math.min(BOARD_CAP, 4 + Math.ceil(day / 2));
@@ -81,6 +97,8 @@ export function advanceAfterDawn(build: BuildState, nextDate: string): BuildStat
   const next = newBuild(nextDate, build.day + 1);
   next.board = build.board.map((u) => ({ ...u, relicIds: [...u.relicIds] }));
   next.teamRelicIds = [...build.teamRelicIds];
+  // Scrap is accumulated idle income — it carries across days, not reset.
+  next.scrap = build.scrap;
   return next;
 }
 
