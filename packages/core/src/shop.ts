@@ -28,6 +28,20 @@ export function boardCapForDay(day: number): number {
   return Math.min(BOARD_CAP, 4 + Math.ceil(day / 2));
 }
 
+// Synchronized seasons: a week runs Monday→Sunday, so the expedition day
+// (1–7) is the ISO weekday of the ride-date, and the season id is the
+// Monday that starts that week. Everyone shares the same clock.
+export function weekdayFor(date: string): number {
+  const d = new Date(`${date}T12:00:00Z`).getUTCDay(); // 0=Sun … 6=Sat
+  return d === 0 ? 7 : d; // 1=Mon … 7=Sun
+}
+
+export function seasonIdFor(date: string): string {
+  const monday = new Date(`${date}T12:00:00Z`);
+  monday.setUTCDate(monday.getUTCDate() - (weekdayFor(date) - 1));
+  return monday.toISOString().slice(0, 10);
+}
+
 export type ShopSlot =
   | { kind: 'unit'; defId: string }
   | { kind: 'relic'; relicId: string }
@@ -41,7 +55,9 @@ export interface BoardUnit {
 
 export interface BuildState {
   date: string;
-  /** Expedition day, 1..SEASON_DAYS. */
+  /** Monday of the week this build belongs to (synchronized season id). */
+  seasonId: string;
+  /** Expedition day, 1..SEASON_DAYS (= ISO weekday of `date`). */
   day: number;
   scrap: number;
   board: BoardUnit[];
@@ -75,6 +91,7 @@ export function newBuild(date: string, day = 1): BuildState {
   const slots = rollOfferings(date, 0);
   return {
     date,
+    seasonId: seasonIdFor(date),
     day,
     scrap: DAILY_SCRAP,
     board: [],

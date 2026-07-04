@@ -12,6 +12,8 @@ import {
   boardCapForDay,
   SEASON_DAYS,
   interestFor,
+  weekdayFor,
+  seasonIdFor,
   INTEREST_CAP,
   DAILY_SCRAP,
   REROLL_COST,
@@ -240,6 +242,32 @@ describe('expedition', () => {
     const res = buyUnit(s, 0);
     expect(res.ok).toBe(true);
     if (res.ok) expect(res.state.board.length).toBe(7);
+  });
+});
+
+describe('synchronized seasons', () => {
+  const addDays = (date: string, n: number) =>
+    new Date(Date.parse(`${date}T12:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+
+  it('seasonId is always the Monday of that date’s week', () => {
+    for (let i = 0; i < 21; i++) {
+      const d = addDays('2026-07-01', i);
+      expect(weekdayFor(seasonIdFor(d))).toBe(1);
+    }
+  });
+
+  it('a Mon–Sun run shares one season; the next Monday starts a new one', () => {
+    const monday = seasonIdFor('2026-07-01');
+    expect(weekdayFor(monday)).toBe(1);
+    const week = Array.from({ length: 7 }, (_, i) => addDays(monday, i));
+    expect(new Set(week.map(seasonIdFor)).size).toBe(1);
+    expect(week.map(weekdayFor)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(seasonIdFor(addDays(monday, 7))).not.toBe(monday);
+  });
+
+  it('newBuild tags the build with the right season', () => {
+    const b = newBuild('2026-07-01', 3);
+    expect(b.seasonId).toBe(seasonIdFor('2026-07-01'));
   });
 });
 

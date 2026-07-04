@@ -26,6 +26,8 @@ export {
   newBuild,
   advanceAfterDawn,
   boardCapForDay,
+  weekdayFor,
+  seasonIdFor,
   interestFor,
   SEASON_DAYS,
   SCRAP_PER_DEPTH,

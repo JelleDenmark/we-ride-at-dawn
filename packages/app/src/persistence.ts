@@ -65,3 +65,23 @@ export function loadLastIncomeHour(): number | null {
     return null;
   }
 }
+
+/** Best depth reached this season (headline leaderboard score). */
+export function saveSeasonBest(seasonId: string, best: number): void {
+  try {
+    localStorage.setItem(`${NS}:best`, JSON.stringify({ seasonId, best }));
+  } catch {
+    // Non-fatal.
+  }
+}
+
+export function loadSeasonBest(seasonId: string): number {
+  try {
+    const raw = localStorage.getItem(`${NS}:best`);
+    if (!raw) return 0;
+    const v = JSON.parse(raw) as { seasonId: string; best: number };
+    return v.seasonId === seasonId ? v.best : 0;
+  } catch {
+    return 0;
+  }
+}

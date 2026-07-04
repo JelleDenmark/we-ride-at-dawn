@@ -12,6 +12,8 @@
     newBuild,
     advanceAfterDawn,
     boardCapForDay,
+    weekdayFor,
+    seasonIdFor,
     interestFor,
     SCRAP_PER_DEPTH,
     SEASON_DAYS,
@@ -40,6 +42,8 @@
     loadLastRide,
     saveLastIncomeHour,
     loadLastIncomeHour,
+    saveSeasonBest,
+    loadSeasonBest,
     type LastRide,
   } from './persistence';
   import {
@@ -80,8 +84,12 @@
   const OFFLINE_RIDE_CAP = 24; // credit at most a day of missed skirmishes at once
 
   // build.date is the current expedition day's date; the horde rides its
-  // gauntlet every hour for scrap.
-  let build = $state<BuildState>(loadPending() ?? newBuild(currentRideDate(), 1));
+  // gauntlet every hour for scrap. Day is the ISO weekday (synchronized:
+  // everyone shares a Monday→Sunday week).
+  let build = $state<BuildState>(
+    loadPending() ?? newBuild(currentRideDate(), weekdayFor(currentRideDate()))
+  );
+  let seasonBest = $state(loadSeasonBest(seasonIdFor(currentRideDate())));
   let lastRide = $state<LastRide | null>(loadLastRide());
   let lastIncomeHour = $state<number>(loadLastIncomeHour() ?? Math.floor(Date.now() / HOUR_MS));
   let awaySummary = $state<{ rides: number; scrap: number } | null>(null);
@@ -164,24 +172,37 @@
   $effect(() => {
     void nowTick;
     const now = new Date(nowTick);
+    const today = currentRideDate(now);
+    const season = seasonIdFor(today);
 
     let advanced = false;
-    let guard = 0;
-    while (currentRideDate(now) > build.date && guard++ < 40) {
-      const lineup = lineupFromBuild(build);
-      if (lineup.units.length > 0) {
-        const outcome = simulate(lineup, generateGauntlet(build.date, build.day));
-        const ride: LastRide = { date: build.date, day: build.day, lineup, result: outcome.result };
-        saveLastRide(ride);
-        lastRide = ride;
-        submitRun({ rideDate: build.date, lineup, result: outcome.result, dev: CHANNEL === 'dev' });
-      }
-      // Interest is paid once per day, at dawn, on the bank you held — except
-      // on the day the expedition resets (advanceAfterDawn wipes scrap then).
-      const dawnInterest = build.day >= SEASON_DAYS ? 0 : interestFor(build.scrap);
-      build = advanceAfterDawn(build, addDay(build.date));
-      if (dawnInterest > 0) build = { ...build, scrap: build.scrap + dawnInterest };
+
+    if (!build.seasonId || build.seasonId < season) {
+      // A new week (or a stale/legacy build): everyone resets Monday, and a
+      // mid-week joiner starts cold at the current day's difficulty. (A build
+      // that's *ahead* — dev fast-forward — is left alone.)
+      build = newBuild(today, weekdayFor(today));
+      saveBuild(build);
+      lastIncomeHour = Math.floor(nowTick / HOUR_MS);
+      saveLastIncomeHour(lastIncomeHour);
       advanced = true;
+    } else {
+      // Same week: carry the horde forward one dawn per day elapsed.
+      let guard = 0;
+      while (currentRideDate(now) > build.date && guard++ < 40) {
+        const lineup = lineupFromBuild(build);
+        if (lineup.units.length > 0) {
+          const outcome = simulate(lineup, generateGauntlet(build.date, build.day));
+          const ride: LastRide = { date: build.date, day: build.day, lineup, result: outcome.result };
+          saveLastRide(ride);
+          lastRide = ride;
+          submitRun({ rideDate: build.date, lineup, result: outcome.result, dev: CHANNEL === 'dev' });
+        }
+        const dawnInterest = interestFor(build.scrap);
+        build = advanceAfterDawn(build, addDay(build.date));
+        if (dawnInterest > 0) build = { ...build, scrap: build.scrap + dawnInterest };
+        advanced = true;
+      }
     }
 
     const nowHour = Math.floor(nowTick / HOUR_MS);
@@ -200,8 +221,23 @@
     }
   });
 
+  // Track the deepest ride this week — the headline leaderboard score.
+  // Resetting whenever the season id changes (real rollover or dev jump).
+  let bestSeasonId = $state(build.seasonId);
+  $effect(() => {
+    if (build.seasonId !== bestSeasonId) {
+      bestSeasonId = build.seasonId;
+      seasonBest = 0;
+      saveSeasonBest(build.seasonId, 0);
+    }
+    if (currentDepth > seasonBest) {
+      seasonBest = currentDepth;
+      saveSeasonBest(build.seasonId, seasonBest);
+    }
+  });
+
   function freshBuild() {
-    build = newBuild(build.date);
+    build = newBuild(build.date, build.day);
     saveBuild(build);
     inspect = null;
     pendingRelic = null;
@@ -334,7 +370,7 @@
 <main>
   <h1>WE RIDE AT DAWN</h1>
   <p class="sub">
-    expedition day {build.day}/{SEASON_DAYS} · the horde rides hourly{CHANNEL === 'dev'
+    week of {build.seasonId} · day {build.day}/{SEASON_DAYS} · rides hourly{CHANNEL === 'dev'
       ? ' · dev build'
       : ''}
   </p>
@@ -499,6 +535,7 @@
           {currentDepth}/hr from depth · +{interestFor(build.scrap)} interest banked each dawn · harder every dawn
         </p>
         <button class="watch" onclick={watchRide}>watch the ride</button>
+        <p class="season-best">deepest ride this week: <strong>wave {Math.max(seasonBest, currentDepth)}</strong> · resets Monday</p>
         {#if awaySummary}
           <p class="away">While you were away: {awaySummary.rides} rides · <strong>+{awaySummary.scrap} scrap</strong>.</p>
         {/if}
@@ -1080,6 +1117,12 @@
     margin: 0 0 14px;
     font-size: 12px;
     color: var(--ink-dim);
+  }
+
+  .season-best {
+    margin: 12px 0 0;
+    font-size: 14px;
+    color: #d4af37;
   }
 
   .away {
