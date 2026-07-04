@@ -4,27 +4,23 @@ import { UNIT_DEFS, type Lineup } from './data/units';
 import { RELIC_DEFS } from './data/relics';
 import { BOARD_CAP } from './sim';
 
-export const DAILY_SCRAP = 12;
+export const DAILY_SCRAP = 24;
 export const REROLL_COST = 1;
 export const SHOP_UNIT_SLOTS = 4;
 export const SHOP_RELIC_SLOTS = 2;
 export const MAX_TIER = 3;
 export const SEASON_DAYS = 7;
 
-// Idle economy: the horde skirmishes hourly, earning scrap by depth plus
-// TFT-style interest (10% of held scrap, capped) — the cap is what keeps
-// the bank from snowballing out of reach.
+// Idle economy: the horde skirmishes hourly, earning SCRAP_PER_DEPTH per wave
+// cleared. Interest (TFT-style, 5% of the bank, capped) is paid once per DAY
+// at dawn, not per hour — the daily cadence + cap keep the bank from
+// snowballing over the hundreds of hours in an expedition.
 export const SCRAP_PER_DEPTH = 1;
-export const INTEREST_RATE = 0.1;
+export const INTEREST_RATE = 0.05;
 export const INTEREST_CAP = 5;
 
 export function interestFor(scrap: number): number {
   return Math.min(INTEREST_CAP, Math.floor(scrap * INTEREST_RATE));
-}
-
-/** Scrap earned by one hourly skirmish: depth cleared + interest on the bank. */
-export function rideIncome(scrap: number, depth: number): number {
-  return depth * SCRAP_PER_DEPTH + interestFor(scrap);
 }
 
 /** Buildable board size grows over the expedition: 5,5,6,6,7,7,8 (day 1–7). */

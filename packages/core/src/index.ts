@@ -27,7 +27,6 @@ export {
   advanceAfterDawn,
   boardCapForDay,
   interestFor,
-  rideIncome,
   SEASON_DAYS,
   SCRAP_PER_DEPTH,
   INTEREST_CAP,

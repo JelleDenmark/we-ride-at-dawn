@@ -12,7 +12,6 @@ import {
   boardCapForDay,
   SEASON_DAYS,
   interestFor,
-  rideIncome,
   INTEREST_CAP,
   DAILY_SCRAP,
   REROLL_COST,
@@ -104,7 +103,7 @@ describe('shop basics', () => {
       ],
     };
     const afterDire = must(sellUnit(s, 0)).state;
-    expect(afterDire.scrap).toBe(DAILY_SCRAP + 2);
+    expect(afterDire.scrap).toBe(DAILY_SCRAP + 4);
     expect(afterDire.board).toHaveLength(1);
     const afterRunt = must(sellUnit(s, 1)).state;
     expect(afterRunt.scrap).toBe(DAILY_SCRAP + 2);
@@ -245,19 +244,13 @@ describe('expedition', () => {
 });
 
 describe('idle economy', () => {
-  it('interest is 10% floored and capped, never on a tiny bank', () => {
+  it('interest is 5% floored and capped, never on a tiny bank', () => {
     expect(interestFor(0)).toBe(0);
-    expect(interestFor(9)).toBe(0);
-    expect(interestFor(10)).toBe(1);
-    expect(interestFor(37)).toBe(3);
-    expect(interestFor(50)).toBe(INTEREST_CAP);
+    expect(interestFor(19)).toBe(0);
+    expect(interestFor(20)).toBe(1);
+    expect(interestFor(74)).toBe(3);
+    expect(interestFor(100)).toBe(INTEREST_CAP);
     expect(interestFor(9999)).toBe(INTEREST_CAP);
-  });
-
-  it('an hourly ride earns scrap per depth plus interest', () => {
-    expect(rideIncome(0, 4)).toBe(4);
-    expect(rideIncome(30, 5)).toBe(5 + 3);
-    expect(rideIncome(100, 0)).toBe(INTEREST_CAP);
   });
 });
 

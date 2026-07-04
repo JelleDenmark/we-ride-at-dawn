@@ -63,7 +63,7 @@ const STRATEGIES: Record<string, Lineup> = {
 
 for (const [name, lineup] of Object.entries(STRATEGIES)) {
   const cost = lineup.units.reduce((s, u) => s + UNIT_DEFS[u.defId].cost, 0);
-  if (cost > 12) throw new Error(`${name} costs ${cost} > 12 scrap`);
+  if (cost > 24) throw new Error(`${name} costs ${cost} > 24 scrap`);
 }
 
 const dates: string[] = [];

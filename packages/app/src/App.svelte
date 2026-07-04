@@ -12,8 +12,8 @@
     newBuild,
     advanceAfterDawn,
     boardCapForDay,
-    rideIncome,
     interestFor,
+    SCRAP_PER_DEPTH,
     SEASON_DAYS,
     buyUnit,
     canRecruit,
@@ -97,7 +97,7 @@
     build.board.length > 0 ? simulate(lineupFromBuild(build), currentGauntlet) : null
   );
   const currentDepth = $derived(currentOutcome ? currentOutcome.result.wavesCleared : 0);
-  const scrapPerHour = $derived(rideIncome(build.scrap, currentDepth));
+  const scrapPerHour = $derived(currentDepth * SCRAP_PER_DEPTH);
   const secondsToNextHour = $derived(3600 - (Math.floor(nowTick / 1000) % 3600));
   let telemetry = $state(telemetryEnabled());
   let pendingRelic = $state<number | null>(null);
@@ -176,16 +176,18 @@
         lastRide = ride;
         submitRun({ rideDate: build.date, lineup, result: outcome.result, dev: CHANNEL === 'dev' });
       }
+      // Interest is paid once per day, at dawn, on the bank you held — except
+      // on the day the expedition resets (advanceAfterDawn wipes scrap then).
+      const dawnInterest = build.day >= SEASON_DAYS ? 0 : interestFor(build.scrap);
       build = advanceAfterDawn(build, addDay(build.date));
+      if (dawnInterest > 0) build = { ...build, scrap: build.scrap + dawnInterest };
       advanced = true;
     }
 
     const nowHour = Math.floor(nowTick / HOUR_MS);
     const elapsed = Math.min(nowHour - lastIncomeHour, OFFLINE_RIDE_CAP);
     if (elapsed > 0) {
-      const depth = currentDepth;
-      let earned = 0;
-      for (let i = 0; i < elapsed; i++) earned += rideIncome(build.scrap + earned, depth);
+      const earned = elapsed * currentDepth * SCRAP_PER_DEPTH;
       lastIncomeHour = nowHour;
       saveLastIncomeHour(nowHour);
       if (earned > 0) {
@@ -221,18 +223,18 @@
       lastRide = ride;
       submitRun({ rideDate: build.date, lineup, result: outcome.result, dev: true });
     }
+    const dawnInterest = build.day >= SEASON_DAYS ? 0 : interestFor(build.scrap);
     build = advanceAfterDawn(build, addDay(build.date));
+    if (dawnInterest > 0) build = { ...build, scrap: build.scrap + dawnInterest };
     saveBuild(build);
     inspect = null;
     pendingRelic = null;
     notice = '';
   }
 
-  // Dev: credit some hours of idle income without waiting.
+  // Dev: credit some hours of idle depth income without waiting.
   function devSkipHours(h: number) {
-    const depth = currentDepth;
-    let earned = 0;
-    for (let i = 0; i < h; i++) earned += rideIncome(build.scrap + earned, depth);
+    const earned = h * currentDepth * SCRAP_PER_DEPTH;
     build = { ...build, scrap: build.scrap + earned };
     awaySummary = { rides: h, scrap: earned };
     saveBuild(build);
@@ -494,7 +496,7 @@
           <div class="stat"><span class="stat-big">{formatCountdown(secondsToNextHour)}</span><span class="stat-lbl">next ride</span></div>
         </div>
         <p class="idle-note">
-          {currentDepth} depth + {interestFor(build.scrap)} interest each hour · difficulty rises every dawn
+          {currentDepth}/hr from depth · +{interestFor(build.scrap)} interest banked each dawn · harder every dawn
         </p>
         <button class="watch" onclick={watchRide}>watch the ride</button>
         {#if awaySummary}
