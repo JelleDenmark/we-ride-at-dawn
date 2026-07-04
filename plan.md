@@ -76,7 +76,11 @@ One repo, one GitHub Pages site, two channels:
 
 The deploy workflow builds both branches on every push to either and assembles prod at the site root with dev under `/dev/`. Channel is baked at build time via `VITE_CHANNEL` (anything not `prod` — including local `npm run dev` — behaves as dev). Flow: changes land on `dev` → tested at the /dev/ URL → merged to `master` for players. A scheduled keep-alive workflow pings Supabase twice weekly so the free-tier project never pauses.
 
-## 2.6 Expedition model — the core loop (designed 2026-07-04)
+## 2.6 Expedition model — the core loop (designed 2026-07-04, v1 built on dev 2026-07-04)
+
+**Built (v1, dev):** horde persists across a 7-day expedition (`advanceAfterDawn` carries roster/tiers/relics with a fresh shop + scrap each dawn); board cap grows 5→8 (`boardCapForDay`); gauntlet difficulty scales with the day (`difficultyForDay`, theme unchanged); after day 7 a fresh expedition begins. **Deviation from below:** currently a *rolling personal* expedition (day 1 = whenever you start), not synchronized weekly — chosen because there's no leaderboard yet and it lets a solo tester feel the whole arc. Switch to synchronized weeks when the leaderboard lands. **Not yet:** weekly leaderboard, expedition-complete summary screen, tuning of the difficulty/cap/scrap curves.
+
+
 
 A day is the atom; a **week-long expedition** is the molecule. Same shop/scout/ride mechanics as a single day, plus three things layered on top: the horde **persists**, the board cap **grows**, and the gauntlet **escalates** across the seven days. This reconciles the two pillars that fight in a single day — each day stays *starving* (small scrap stipend, hard choices) while the *army* compounds into the deep, unique horde the "a lot of rats" pillar promises.
 
