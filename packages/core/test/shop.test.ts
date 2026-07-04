@@ -155,6 +155,31 @@ describe('relics in the shop', () => {
     const team = must(buyRelic(s, 1)).state;
     expect(team.teamRelicIds).toEqual(['filth-totem']);
   });
+
+  it('one of each: a rat cannot carry the same relic twice, nor the team', () => {
+    const base = newBuild('2026-07-03');
+    const s = {
+      ...base,
+      board: [
+        { defId: 'dire-rat', tier: 1, relicIds: ['rusted-nail'] },
+        { defId: 'gnawer', tier: 1, relicIds: [] },
+      ],
+      teamRelicIds: ['filth-totem'],
+      shop: {
+        ...base.shop,
+        slots: [
+          { kind: 'relic' as const, relicId: 'rusted-nail' },
+          { kind: 'relic' as const, relicId: 'filth-totem' },
+          ...base.shop.slots.slice(2),
+        ],
+      },
+    };
+    // Duplicate on the same rat: rejected; a different rat: fine.
+    expect(buyRelic(s, 0, 0).ok).toBe(false);
+    expect(buyRelic(s, 0, 1).ok).toBe(true);
+    // Duplicate team relic: rejected.
+    expect(buyRelic(s, 1).ok).toBe(false);
+  });
 });
 
 describe('combining', () => {
@@ -177,6 +202,25 @@ describe('combining', () => {
     expect(after.board).toHaveLength(2);
     const merged = after.board.find((u) => u.defId === 'gutter-runt')!;
     expect(merged.tier).toBe(2);
+    expect(merged.relicIds.sort()).toEqual(['rusted-nail', 'tail-charm']);
+  });
+
+  it('merging collapses duplicate relics across the three copies', () => {
+    const base = newBuild('2026-07-03');
+    const s = {
+      ...base,
+      scrap: 20,
+      board: [
+        { defId: 'gutter-runt', tier: 1, relicIds: ['rusted-nail'] },
+        { defId: 'gutter-runt', tier: 1, relicIds: ['rusted-nail', 'tail-charm'] },
+      ],
+      shop: {
+        ...base.shop,
+        slots: [{ kind: 'unit' as const, defId: 'gutter-runt' }, ...base.shop.slots.slice(1)],
+      },
+    };
+    const after = must(buyUnit(s, 0)).state;
+    const merged = after.board.find((u) => u.defId === 'gutter-runt')!;
     expect(merged.relicIds.sort()).toEqual(['rusted-nail', 'tail-charm']);
   });
 });

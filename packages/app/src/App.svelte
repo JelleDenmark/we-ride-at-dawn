@@ -561,7 +561,7 @@
           >
             <span class="tile-name">{relic.name}</span>
             <span class="tile-sub">{relic.desc}</span>
-            <span class="tile-cost">⚙ {relic.cost}</span>
+            <span class="tile-cost">⚙ {relic.cost} · {relic.scope === 'team' ? 'whole team' : 'one rat'}</span>
             <span
               class="freeze"
               role="button"
@@ -588,7 +588,7 @@
     {#if phase !== 'idle'}
       {#if result}
         <p class="result">
-          Your horde rode to depth <strong>wave {result.wavesCleared}</strong>
+          Your horde rode to <strong>wave {result.wavesCleared}</strong>
           &middot; {result.survivors.length > 0
             ? `${result.survivors.length} rats crawled home`
             : 'wiped out at the end'}
@@ -670,6 +670,7 @@
             {@const def = UNIT_DEFS[slot.defId]}
             {@const afford = build.scrap >= def.cost}
             {@const recruitable = canRecruit(build, ins.index)}
+            {@const copies = build.board.filter((u) => u.defId === def.id && u.tier === 1).length}
             <div class="card-head">
               {#if ART_URL[def.id]}<img class="card-portrait" src={ART_URL[def.id]} alt="" />{/if}
               <div>
@@ -681,6 +682,7 @@
               </div>
             </div>
             <p class="card-ability">{abilitySentence(def.id)}</p>
+            <p class="card-hint">recruit three of a kind and they merge into one stronger ★ rat</p>
             <div class="card-actions">
               <button class="primary" disabled={!recruitable} onclick={() => recruitFromCard(ins.index)}>
                 Recruit · ⚙ {def.cost}
@@ -689,10 +691,11 @@
             </div>
             {#if !afford}<div class="card-warn">not enough scrap</div>
             {:else if !recruitable}<div class="card-warn">the warren is full</div>
-            {:else if build.board.length >= 5}<div class="card-warn">buying will merge three into one</div>{/if}
+            {:else if copies >= 2}<div class="card-note">third of a kind — this buy merges them into a ★2</div>{/if}
           {:else if slot.kind === 'relic'}
             {@const relic = RELIC_DEFS[slot.relicId]}
             {@const afford = build.scrap >= relic.cost}
+            {@const owned = relic.scope === 'team' && build.teamRelicIds.includes(relic.id)}
             <div class="card-head">
               <div class="card-relic-icon">✦</div>
               <div>
@@ -701,13 +704,15 @@
               </div>
             </div>
             <p class="card-ability">{relic.desc}.</p>
+            <p class="card-hint">one of each per {relic.scope === 'team' ? 'horde' : 'rat'} — no stacking duplicates</p>
             <div class="card-actions">
-              <button class="primary" disabled={!afford} onclick={() => pinRelicFromCard(ins.index)}>
+              <button class="primary" disabled={!afford || owned} onclick={() => pinRelicFromCard(ins.index)}>
                 {relic.scope === 'team' ? 'Add' : 'Pin'} · ⚙ {relic.cost}
               </button>
               <button onclick={() => (inspect = null)}>close</button>
             </div>
-            {#if !afford}<div class="card-warn">not enough scrap</div>{/if}
+            {#if owned}<div class="card-warn">the horde already carries one</div>
+            {:else if !afford}<div class="card-warn">not enough scrap</div>{/if}
           {/if}
         {:else}
           {@const unit = build.board[ins.index]}
@@ -1189,6 +1194,18 @@
     margin-top: 8px;
     font-size: 12px;
     color: #d8452e;
+  }
+
+  .card-hint {
+    margin: 2px 0 0;
+    font-size: 12px;
+    color: var(--ink-dim);
+  }
+
+  .card-note {
+    margin-top: 8px;
+    font-size: 12px;
+    color: #d4af37;
   }
 
   .team-relics {

@@ -31,7 +31,7 @@ export const RELIC_DEFS: Record<string, RelicDef> = {
   },
   'fat-tick': {
     id: 'fat-tick', name: 'Fat Tick', scope: 'unit', cost: 6,
-    desc: '+1/+2, heals 1 each tick', attack: 1, health: 2, healPerTick: 1,
+    desc: '+1/+2, heals 1 every clash', attack: 1, health: 2, healPerTick: 1,
   },
   'tail-charm': {
     id: 'tail-charm', name: 'Tail-Charm', scope: 'unit', cost: 6,

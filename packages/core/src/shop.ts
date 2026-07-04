@@ -132,7 +132,11 @@ function combineAll(state: BuildState): void {
       if (matches.length < 3) continue;
       const [first, second, third] = matches;
       first.b.tier += 1;
-      first.b.relicIds = [...first.b.relicIds, ...second.b.relicIds, ...third.b.relicIds];
+      // Merged veterans pool their trinkets, but the one-of-each rule holds:
+      // duplicates across the three copies collapse into a single relic.
+      first.b.relicIds = [
+        ...new Set([...first.b.relicIds, ...second.b.relicIds, ...third.b.relicIds]),
+      ];
       state.board.splice(third.idx, 1);
       state.board.splice(second.idx, 1);
       merged = true;
@@ -171,6 +175,15 @@ export function buyRelic(state: BuildState, slotIndex: number, targetIndex?: num
   if (state.scrap < relic.cost) return fail('not enough scrap');
   if (relic.scope === 'unit' && (targetIndex === undefined || !state.board[targetIndex])) {
     return fail('pick a rat to carry it');
+  }
+  // One of each trinket per carrier: duplicate stacking is either degenerate
+  // (Rusted Nail forever) or a silent no-op (a second Tail-Charm), so both
+  // are rejected outright rather than sold as traps.
+  if (relic.scope === 'unit' && state.board[targetIndex!].relicIds.includes(relic.id)) {
+    return fail('that rat already carries one');
+  }
+  if (relic.scope === 'team' && state.teamRelicIds.includes(relic.id)) {
+    return fail('the horde already carries one');
   }
   const s = clone(state);
   s.scrap -= relic.cost;
