@@ -28,7 +28,13 @@
   import { ReplayPlayer } from './replay/ReplayPlayer';
   import { CHANNEL } from './env';
   import { ART_URL } from './art';
-  import { loadBuild, saveBuild } from './persistence';
+  import {
+    savePending as saveBuild,
+    loadPending,
+    saveLastRide,
+    loadLastRide,
+    type LastRide,
+  } from './persistence';
   import {
     submitRun,
     telemetryConfigured,
@@ -36,16 +42,47 @@
     setTelemetryEnabled,
   } from './telemetry';
 
-  let selectedDate = $state(currentRideDate());
-  const seed = $derived(dailySeed(selectedDate));
-  const tomorrow = $derived(
-    new Date(Date.parse(`${selectedDate}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10)
-  );
-  const report = $derived(scoutReport(generateGauntlet(tomorrow)));
-  const theme = $derived(generateGauntlet(selectedDate).theme);
+  function addDay(date: string): string {
+    return new Date(Date.parse(`${date}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+  }
 
-  let build = $state<BuildState>(loadBuild(currentRideDate()) ?? newBuild(currentRideDate()));
+  function copenhagenSeconds(now: Date): number {
+    const p = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Europe/Copenhagen',
+      hour12: false,
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    })
+      .format(now)
+      .split(':')
+      .map(Number);
+    return p[0] * 3600 + p[1] * 60 + p[2];
+  }
+
+  function secondsUntilDawn(now: Date): number {
+    const d = 6 * 3600 - copenhagenSeconds(now);
+    return d <= 0 ? d + 86_400 : d;
+  }
+
+  function formatCountdown(sec: number): string {
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = sec % 60;
+    return `${h}h ${String(m).padStart(2, '0')}m ${String(s).padStart(2, '0')}s`;
+  }
+
+  // build.date is the target ride date — the next dawn this horde rides.
+  let build = $state<BuildState>(loadPending() ?? newBuild(addDay(currentRideDate())));
+  let lastRide = $state<LastRide | null>(loadLastRide());
+  let nowTick = $state(Date.now());
+  let practiceMode = $state(false);
   let speed = $state(1);
+
+  const targetDate = $derived(build.date);
+  const report = $derived(scoutReport(generateGauntlet(targetDate)));
+  const theme = $derived(generateGauntlet(targetDate).theme);
+  const countdownSec = $derived(secondsUntilDawn(new Date(nowTick)));
   let telemetry = $state(telemetryEnabled());
   let pendingRelic = $state<number | null>(null);
   let inspect = $state<{ area: 'shop' | 'board'; index: number } | null>(null);
@@ -93,23 +130,37 @@
   let phase: 'idle' | 'riding' | 'done' = $state('idle');
   let result: BattleResult | null = $state(null);
 
-  onMount(async () => {
-    player = new ReplayPlayer();
-    await player.init(stageEl);
+  onMount(() => {
+    const id = setInterval(() => (nowTick = Date.now()), 1000);
+    void (async () => {
+      player = new ReplayPlayer();
+      await player.init(stageEl);
+    })();
+    return () => clearInterval(id);
   });
 
-  function setDate(d: string) {
-    if (!d) return;
-    selectedDate = d;
-    build = loadBuild(d) ?? newBuild(d);
-    inspect = null;
-    pendingRelic = null;
-    result = null;
-    notice = '';
-  }
+  // When a dawn passes, the pending horde locks and rides its target
+  // gauntlet; the result is stored and a fresh horde is started for the
+  // next dawn. Runs on load and each tick, but only acts on a boundary.
+  $effect(() => {
+    void nowTick;
+    const today = currentRideDate(new Date(nowTick));
+    if (build.date <= today) {
+      const lineup = lineupFromBuild(build);
+      if (lineup.units.length > 0) {
+        const outcome = simulate(lineup, generateGauntlet(build.date));
+        const ride: LastRide = { date: build.date, lineup, result: outcome.result };
+        saveLastRide(ride);
+        lastRide = ride;
+        submitRun({ rideDate: build.date, lineup, result: outcome.result, dev: CHANNEL === 'dev' });
+      }
+      build = newBuild(addDay(today));
+      saveBuild(build);
+    }
+  });
 
   function freshBuild() {
-    build = newBuild(selectedDate);
+    build = newBuild(build.date);
     saveBuild(build);
     inspect = null;
     pendingRelic = null;
@@ -119,8 +170,25 @@
   function addScrap() {
     build = { ...build, scrap: build.scrap + 10 };
     saveBuild(build);
-    // Boosted-scrap builds are not representative — mark the day as dev.
-    localStorage.setItem(`wrad-devscrap:${selectedDate}`, '1');
+  }
+
+  // Dev: pretend the next dawn arrived — resolve the current horde now.
+  function simulateDawn() {
+    const lineup = lineupFromBuild(build);
+    if (lineup.units.length === 0) {
+      notice = 'recruit some rats first';
+      return;
+    }
+    const outcome = simulate(lineup, generateGauntlet(build.date));
+    const ride: LastRide = { date: build.date, lineup, result: outcome.result };
+    saveLastRide(ride);
+    lastRide = ride;
+    submitRun({ rideDate: build.date, lineup, result: outcome.result, dev: true });
+    build = newBuild(addDay(build.date));
+    saveBuild(build);
+    inspect = null;
+    pendingRelic = null;
+    notice = '';
   }
 
   function setSpeed(s: number) {
@@ -191,7 +259,9 @@
     apply(toggleFreeze(build, i));
   }
 
-  async function ride() {
+  // Practice against today's already-revealed gauntlet — never tomorrow's
+  // (that stays a surprise until dawn). Doesn't count, isn't submitted.
+  async function practiceRide() {
     if (!player || phase === 'riding') return;
     if (build.board.length === 0) {
       notice = 'recruit some rats first';
@@ -199,42 +269,49 @@
     }
     inspect = null;
     pendingRelic = null;
+    practiceMode = true;
     phase = 'riding';
     result = null;
     player.speed = speed;
-    const lineup = lineupFromBuild(build);
-    const outcome = simulate(lineup, generateGauntlet(selectedDate));
-    submitRun({
-      rideDate: selectedDate,
-      lineup,
-      result: outcome.result,
-      dev:
-        selectedDate !== currentRideDate() ||
-        localStorage.getItem(`wrad-devscrap:${selectedDate}`) === '1',
-    });
+    const today = currentRideDate(new Date(nowTick));
+    const outcome = simulate(lineupFromBuild(build), generateGauntlet(today));
     await player.play(outcome.events);
     result = outcome.result;
     phase = 'done';
+  }
+
+  async function watchLastDawn() {
+    if (!player || phase === 'riding' || !lastRide) return;
+    inspect = null;
+    practiceMode = false;
+    phase = 'riding';
+    result = null;
+    player.speed = speed;
+    const outcome = simulate(lastRide.lineup, generateGauntlet(lastRide.date));
+    await player.play(outcome.events);
+    result = outcome.result;
+    phase = 'done';
+  }
+
+  function backToWarren() {
+    phase = 'idle';
+    result = null;
   }
 </script>
 
 <main>
   <h1>WE RIDE AT DAWN</h1>
   <p class="sub">
-    gauntlet of {selectedDate} &middot; seed {seed.toString(16)}{CHANNEL === 'dev' ? ' · dev build' : ''}
+    building for the dawn of {targetDate}{CHANNEL === 'dev' ? ' · dev build' : ''}
   </p>
 
   {#if CHANNEL === 'dev'}
   <div class="dev">
     <span class="panel-label">testing</span>
-    <input
-      type="date"
-      value={selectedDate}
-      onchange={(e) => setDate(e.currentTarget.value)}
-    />
+    <button onclick={simulateDawn}>⏭ simulate dawn</button>
     <button onclick={freshBuild}>fresh build</button>
     <button onclick={addScrap}>+10 scrap</button>
-    <span class="dev-theme">theme: {theme.primary} + {theme.secondary} @ wave {theme.pivotWave}</span>
+    <span class="dev-theme">tomorrow: {theme.primary} + {theme.secondary} @ wave {theme.pivotWave}</span>
     <span class="dev-sep">·</span>
     {#each [1, 2, 4] as s}
       <button class:active={speed === s} onclick={() => setSpeed(s)}>{s}×</button>
@@ -361,19 +438,39 @@
   <div class="phase-divider"><span>the ride</span></div>
 
   <div class="battle-panel">
-  <div class="stage" bind:this={stageEl}></div>
-  <button class="ride" onclick={ride} disabled={phase === 'riding'}>
-    {phase === 'idle' ? 'The horde rides' : phase === 'riding' ? 'Riding…' : 'Ride again'}
-  </button>
-  {#if result}
-    <p class="result">
-      Depth: <strong>wave {result.wavesCleared}</strong>
-      &middot; score <strong>{result.score}</strong>
-      &middot; {result.survivors.length > 0
-        ? `${result.survivors.length} rats crawled home`
-        : 'the horde was wiped out'}
-    </p>
-  {/if}
+    <div class="stage" class:hidden={phase === 'idle'} bind:this={stageEl}></div>
+
+    {#if phase !== 'idle'}
+      {#if result}
+        <p class="result">
+          {practiceMode ? 'Practice — ' : 'Dawn ride — '}
+          depth <strong>wave {result.wavesCleared}</strong>
+          &middot; score <strong>{result.score}</strong>
+          &middot; {result.survivors.length > 0
+            ? `${result.survivors.length} rats crawled home`
+            : 'the horde was wiped out'}
+        </p>
+      {/if}
+      <button class="ride" onclick={backToWarren} disabled={phase === 'riding'}>
+        {phase === 'riding' ? 'Riding…' : '← back to the warren'}
+      </button>
+    {:else}
+      <div class="muster">
+        <p class="muster-line">The horde is mustered. It rides at the next dawn — <strong>06:00 CET</strong>.</p>
+        <p class="countdown">next ride in {formatCountdown(countdownSec)}</p>
+        <button class="practice" onclick={practiceRide}>practice ride · doesn't count</button>
+      </div>
+
+      {#if lastRide}
+        <div class="lastdawn">
+          <div class="panel-label">last dawn ride · {lastRide.date}</div>
+          <p class="lastdawn-line">
+            rode to <strong>wave {lastRide.result.wavesCleared}</strong> · score {lastRide.result.score}
+          </p>
+          <button class="watch" onclick={watchLastDawn}>watch the replay</button>
+        </div>
+      {/if}
+    {/if}
   </div>
 
   {#if telemetryConfigured}
@@ -900,6 +997,63 @@
     max-width: 100%;
     border: 1px solid #2a221a;
     border-radius: 6px;
+  }
+
+  .stage.hidden {
+    display: none;
+  }
+
+  .muster {
+    text-align: center;
+    padding: 6px 0 2px;
+  }
+
+  .muster-line {
+    margin: 0 0 6px;
+    font-size: 15px;
+    color: var(--ink);
+  }
+
+  .countdown {
+    margin: 0 0 14px;
+    font-size: 22px;
+    letter-spacing: 1px;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .practice {
+    padding: 8px 18px;
+    font-family: inherit;
+    font-size: 13px;
+    color: var(--ink);
+    background: #241a14;
+    border: 1px solid #4a3520;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+
+  .lastdawn {
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px solid #2a221a;
+    text-align: center;
+  }
+
+  .lastdawn-line {
+    margin: 5px 0 10px;
+    font-size: 15px;
+  }
+
+  .watch {
+    padding: 8px 18px;
+    font-family: inherit;
+    font-size: 13px;
+    color: var(--ink);
+    background: var(--accent);
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
   }
 
   .ride {
