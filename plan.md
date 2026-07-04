@@ -103,7 +103,7 @@ A day is the atom; a **week-long expedition** is the molecule. Same shop/scout/r
 ## 3.5 Teaching the rats (designed 2026-07-03, not yet built)
 
 Three layers of progressive disclosure, all app-layer:
-1. **Tap-to-inspect card** — bottom-sheet for any unit/relic/enemy: portrait, archetype, stats incl. ★2/★3 preview, ability as a full sentence with the trigger explained. Shop stalls become tap-to-inspect with a buy button inside the card (also fixes accidental instant-buys). Build first.
+1. ✅ *(2026-07-04)* **Tap-to-inspect card** — bottom-sheet for shop stalls and board rats: portrait, stats incl. ★2/★3 preview, ability as a generated plain-English sentence. Buy/pin and sell/reposition live inside the card; tapping no longer instant-buys (accidental-buy fixed). Unit sprites also shown on the tiles. *(Not yet: archetype/role badge, enemy inspect — deferred to the Codex.)*
 2. **Warren Codex** — bestiary screen (rats by strategy archetype, relics, defenders by their archetypes). Scout-report chips deep-link into it, making the report a strategic instrument. Build second.
 3. **Replay callouts** — ability procs named in float text; one-time-per-device mechanic explainers (poison, revive, combine). Build third.
 Explicitly rejected: tutorial flows, stat tables, hover tooltips (mobile-first).
