@@ -15,7 +15,9 @@ const SIDE_COLOR: Record<Side, number> = { horde: 0x8a4b2f, gauntlet: 0x46586e }
 const ART_TEXTURE = new Map<string, Texture>();
 
 function wait(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
+  // Resolve 0-waits synchronously: hidden tabs throttle setTimeout hard, and
+  // a skipped replay must be able to finish timer-free in the background.
+  return ms <= 0 ? Promise.resolve() : new Promise((r) => setTimeout(r, ms));
 }
 
 // Driven by rAF with a timer fallback: rAF stops in hidden tabs, and an
@@ -214,7 +216,7 @@ export class ReplayPlayer {
       }
       case 'revive': {
         this.spawn(event.unit, event.index, event.unit.side === 'horde' ? -80 : W + 80);
-        await this.layout(200);
+        await this.layout(this.d(200));
         const sprite = this.sprites.get(event.unit.instanceId);
         if (sprite) await this.floatText(sprite.root.x, sprite.root.y - 58, 'RISEN', 0xd4af37);
         break;

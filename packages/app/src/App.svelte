@@ -586,13 +586,15 @@
     <div class="stage" class:hidden={phase === 'idle'} bind:this={stageEl}></div>
 
     {#if phase !== 'idle'}
+      <p class="ride-caption">the next hourly ride · your horde as it stands now</p>
       {#if result}
         <p class="result">
-          Your horde rode to <strong>wave {result.wavesCleared}</strong>
+          Your horde rides to <strong>wave {result.wavesCleared}</strong>
           &middot; {result.survivors.length > 0
-            ? `${result.survivors.length} rats crawled home`
+            ? `${result.survivors.length} rats crawl home`
             : 'wiped out at the end'}
         </p>
+        <p class="result-note">it repeats this exact ride every hour — rebuild, and the next ride changes</p>
       {/if}
       <button class="ride" onclick={backToWarren} disabled={phase === 'riding'}>
         {phase === 'riding' ? 'Riding…' : '← back to the warren'}
@@ -608,7 +610,7 @@
         <p class="idle-note">
           +{SCRAP_PER_DEPTH} scrap per depth cleared, every hour · +{interestFor(build.scrap)} interest banked each dawn · harder every dawn
         </p>
-        <button class="watch" onclick={watchRide}>watch the ride</button>
+        <button class="watch" onclick={watchRide}>▶ watch the next ride</button>
         <p class="season-best">deepest ride this week: <strong>wave {Math.max(seasonBest, currentDepth)}</strong> · resets Monday</p>
         {#if awaySummary}
           <p class="away">While you were away: {awaySummary.rides} rides · <strong>+{awaySummary.scrap} scrap</strong>.</p>
@@ -1316,6 +1318,19 @@
   .result {
     margin-top: 14px;
     font-size: 15px;
+  }
+
+  .ride-caption {
+    margin: 0 0 10px;
+    font-size: 12px;
+    letter-spacing: 1px;
+    color: var(--ink-dim);
+  }
+
+  .result-note {
+    margin: 6px 0 0;
+    font-size: 12px;
+    color: var(--ink-dim);
   }
 
   .telemetry {
