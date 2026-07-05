@@ -58,6 +58,9 @@ export async function submitScore(args: {
   depth: number;
   day: number;
   lineup: Lineup;
+  /** Hour bucket of the ride that set this best — lets the P4 anti-cheat
+   * re-simulate the exact gauntlet. Tucked into the lineup jsonb. */
+  rideHour?: number;
 }): Promise<void> {
   try {
     await fetch(`${SUPABASE_URL}/rest/v1/rpc/submit_score`, {
@@ -69,7 +72,7 @@ export async function submitScore(args: {
         p_name: args.name,
         p_depth: args.depth,
         p_day: args.day,
-        p_lineup: args.lineup,
+        p_lineup: { ...args.lineup, rideHour: args.rideHour },
       }),
       keepalive: true,
     });

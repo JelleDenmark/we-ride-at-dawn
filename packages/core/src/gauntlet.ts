@@ -1,5 +1,5 @@
 import { xorshift128, type Rng } from './prng';
-import { dailySeed } from './seed';
+import { dailySeed, fnv1a } from './seed';
 import { ENEMY_POOL } from './data/enemies';
 import type { Archetype, UnitDef } from './data/units';
 
@@ -18,6 +18,8 @@ export interface Gauntlet {
   date: string;
   seed: number;
   theme: GauntletTheme;
+  /** Absolute hour bucket this ride belongs to; absent = the day's base gauntlet. */
+  hour?: number;
   waves: EnemyWave[];
 }
 
@@ -47,16 +49,26 @@ export function difficultyForDay(day: number): number {
  * `day` scales every wave's budget so later expedition days field tougher
  * gauntlets. The theme (archetype composition) is derived before the waves,
  * so it stays a pure function of the date regardless of difficulty.
+ *
+ * `hour` (absolute hour bucket) reshuffles the wave composition under the
+ * fixed daily theme: same budget, same archetype quotas, different enemy
+ * picks and ordering — so hourly rides vary but the scout report stays
+ * truthful all day. Hourless calls keep the day's base stream byte-identical
+ * (golden logs, telemetry dawn rides).
  */
-export function generateGauntlet(date: string, day = 1): Gauntlet {
+export function generateGauntlet(date: string, day = 1, hour?: number): Gauntlet {
   const seed = dailySeed(date);
-  const rng = xorshift128(seed);
+  const themeRng = xorshift128(seed);
 
-  const primary = ARCHETYPES[rng.int(ARCHETYPES.length)];
+  const primary = ARCHETYPES[themeRng.int(ARCHETYPES.length)];
   const rest = ARCHETYPES.filter((a) => a !== primary);
-  const secondary = rest[rng.int(rest.length)];
-  const pivotWave = 4 + rng.int(4);
+  const secondary = rest[themeRng.int(rest.length)];
+  const pivotWave = 4 + themeRng.int(4);
   const theme: GauntletTheme = { primary, secondary, pivotWave };
+
+  // Hourly rides roll waves from their own stream; the base gauntlet
+  // continues the theme stream exactly as before.
+  const rng = hour === undefined ? themeRng : xorshift128(fnv1a(`${date}#ride#${hour}`));
 
   // Structural theming: each wave force-spends a budget quota on the
   // primary archetype (and on the secondary once its pivot wave is
@@ -95,5 +107,5 @@ export function generateGauntlet(date: string, day = 1): Gauntlet {
     waves.push({ units });
   }
 
-  return { date, seed, theme, waves };
+  return hour === undefined ? { date, seed, theme, waves } : { date, seed, theme, hour, waves };
 }

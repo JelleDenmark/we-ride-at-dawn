@@ -46,6 +46,10 @@
     loadSeasonBest,
     savePlayerName,
     loadPlayerName,
+    saveRideLog,
+    loadRideLog,
+    RIDE_LOG_MAX,
+    type RideLogEntry,
     type LastRide,
   } from './persistence';
   import {
@@ -81,6 +85,11 @@
     return p[0] * 3600 + p[1] * 60 + p[2];
   }
 
+  function fmtRideHour(hourBucket: number): string {
+    const d = new Date(hourBucket * HOUR_MS);
+    return `${String(d.getHours()).padStart(2, '0')}:00`;
+  }
+
   function formatCountdown(sec: number): string {
     const h = Math.floor(sec / 3600);
     const m = Math.floor((sec % 3600) / 60);
@@ -99,18 +108,25 @@
   let build = $state<BuildState>(
     loadPending() ?? newBuild(currentRideDate(), weekdayFor(currentRideDate()))
   );
-  let seasonBest = $state(loadSeasonBest(seasonIdFor(currentRideDate())));
+  const storedBest = loadSeasonBest(seasonIdFor(currentRideDate()));
+  let seasonBest = $state(storedBest.best);
+  let seasonBestHour = $state<number | undefined>(storedBest.hour);
+  let rideLog = $state<RideLogEntry[]>(loadRideLog());
   let lastRide = $state<LastRide | null>(loadLastRide());
   let lastIncomeHour = $state<number>(loadLastIncomeHour() ?? Math.floor(Date.now() / HOUR_MS));
   let awaySummary = $state<{ rides: number; scrap: number } | null>(null);
   let nowTick = $state(Date.now());
   let speed = $state(1);
 
-  const currentGauntlet = $derived(generateGauntlet(build.date, build.day));
+  // The ride at the top of hour H uses gauntlet(date, day, H): waves
+  // reshuffle hourly under a fixed daily theme. The preview always shows the
+  // NEXT ride — the one the countdown points at.
+  const nextRideHour = $derived(Math.floor(nowTick / HOUR_MS) + 1);
+  const currentGauntlet = $derived(generateGauntlet(build.date, build.day, nextRideHour));
   const report = $derived(scoutReport(currentGauntlet));
   const theme = $derived(currentGauntlet.theme);
-  // Live outcome of the current horde on the current gauntlet — updates as
-  // you build, so you see your depth (and income) change in real time.
+  // Live outcome of the current horde on the next ride — updates as you
+  // build (and as the hour flips), so you see your depth change in real time.
   const currentOutcome = $derived(
     build.board.length > 0 ? simulate(lineupFromBuild(build), currentGauntlet) : null
   );
@@ -155,6 +171,7 @@
       depth: seasonBest,
       day: build.day,
       lineup: lineupFromBuild(build),
+      rideHour: seasonBestHour,
     });
     await refreshBoard();
   }
@@ -276,12 +293,43 @@
       }
     }
 
+    // Credit each elapsed hour as its own ride: the horde fights that hour's
+    // reshuffled gauntlet, earns that ride's depth, and the ride is logged.
+    // (Offline hours use the current board and day — the honest limit of
+    // lazy crediting; the 24h cap keeps the drift small.)
     const nowHour = Math.floor(nowTick / HOUR_MS);
     const elapsed = Math.min(nowHour - lastIncomeHour, OFFLINE_RIDE_CAP);
     if (elapsed > 0) {
-      const earned = elapsed * currentDepth * SCRAP_PER_DEPTH;
+      const lineup = lineupFromBuild(build);
+      let earned = 0;
+      const rides: RideLogEntry[] = [];
+      if (lineup.units.length > 0) {
+        for (let h = nowHour - elapsed + 1; h <= nowHour; h++) {
+          const { result } = simulate(lineup, generateGauntlet(build.date, build.day, h));
+          const scrap = result.wavesCleared * SCRAP_PER_DEPTH;
+          earned += scrap;
+          rides.push({
+            hour: h,
+            depth: result.wavesCleared,
+            scrap,
+            survivors: result.survivors.length,
+          });
+        }
+      }
       lastIncomeHour = nowHour;
       saveLastIncomeHour(nowHour);
+      if (rides.length > 0) {
+        rideLog = [...rides.reverse(), ...rideLog].slice(0, RIDE_LOG_MAX);
+        saveRideLog(rideLog);
+        // Only completed rides count toward the weekly best (the leaderboard
+        // score) — a deep preview that never rides earns nothing.
+        const deepest = rides.reduce((a, r) => (r.depth > a.depth ? r : a));
+        if (deepest.depth > seasonBest) {
+          seasonBest = deepest.depth;
+          seasonBestHour = deepest.hour;
+          saveSeasonBest(build.seasonId, seasonBest, deepest.hour);
+        }
+      }
       if (earned > 0) {
         build = { ...build, scrap: build.scrap + earned };
         awaySummary = { rides: elapsed, scrap: earned };
@@ -292,19 +340,17 @@
     }
   });
 
-  // Track the deepest ride this week — the headline leaderboard score.
-  // Resetting whenever the season id changes (real rollover or dev jump).
+  // The weekly best is set by completed rides (in the income loop above);
+  // this effect handles the season rollover (real or dev jump) and pushes
+  // improvements to the leaderboard.
   let bestSeasonId = $state(build.seasonId);
   $effect(() => {
     if (build.seasonId !== bestSeasonId) {
       bestSeasonId = build.seasonId;
       seasonBest = 0;
+      seasonBestHour = undefined;
       saveSeasonBest(build.seasonId, 0);
       void refreshBoard(); // new week → pull the fresh (empty) board
-    }
-    if (currentDepth > seasonBest) {
-      seasonBest = currentDepth;
-      saveSeasonBest(build.seasonId, seasonBest);
     }
     // Auto-submit the season-best on any improvement (guarded so an
     // unchanged score never re-POSTs).
@@ -343,9 +389,37 @@
     notice = '';
   }
 
-  // Dev: credit some hours of idle depth income without waiting.
+  // Dev: credit some hours of idle income without waiting — simulates the
+  // next h hourly gauntlets so the log shows real variance. (A scrap cheat:
+  // the wall clock will ride those hours again for real.)
   function devSkipHours(h: number) {
-    const earned = h * currentDepth * SCRAP_PER_DEPTH;
+    const lineup = lineupFromBuild(build);
+    if (lineup.units.length === 0) {
+      notice = 'recruit some rats first';
+      return;
+    }
+    const nowHour = Math.floor(Date.now() / HOUR_MS);
+    let earned = 0;
+    const rides: RideLogEntry[] = [];
+    for (let i = 1; i <= h; i++) {
+      const { result } = simulate(lineup, generateGauntlet(build.date, build.day, nowHour + i));
+      const scrap = result.wavesCleared * SCRAP_PER_DEPTH;
+      earned += scrap;
+      rides.push({
+        hour: nowHour + i,
+        depth: result.wavesCleared,
+        scrap,
+        survivors: result.survivors.length,
+      });
+    }
+    rideLog = [...rides.reverse(), ...rideLog].slice(0, RIDE_LOG_MAX);
+    saveRideLog(rideLog);
+    const deepest = rides.reduce((a, r) => (r.depth > a.depth ? r : a));
+    if (deepest.depth > seasonBest) {
+      seasonBest = deepest.depth;
+      seasonBestHour = deepest.hour;
+      saveSeasonBest(build.seasonId, seasonBest, deepest.hour);
+    }
     build = { ...build, scrap: build.scrap + earned };
     awaySummary = { rides: h, scrap: earned };
     saveBuild(build);
@@ -431,8 +505,11 @@
     phase = 'riding';
     result = null;
     player.speed = speed;
-    await player.play(currentOutcome.events);
-    result = currentOutcome.result;
+    // Capture the outcome: the hour can flip (or the horde change) while the
+    // replay runs, and the result must match the ride that was watched.
+    const outcome = currentOutcome;
+    await player.play(outcome.events);
+    result = outcome.result;
     phase = 'done';
   }
 
@@ -594,26 +671,44 @@
             ? `${result.survivors.length} rats crawl home`
             : 'wiped out at the end'}
         </p>
-        <p class="result-note">it repeats this exact ride every hour — rebuild, and the next ride changes</p>
+        <p class="result-note">each hourly ride reshuffles the drains — same threats, new arrangement</p>
       {/if}
       <button class="ride" onclick={backToWarren} disabled={phase === 'riding'}>
         {phase === 'riding' ? 'Riding…' : '← back to the warren'}
       </button>
     {:else}
       <div class="idle">
-        <p class="muster-line">Your horde rides the drains <strong>every hour</strong>, hauling back scrap by how deep it pushes.</p>
+        <p class="muster-line">Your horde rides the drains <strong>every hour</strong>, hauling back scrap by how deep it pushes. Each ride the drains reshuffle — same threats, new arrangement.</p>
         <div class="idle-stats">
-          <div class="stat"><span class="stat-big">{currentDepth}</span><span class="stat-lbl">depth now</span></div>
-          <div class="stat"><span class="stat-big">+{scrapPerHour}</span><span class="stat-lbl">scrap / hour</span></div>
-          <div class="stat"><span class="stat-big">{formatCountdown(secondsToNextHour)}</span><span class="stat-lbl">next ride</span></div>
+          <div class="stat"><span class="stat-big">{currentDepth}</span><span class="stat-lbl">next depth</span></div>
+          <div class="stat"><span class="stat-big">+{scrapPerHour}</span><span class="stat-lbl">next haul</span></div>
+          <div class="stat"><span class="stat-big">{formatCountdown(secondsToNextHour)}</span><span class="stat-lbl">rides in</span></div>
         </div>
         <p class="idle-note">
           +{SCRAP_PER_DEPTH} scrap per depth cleared, every hour · +{interestFor(build.scrap)} interest banked each dawn · harder every dawn
         </p>
         <button class="watch" onclick={watchRide}>▶ watch the next ride</button>
-        <p class="season-best">deepest ride this week: <strong>wave {Math.max(seasonBest, currentDepth)}</strong> · resets Monday</p>
+        <p class="season-best">deepest ride this week: <strong>wave {seasonBest}</strong> · resets Monday</p>
+        {#if currentDepth > seasonBest}
+          <p class="season-hint">the next ride could push to wave {currentDepth}</p>
+        {/if}
         {#if awaySummary}
           <p class="away">While you were away: {awaySummary.rides} rides · <strong>+{awaySummary.scrap} scrap</strong>.</p>
+        {/if}
+        {#if rideLog.length > 0}
+          <div class="ride-log">
+            <div class="panel-label rl-head">recent rides</div>
+            <ul class="rl-rows">
+              {#each rideLog as r}
+                <li class="rl-row" class:deepest={r.depth === seasonBest && r.depth > 0}>
+                  <span class="rl-time">{fmtRideHour(r.hour)}</span>
+                  <span class="rl-depth">wave {r.depth}{r.depth === seasonBest && r.depth > 0 ? ' ★' : ''}</span>
+                  <span class="rl-scrap">+{r.scrap} ⚙</span>
+                  <span class="rl-surv">{r.survivors > 0 ? `${r.survivors} home` : '☠ wiped'}</span>
+                </li>
+              {/each}
+            </ul>
+          </div>
         {/if}
       </div>
     {/if}
@@ -1276,6 +1371,73 @@
     margin: 12px 0 0;
     font-size: 14px;
     color: #d4af37;
+  }
+
+  .season-hint {
+    margin: 3px 0 0;
+    font-size: 12px;
+    color: var(--ink-dim);
+  }
+
+  .ride-log {
+    margin-top: 16px;
+    padding-top: 10px;
+    border-top: 1px solid #2a221a;
+    text-align: left;
+  }
+
+  .rl-head {
+    margin-bottom: 6px;
+  }
+
+  .rl-rows {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    max-height: 220px;
+    overflow-y: auto;
+  }
+
+  .rl-row {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 3px 8px;
+    border-radius: 5px;
+    font-size: 12.5px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .rl-row:nth-child(odd) {
+    background: #17110d;
+  }
+
+  .rl-row.deepest {
+    color: #d4af37;
+  }
+
+  .rl-time {
+    min-width: 42px;
+    color: var(--ink-dim);
+  }
+
+  .rl-row.deepest .rl-time {
+    color: #d4af37;
+  }
+
+  .rl-depth {
+    min-width: 64px;
+  }
+
+  .rl-scrap {
+    min-width: 48px;
+    color: #c9b891;
+  }
+
+  .rl-surv {
+    flex: 1;
+    text-align: right;
+    color: var(--ink-dim);
   }
 
   .away {

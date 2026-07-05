@@ -16,12 +16,14 @@ A grimy dark-fantasy **idle auto-battler**. Build a horde of rats; it auto-rides
 
 ## Current core loop (SHIPPED TO PROD)
 - Horde rides **hourly** → **+1 scrap per depth** cleared. Income accrues live + offline (≤24h/visit). Depth/income update live as you build.
+- **Hourly variance (dev-only, 2026-07-05):** each ride's waves reshuffle under the fixed daily theme (`generateGauntlet(date, day, hour)`, hour = absolute hour bucket; hourless calls byte-identical for golden logs). Shuffle-only — same budgets/quotas, ±1–2 waves depth swing. Income loop simulates each elapsed hour; **ride log** (last 24: time·depth·scrap·survivors, ★ on the best) shown in the idle panel. **Season best = completed rides only** (preview no longer counts); best ride's hour stored + sent as `rideHour` inside the lineup jsonb for P4 re-sim.
 - **Interest:** paid **daily at dawn**, 5% of bank, **floored, capped at +5** (moved off hourly after a creep sim showed hourly interest was the snowball engine).
 - **Costs ×2, starting scrap 24** (early affordability unchanged; idle scrap worth ~half in units).
 - **7-day expedition:** difficulty steps each dawn (`difficultyForDay`), board cap grows 5→8, scrap carries across days, full reset after day 7.
 - **3 promo infographics** hosted at `…/we-ride-at-dawn/promo/` (gameplay, minions/relics, economy) + gallery `index.html`.
 
 ## Key decisions
+- **Hourly ride variance: shuffle-only, completed-rides-only scoring** *(2026-07-05)* — waves reshuffle per hour under the fixed daily theme (scout report stays truthful); no budget jitter (leaderboard stays mostly skill). Weekly best counts only rides that actually ran; the setting ride's hour rides along in the score payload for anti-cheat. Ride log keeps last 24. Deferred to later: tap-a-log-row to replay that ride (needs lineup stored per row).
 - **Relics: one of each per carrier** *(2026-07-05)* — a rat carries each trinket once, the horde carries each team relic once; merges pool relics but dedupe. Chosen over single-slot/2-slot caps: kills degenerate Rusted-Nail stacking and the no-op duplicate Tail-Charm while keeping combos (Nail+Shard+Charm). Enforced in `core` `buyRelic`/`combineAll` with tests.
 - **Genre:** pivoted from a daily-dawn puzzle to an **idle auto-battler** (dropped the "shared daily puzzle" + "starving economy" pillars — user's call).
 - **Leaderboard score = deepest depth reached during the week** (headline).

@@ -84,22 +84,51 @@ export function loadPlayerName(): string | null {
   }
 }
 
-/** Best depth reached this season (headline leaderboard score). */
-export function saveSeasonBest(seasonId: string, best: number): void {
+/** Best depth reached this season (headline leaderboard score), plus the
+ * hour bucket of the ride that set it (for anti-cheat re-simulation). */
+export function saveSeasonBest(seasonId: string, best: number, hour?: number): void {
   try {
-    localStorage.setItem(`${NS}:best`, JSON.stringify({ seasonId, best }));
+    localStorage.setItem(`${NS}:best`, JSON.stringify({ seasonId, best, hour }));
   } catch {
     // Non-fatal.
   }
 }
 
-export function loadSeasonBest(seasonId: string): number {
+export function loadSeasonBest(seasonId: string): { best: number; hour?: number } {
   try {
     const raw = localStorage.getItem(`${NS}:best`);
-    if (!raw) return 0;
-    const v = JSON.parse(raw) as { seasonId: string; best: number };
-    return v.seasonId === seasonId ? v.best : 0;
+    if (!raw) return { best: 0 };
+    const v = JSON.parse(raw) as { seasonId: string; best: number; hour?: number };
+    return v.seasonId === seasonId ? { best: v.best, hour: v.hour } : { best: 0 };
   } catch {
-    return 0;
+    return { best: 0 };
+  }
+}
+
+export interface RideLogEntry {
+  /** Absolute hour bucket (Date.now() / 3_600_000, floored). */
+  hour: number;
+  depth: number;
+  scrap: number;
+  survivors: number;
+}
+
+export const RIDE_LOG_MAX = 24;
+
+/** Completed hourly rides, newest first, capped at RIDE_LOG_MAX. */
+export function saveRideLog(log: RideLogEntry[]): void {
+  try {
+    localStorage.setItem(`${NS}:ridelog`, JSON.stringify(log.slice(0, RIDE_LOG_MAX)));
+  } catch {
+    // Non-fatal.
+  }
+}
+
+export function loadRideLog(): RideLogEntry[] {
+  try {
+    const raw = localStorage.getItem(`${NS}:ridelog`);
+    return raw ? (JSON.parse(raw) as RideLogEntry[]) : [];
+  } catch {
+    return [];
   }
 }
