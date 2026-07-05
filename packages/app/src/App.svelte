@@ -668,8 +668,8 @@
         <p class="result">
           Your horde rides to <strong>wave {result.wavesCleared}</strong>
           &middot; {result.survivors.length > 0
-            ? `${result.survivors.length} rats crawl home`
-            : 'wiped out at the end'}
+            ? `⚑ the drains cleared — ${result.survivors.length} rats ride home`
+            : 'until the last rat falls'}
         </p>
         <p class="result-note">each hourly ride reshuffles the drains — same threats, new arrangement</p>
       {/if}
@@ -704,7 +704,9 @@
                   <span class="rl-time">{fmtRideHour(r.hour)}</span>
                   <span class="rl-depth">wave {r.depth}{r.depth === seasonBest && r.depth > 0 ? ' ★' : ''}</span>
                   <span class="rl-scrap">+{r.scrap} ⚙</span>
-                  <span class="rl-surv">{r.survivors > 0 ? `${r.survivors} home` : '☠ wiped'}</span>
+                  <!-- Riding until the last rat falls is the normal end of a ride;
+                       only the rare full clear gets a badge. -->
+                  <span class="rl-surv">{r.survivors > 0 ? '⚑ cleared the drains!' : ''}</span>
                 </li>
               {/each}
             </ul>
@@ -1437,7 +1439,7 @@
   .rl-surv {
     flex: 1;
     text-align: right;
-    color: var(--ink-dim);
+    color: #d4af37;
   }
 
   .away {

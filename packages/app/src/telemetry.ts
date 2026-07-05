@@ -5,7 +5,7 @@ import { CHANNEL } from './env';
 // server allows inserts only — it cannot read, edit, or delete anything.
 export const SUPABASE_URL = 'https://wvrllhiktnkvbpclmrpq.supabase.co';
 export const SUPABASE_ANON_KEY = 'sb_publishable_6S2kGgYAI2gRLhfRxXBY3A_E_mIgpAi';
-const APP_VERSION = `0.4.5${CHANNEL === 'dev' ? '-dev' : ''}`;
+const APP_VERSION = `0.5.0${CHANNEL === 'dev' ? '-dev' : ''}`;
 
 const OPT_OUT_KEY = 'wrad-telemetry-opt-out';
 const DEVICE_KEY = 'wrad-device-id';

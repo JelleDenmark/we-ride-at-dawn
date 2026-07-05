@@ -41,7 +41,7 @@ A grimy dark-fantasy **idle auto-battler**. Build a horde of rats; it auto-rides
 
 ## Pending / next steps
 1. ~~P3 leaderboard UI~~ ✅ done on `dev`.
-2. **Ship to prod:** P1 (sync weeks) + P3 (leaderboard) are **dev-only**; they now land together — ready to merge `dev` → `master` when approved. Shared-board decision is resolved (dev-prefixed seasons, above).
+2. **Ship to prod: ✅ GO-LIVE approved 2026-07-05** — merged `dev` → `master` Sunday night; the new synchronized season starts automatically Monday 2026-07-06 at 06:00 CET (client-side rollover, nothing to do at dawn). Launch board (`2026-07-06`) verified clean; QA lives under `dev-*`; legacy prod players cold-reset into the sync week on first visit. Version bumped to 0.5.0. "Wiped" de-emphasized: log rows show time·depth·scrap, only a full 12-wave clear gets a "⚑ cleared the drains!" badge (survivors matter nowhere else — leaderboard is depth-only).
 3. **P4 anti-cheat** later.
 4. **Minor — clean the board before real testers.** Anon key can't delete (read-only + RPC-insert-only), so remove via SQL / service role. **Prod** seasons still hold pre-isolation test rows: `00000000-…-0009` "Test-Warlord" depth 7 and `00000000-…-0001` "Probe-Warlord" depth 3 (season `2026-06-29`); plus a dev-era row on `2026-07-06` (device `dfea602b-…`, depth 8) written before the `dev-` prefix landed. Dev QA now lives harmlessly under `dev-2026-07-06`. Wipe the bare-season rows before launch: `delete from scores where season_id not like 'dev-%';` (or target the specific device ids).
 5. **Open tuning knobs** (untested guesses): idle income rate, difficulty/board/scrap curves, whether "deepest depth" needs a tiebreak. Use `npm run balance` + real telemetry.
