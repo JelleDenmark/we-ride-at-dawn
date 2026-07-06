@@ -18,8 +18,11 @@ alter table public.scores
   add column if not exists kills bigint not null default 0;
 
 -- 2. Replace the RPC to accept p_kills (defaulted for old callers) and store
---    greatest(existing, new) for kills, while preserving the existing
---    depth-best upsert behavior untouched.
+--    greatest(existing, new) for kills. This is the live submit_score body
+--    verbatim (verified via pg_get_functiondef on 2026-07-06 — keeps the name
+--    sanitization `left(coalesce(nullif(...),'Warlord'),24)`, the `greatest(p_depth,0)`
+--    clamp, the `s` alias, and the depth-best day/lineup logic) with only the
+--    kills column/param/upsert added.
 create or replace function public.submit_score(
   p_season text,
   p_device uuid,
@@ -29,24 +32,24 @@ create or replace function public.submit_score(
   p_lineup jsonb,
   p_kills bigint default 0
 )
-returns void
-language plpgsql
-security definer
-set search_path = public
-as $$
+ returns void
+ language plpgsql
+ security definer
+ set search_path to 'public'
+as $function$
 begin
-  insert into public.scores (season_id, device_id, name, depth, day, lineup, kills, updated_at)
-  values (p_season, p_device, p_name, p_depth, p_day, p_lineup, p_kills, now())
-  on conflict (season_id, device_id) do update
-    set name = excluded.name,
-        -- unchanged: keep each device's best (deepest) depth for the season
-        depth = greatest(public.scores.depth, excluded.depth),
-        day = case when excluded.depth > public.scores.depth then excluded.day else public.scores.day end,
-        lineup = case when excluded.depth > public.scores.depth then excluded.lineup else public.scores.lineup end,
-        -- kills is a cumulative monotonic total — never let a resubmit lower it
-        kills = greatest(public.scores.kills, excluded.kills),
-        updated_at = now();
+  insert into public.scores as s (season_id, device_id, name, depth, day, lineup, kills, updated_at)
+  values (p_season, p_device, left(coalesce(nullif(p_name,''),'Warlord'),24),
+          greatest(p_depth,0), p_day, p_lineup, greatest(p_kills,0), now())
+  on conflict (season_id, device_id) do update set
+    name       = excluded.name,
+    day        = case when excluded.depth > s.depth then excluded.day    else s.day    end,
+    lineup     = case when excluded.depth > s.depth then excluded.lineup else s.lineup end,
+    depth      = greatest(s.depth, excluded.depth),
+    -- kills is a cumulative monotonic total — never let a resubmit lower it
+    kills      = greatest(s.kills, excluded.kills),
+    updated_at = now();
 end;
-$$;
+$function$;
 
 grant execute on function public.submit_score(text, uuid, text, integer, integer, jsonb, bigint) to anon;
