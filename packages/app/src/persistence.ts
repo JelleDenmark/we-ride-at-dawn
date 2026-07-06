@@ -105,12 +105,35 @@ export function loadSeasonBest(seasonId: string): { best: number; hour?: number 
   }
 }
 
+/** Cumulative enemies defeated this season — sums across every completed
+ * ride (mirrors seasonBest's reset-per-season lifecycle, but only ever
+ * climbs within a season instead of tracking a max). Leaderboard tiebreak. */
+export function saveSeasonKills(seasonId: string, total: number): void {
+  try {
+    localStorage.setItem(`${NS}:kills`, JSON.stringify({ seasonId, total }));
+  } catch {
+    // Non-fatal.
+  }
+}
+
+export function loadSeasonKills(seasonId: string): number {
+  try {
+    const raw = localStorage.getItem(`${NS}:kills`);
+    if (!raw) return 0;
+    const v = JSON.parse(raw) as { seasonId: string; total: number };
+    return v.seasonId === seasonId ? v.total : 0;
+  } catch {
+    return 0;
+  }
+}
+
 export interface RideLogEntry {
   /** Absolute hour bucket (Date.now() / 3_600_000, floored). */
   hour: number;
   depth: number;
   scrap: number;
   survivors: number;
+  enemiesDefeated: number;
 }
 
 export const RIDE_LOG_MAX = 24;

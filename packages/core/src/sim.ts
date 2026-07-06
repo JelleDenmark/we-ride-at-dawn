@@ -47,6 +47,9 @@ export interface BattleResult {
   score: number;
   survivors: UnitView[];
   damageDealt: number;
+  /** Enemies felled this battle (fallen.gauntlet.length) — the season's
+   * cumulative kill-count leaderboard tiebreak is a running sum of this. */
+  enemiesDefeated: number;
 }
 
 interface BattleUnit {
@@ -346,6 +349,12 @@ export function simulate(
 
   return {
     events,
-    result: { wavesCleared, score, survivors: horde.map(view), damageDealt: totalDamage },
+    result: {
+      wavesCleared,
+      score,
+      survivors: horde.map(view),
+      damageDealt: totalDamage,
+      enemiesDefeated: fallen.gauntlet.length,
+    },
   };
 }

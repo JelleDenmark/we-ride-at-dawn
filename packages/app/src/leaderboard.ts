@@ -36,6 +36,8 @@ export interface BoardRow {
   depth: number;
   day: number;
   device_id: string;
+  /** Cumulative season enemies-defeated total — tiebreak below depth. */
+  kills: number;
 }
 
 /** True if this row belongs to the player on this device. */
@@ -61,6 +63,9 @@ export async function submitScore(args: {
   /** Hour bucket of the ride that set this best — lets the P4 anti-cheat
    * re-simulate the exact gauntlet. Tucked into the lineup jsonb. */
   rideHour?: number;
+  /** Cumulative season enemies-defeated total (tiebreak). Monotonic — the
+   * RPC stores greatest(existing, new) so a stale resubmit never lowers it. */
+  kills: number;
 }): Promise<void> {
   try {
     await fetch(`${SUPABASE_URL}/rest/v1/rpc/submit_score`, {
@@ -73,6 +78,7 @@ export async function submitScore(args: {
         p_depth: args.depth,
         p_day: args.day,
         p_lineup: { ...args.lineup, rideHour: args.rideHour },
+        p_kills: args.kills,
       }),
       keepalive: true,
     });
@@ -81,12 +87,12 @@ export async function submitScore(args: {
   }
 }
 
-/** Top-N of a season, deepest first. Empty array on any failure. */
+/** Top-N of a season, deepest first, kills as the tiebreak. Empty array on any failure. */
 export async function fetchTop(seasonId: string, limit = 20): Promise<BoardRow[]> {
   try {
     const url =
       `${SUPABASE_URL}/rest/v1/scores?season_id=eq.${encodeURIComponent(boardSeason(seasonId))}` +
-      `&order=depth.desc,updated_at.asc&limit=${limit}&select=name,depth,day,device_id`;
+      `&order=depth.desc,kills.desc,updated_at.asc&limit=${limit}&select=name,depth,day,device_id,kills`;
     const res = await fetch(url, { headers: HEADERS });
     if (!res.ok) return [];
     return (await res.json()) as BoardRow[];
@@ -96,15 +102,16 @@ export async function fetchTop(seasonId: string, limit = 20): Promise<BoardRow[]
 }
 
 /**
- * This device's rank in a season (1-based). Counts riders strictly deeper,
- * so ties share the better rank. Returns null if unranked or on failure.
+ * This device's rank in a season (1-based). A rider outranks you if they're
+ * strictly deeper, or tied on depth with strictly more kills (mirrors the
+ * board's depth.desc,kills.desc ordering). Returns null if unranked or on failure.
  */
-export async function fetchRank(seasonId: string, depth: number): Promise<number | null> {
+export async function fetchRank(seasonId: string, depth: number, kills: number): Promise<number | null> {
   if (depth <= 0) return null;
   try {
     const url =
       `${SUPABASE_URL}/rest/v1/scores?season_id=eq.${encodeURIComponent(boardSeason(seasonId))}` +
-      `&depth=gt.${depth}&select=device_id`;
+      `&or=(depth.gt.${depth},and(depth.eq.${depth},kills.gt.${kills}))&select=device_id`;
     const res = await fetch(url, {
       headers: { ...HEADERS, Prefer: 'count=exact' },
     });

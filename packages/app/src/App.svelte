@@ -44,6 +44,8 @@
     loadLastIncomeHour,
     saveSeasonBest,
     loadSeasonBest,
+    saveSeasonKills,
+    loadSeasonKills,
     savePlayerName,
     loadPlayerName,
     saveRideLog,
@@ -111,6 +113,9 @@
   const storedBest = loadSeasonBest(seasonIdFor(currentRideDate()));
   let seasonBest = $state(storedBest.best);
   let seasonBestHour = $state<number | undefined>(storedBest.hour);
+  // Cumulative season total of enemies felled across every completed ride —
+  // only climbs, resets with seasonBest. Leaderboard tiebreak under depth.
+  let seasonKills = $state(loadSeasonKills(build.seasonId));
   let rideLog = $state<RideLogEntry[]>(loadRideLog());
   let lastRide = $state<LastRide | null>(loadLastRide());
   let lastIncomeHour = $state<number>(loadLastIncomeHour() ?? Math.floor(Date.now() / HOUR_MS));
@@ -149,7 +154,7 @@
     try {
       const [rows, rank] = await Promise.all([
         fetchTop(build.seasonId, 20),
-        fetchRank(build.seasonId, seasonBest),
+        fetchRank(build.seasonId, seasonBest, seasonKills),
       ]);
       board = rows;
       myRank = rank;
@@ -162,7 +167,7 @@
   let lastSubmit = '';
   async function submitBest() {
     if (!playerName || seasonBest <= 0) return;
-    const sig = `${build.seasonId}|${playerName}|${seasonBest}|${build.day}`;
+    const sig = `${build.seasonId}|${playerName}|${seasonBest}|${build.day}|${seasonKills}`;
     if (sig === lastSubmit) return;
     lastSubmit = sig;
     await submitScore({
@@ -172,6 +177,7 @@
       day: build.day,
       lineup: lineupFromBuild(build),
       rideHour: seasonBestHour,
+      kills: seasonKills,
     });
     await refreshBoard();
   }
@@ -313,6 +319,7 @@
             depth: result.wavesCleared,
             scrap,
             survivors: result.survivors.length,
+            enemiesDefeated: result.enemiesDefeated,
           });
         }
       }
@@ -322,13 +329,16 @@
         rideLog = [...rides.reverse(), ...rideLog].slice(0, RIDE_LOG_MAX);
         saveRideLog(rideLog);
         // Only completed rides count toward the weekly best (the leaderboard
-        // score) — a deep preview that never rides earns nothing.
+        // score) — a deep preview that never rides earns nothing. Same rule
+        // for the cumulative kill total: it only grows from rides that ran.
         const deepest = rides.reduce((a, r) => (r.depth > a.depth ? r : a));
         if (deepest.depth > seasonBest) {
           seasonBest = deepest.depth;
           seasonBestHour = deepest.hour;
           saveSeasonBest(build.seasonId, seasonBest, deepest.hour);
         }
+        seasonKills += rides.reduce((sum, r) => sum + r.enemiesDefeated, 0);
+        saveSeasonKills(build.seasonId, seasonKills);
       }
       if (earned > 0) {
         build = { ...build, scrap: build.scrap + earned };
@@ -349,7 +359,9 @@
       bestSeasonId = build.seasonId;
       seasonBest = 0;
       seasonBestHour = undefined;
+      seasonKills = 0;
       saveSeasonBest(build.seasonId, 0);
+      saveSeasonKills(build.seasonId, 0);
       void refreshBoard(); // new week → pull the fresh (empty) board
     }
     // Auto-submit the season-best on any improvement (guarded so an
@@ -410,6 +422,7 @@
         depth: result.wavesCleared,
         scrap,
         survivors: result.survivors.length,
+        enemiesDefeated: result.enemiesDefeated,
       });
     }
     rideLog = [...rides.reverse(), ...rideLog].slice(0, RIDE_LOG_MAX);
@@ -420,6 +433,8 @@
       seasonBestHour = deepest.hour;
       saveSeasonBest(build.seasonId, seasonBest, deepest.hour);
     }
+    seasonKills += rides.reduce((sum, r) => sum + r.enemiesDefeated, 0);
+    saveSeasonKills(build.seasonId, seasonKills);
     build = { ...build, scrap: build.scrap + earned };
     awaySummary = { rides: h, scrap: earned };
     saveBuild(build);
@@ -689,6 +704,7 @@
         </p>
         <button class="watch" onclick={watchRide}>▶ watch the next ride</button>
         <p class="season-best">deepest ride this week: <strong>wave {seasonBest}</strong> · resets Monday</p>
+        <p class="season-kills">rats felled this week: <strong>{seasonKills}</strong></p>
         {#if currentDepth > seasonBest}
           <p class="season-hint">the next ride could push to wave {currentDepth}</p>
         {/if}
@@ -703,6 +719,7 @@
                 <li class="rl-row" class:deepest={r.depth === seasonBest && r.depth > 0}>
                   <span class="rl-time">{fmtRideHour(r.hour)}</span>
                   <span class="rl-depth">wave {r.depth}{r.depth === seasonBest && r.depth > 0 ? ' ★' : ''}</span>
+                  <span class="rl-kills">{r.enemiesDefeated} felled</span>
                   <span class="rl-scrap">+{r.scrap} ⚙</span>
                   <!-- Riding until the last rat falls is the normal end of a ride;
                        only the rare full clear gets a badge. -->
@@ -731,13 +748,14 @@
           <li class="lb-row" class:me={isMe(row)}>
             <span class="lb-rank">{i + 1}</span>
             <span class="lb-name">{row.name}{isMe(row) ? ' · you' : ''}</span>
+            <span class="lb-kills">{row.kills} felled</span>
             <span class="lb-depth">wave {row.depth}</span>
           </li>
         {/each}
       </ol>
     {/if}
     {#if myRank !== null && myRank > board.length}
-      <p class="lb-myrank">your rank: <strong>#{myRank}</strong> · wave {seasonBest}</p>
+      <p class="lb-myrank">your rank: <strong>#{myRank}</strong> · wave {seasonBest} · {seasonKills} felled</p>
     {/if}
     <p class="lb-you">
       riding as <strong>{playerName || '—'}</strong>
@@ -1375,6 +1393,12 @@
     color: #d4af37;
   }
 
+  .season-kills {
+    margin: 2px 0 0;
+    font-size: 12.5px;
+    color: var(--ink-dim);
+  }
+
   .season-hint {
     margin: 3px 0 0;
     font-size: 12px;
@@ -1429,6 +1453,11 @@
 
   .rl-depth {
     min-width: 64px;
+  }
+
+  .rl-kills {
+    min-width: 58px;
+    color: var(--ink-dim);
   }
 
   .rl-scrap {
@@ -1584,6 +1613,12 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .lb-kills {
+    font-size: 12px;
+    color: var(--ink-dim);
+    font-variant-numeric: tabular-nums;
   }
 
   .lb-depth {
