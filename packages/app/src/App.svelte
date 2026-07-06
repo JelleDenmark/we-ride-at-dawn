@@ -449,6 +449,10 @@
     if (player) player.speed = 1e9;
   }
 
+  function jumpToFinalWave() {
+    player?.jumpToLastWave();
+  }
+
   function apply(res: ActionResult): boolean {
     if (res.ok) {
       build = res.state;
@@ -680,6 +684,15 @@
 
   <div class="battle-panel">
     <div class="stage" class:hidden={phase === 'idle'} bind:this={stageEl}></div>
+
+    {#if phase === 'riding'}
+      <div class="ride-controls">
+        {#each [1, 2, 4] as s}
+          <button class:active={speed === s} onclick={() => setSpeed(s)}>{s}×</button>
+        {/each}
+        <button onclick={jumpToFinalWave}>⏭ to final wave</button>
+      </div>
+    {/if}
 
     {#if phase !== 'idle'}
       <p class="ride-caption">the next hourly ride · your horde as it stands now</p>
@@ -1333,6 +1346,31 @@
     margin-top: 8px;
     font-size: 12px;
     color: #c9b891;
+  }
+
+  .ride-controls {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 10px 0 0;
+  }
+
+  .ride-controls button {
+    padding: 3px 10px;
+    font-family: inherit;
+    font-size: 12px;
+    color: var(--ink);
+    background: #241a14;
+    border: 1px solid #4a3520;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+
+  .ride-controls button.active {
+    border-color: var(--accent);
+    color: #f0e6d2;
   }
 
   .stage :global(canvas) {

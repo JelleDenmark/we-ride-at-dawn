@@ -109,6 +109,12 @@ export class ReplayPlayer {
   private stats = new Map<number, { attack: number; health: number }>();
   private order: Record<Side, number[]> = { horde: [], gauntlet: [] };
   private banner?: Text;
+  /** Index of the current event within the events array passed to play(). */
+  private currentIndex = 0;
+  /** Index of the last waveStart event, or -1 if there is none. */
+  private lastWaveStartIndex = -1;
+  /** While currentIndex < skipUntilIndex, d(ms) fast-forwards to 0. */
+  private skipUntilIndex = -1;
 
   async init(el: HTMLElement): Promise<void> {
     this.app = new Application();
@@ -135,11 +141,28 @@ export class ReplayPlayer {
 
   async play(events: BattleEvent[]): Promise<void> {
     this.reset();
-    for (const event of events) await this.handle(event);
+    this.lastWaveStartIndex = -1;
+    for (let i = 0; i < events.length; i++) {
+      if (events[i].type === 'waveStart') this.lastWaveStartIndex = i;
+    }
+    for (let i = 0; i < events.length; i++) {
+      this.currentIndex = i;
+      await this.handle(events[i]);
+    }
+  }
+
+  /** Jump straight to the final wave: everything before it plays at 0 delay,
+   * then normal speed resumes so the last wave is watched, not skipped. */
+  jumpToLastWave(): void {
+    if (this.lastWaveStartIndex > this.currentIndex) {
+      this.skipUntilIndex = this.lastWaveStartIndex;
+    }
   }
 
   private d(ms: number): number {
-    return this.speed >= 1e6 ? 0 : ms / this.speed;
+    if (this.speed >= 1e6) return 0;
+    if (this.currentIndex < this.skipUntilIndex) return 0;
+    return ms / this.speed;
   }
 
   private reset(): void {
@@ -148,6 +171,8 @@ export class ReplayPlayer {
     this.stats.clear();
     this.order = { horde: [], gauntlet: [] };
     this.banner = undefined;
+    this.currentIndex = 0;
+    this.skipUntilIndex = -1;
   }
 
   private async handle(event: BattleEvent): Promise<void> {
