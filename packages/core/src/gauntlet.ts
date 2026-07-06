@@ -23,9 +23,14 @@ export interface Gauntlet {
   waves: EnemyWave[];
 }
 
-export const WAVE_COUNT = 12;
+// Depth is the leaderboard's core metric, so the ceiling needs enough
+// headroom that even a maxed-out horde is chasing depth, not capping out.
+export const WAVE_COUNT = 45;
 export const WAVE_BUDGET_BASE = 3;
 export const WAVE_BUDGET_GROWTH = 2;
+/** Super-linear term: budget grows by i^2 * this, so late waves outpace
+ * early linear growth instead of scaling forever at the same rate. */
+export const WAVE_BUDGET_QUADRATIC = 0.15;
 export const WAVE_UNIT_CAP = 5;
 
 const ARCHETYPES: Archetype[] = ['swarm', 'brute', 'armored', 'plague'];
@@ -40,9 +45,15 @@ function weightedPick<T>(rng: Rng, items: T[], weight: (item: T) => number): T {
   return items[items.length - 1];
 }
 
-/** Difficulty multiplier for a given expedition day (day 1 = baseline). */
+/**
+ * Difficulty multiplier for a given expedition day (day 1 = baseline).
+ * Steeper than a straight line: the quadratic term keeps the back half of
+ * the 7-day expedition (days 5-7) meaningfully harder than a linear ramp
+ * would, so a strong horde can't coast through the whole week at one power
+ * level.
+ */
 export function difficultyForDay(day: number): number {
-  return 1 + (day - 1) * 0.35;
+  return 1 + (day - 1) * 0.55 + (day - 1) * (day - 1) * 0.05;
 }
 
 /**
@@ -80,7 +91,9 @@ export function generateGauntlet(date: string, day = 1, hour?: number): Gauntlet
 
   const waves: EnemyWave[] = [];
   for (let i = 0; i < WAVE_COUNT; i++) {
-    const waveBudget = Math.round((WAVE_BUDGET_BASE + i * WAVE_BUDGET_GROWTH) * scale);
+    const waveBudget = Math.round(
+      (WAVE_BUDGET_BASE + i * WAVE_BUDGET_GROWTH + i * i * WAVE_BUDGET_QUADRATIC) * scale
+    );
     let budget = waveBudget;
     const units: UnitDef[] = [];
 
