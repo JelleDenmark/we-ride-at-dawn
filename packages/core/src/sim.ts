@@ -16,6 +16,29 @@ export const SCORE_PER_WAVE = 100;
 /** Stalemate guard (e.g. two healers out-sustaining each other): the wave is abandoned. */
 export const MAX_TICKS_PER_WAVE = 1000;
 
+// Enemy stat-scaling by WAVE DEPTH (wave index `i`, 0-based), not by day.
+// This is the primary difficulty lever: deeper waves field tankier foes, so
+// pushing depth requires attack (making attack-buffing relics matter) while
+// staying day-agnostic (no early-peak sweet spot for the max-depth-over-week
+// leaderboard metric). Health scales faster than attack so overkill damage
+// keeps being "spent" on enemy HP rather than wasted past a low cap.
+// Health also carries a small quadratic term: a stronger (higher-tier)
+// horde's raw attack grows multiplicatively with tier-ups, so a purely
+// linear HP curve eventually falls behind and attack stops mattering again
+// at high depth/tier — the same "overkill wasted" bug this whole change
+// exists to fix, just recurring at a higher power level.
+export const ENEMY_HEALTH_SCALE_PER_WAVE = 0.35;
+export const ENEMY_HEALTH_SCALE_QUADRATIC = 0.012;
+export const ENEMY_ATTACK_SCALE_PER_WAVE = 0.08;
+
+export function enemyHealthScale(waveIndex: number): number {
+  return 1 + waveIndex * ENEMY_HEALTH_SCALE_PER_WAVE + waveIndex * waveIndex * ENEMY_HEALTH_SCALE_QUADRATIC;
+}
+
+export function enemyAttackScale(waveIndex: number): number {
+  return 1 + waveIndex * ENEMY_ATTACK_SCALE_PER_WAVE;
+}
+
 export interface UnitView {
   instanceId: number;
   defId: string;
@@ -90,12 +113,21 @@ export function simulate(
   const teamAttack = teamRelics.reduce((s, r) => s + (r.attack ?? 0), 0);
   const teamHealth = teamRelics.reduce((s, r) => s + (r.health ?? 0), 0);
 
-  const instantiate = (def: UnitDef, side: Side, relicIds: string[] = [], tier = 1): BattleUnit => {
+  const instantiate = (
+    def: UnitDef,
+    side: Side,
+    relicIds: string[] = [],
+    tier = 1,
+    attackScale = 1,
+    healthScale = 1
+  ): BattleUnit => {
     const relics = relicIds
       .map((id) => RELIC_DEFS[id])
       .filter((r): r is RelicDef => r !== undefined && r.scope === 'unit');
-    let attack = def.attack * tier + relics.reduce((s, r) => s + (r.attack ?? 0), 0);
-    let health = def.health * tier + relics.reduce((s, r) => s + (r.health ?? 0), 0);
+    let attack =
+      Math.round(def.attack * tier * attackScale) + relics.reduce((s, r) => s + (r.attack ?? 0), 0);
+    let health =
+      Math.round(def.health * tier * healthScale) + relics.reduce((s, r) => s + (r.health ?? 0), 0);
     if (side === 'horde') {
       attack += teamAttack;
       health += teamHealth;
@@ -283,7 +315,9 @@ export function simulate(
   let damageThisWave = 0;
 
   for (let w = 0; w < gauntlet.waves.length && horde.length > 0; w++) {
-    enemies = gauntlet.waves[w].units.map((d) => instantiate(d, 'gauntlet'));
+    enemies = gauntlet.waves[w].units.map((d) =>
+      instantiate(d, 'gauntlet', [], 1, enemyAttackScale(w), enemyHealthScale(w))
+    );
     events.push({ type: 'waveStart', wave: w + 1, enemies: enemies.map(view) });
     damageThisWave = 0;
 

@@ -8,7 +8,8 @@
   },
   "scripts": {
     "test": "vitest run",
-    "balance": "tsx scripts/balance.ts"
+    "balance": "tsx scripts/balance.ts",
+    "balance:depth": "tsx scripts/depth-scaling.ts"
   },
   "devDependencies": {
     "tsx": "^4.19.0",

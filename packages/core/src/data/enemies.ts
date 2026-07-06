@@ -33,6 +33,14 @@ export const ENEMY_POOL: UnitDef[] = [
   { id: 'grate-golem', name: 'Grate-Golem', attack: 1, health: 9, cost: 4, archetype: 'armored' },
   { id: 'culvert-knight', name: 'Culvert-Knight', attack: 5, health: 7, cost: 7, archetype: 'armored' },
   {
+    id: 'sluice-bulwark',
+    name: 'Sluice-Bulwark',
+    attack: 2,
+    health: 16,
+    cost: 8,
+    archetype: 'armored',
+  },
+  {
     id: 'plague-doctor',
     name: 'Plague-Doctor',
     attack: 2,

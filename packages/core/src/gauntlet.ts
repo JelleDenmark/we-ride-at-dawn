@@ -29,8 +29,11 @@ export const WAVE_COUNT = 45;
 export const WAVE_BUDGET_BASE = 3;
 export const WAVE_BUDGET_GROWTH = 2;
 /** Super-linear term: budget grows by i^2 * this, so late waves outpace
- * early linear growth instead of scaling forever at the same rate. */
-export const WAVE_BUDGET_QUADRATIC = 0.15;
+ * early linear growth instead of scaling forever at the same rate. Dialed
+ * down from 0.15: depth difficulty now comes primarily from enemy-stat
+ * scaling by wave depth (see sim.ts's enemyHealthScale/enemyAttackScale),
+ * not from a wall of extra chaff bodies compounding with day difficulty. */
+export const WAVE_BUDGET_QUADRATIC = 0.05;
 export const WAVE_UNIT_CAP = 5;
 
 const ARCHETYPES: Archetype[] = ['swarm', 'brute', 'armored', 'plague'];
@@ -47,13 +50,16 @@ function weightedPick<T>(rng: Rng, items: T[], weight: (item: T) => number): T {
 
 /**
  * Difficulty multiplier for a given expedition day (day 1 = baseline).
- * Steeper than a straight line: the quadratic term keeps the back half of
- * the 7-day expedition (days 5-7) meaningfully harder than a linear ramp
- * would, so a strong horde can't coast through the whole week at one power
- * level.
+ * Kept MODEST by design: the leaderboard metric is max depth over the whole
+ * week, so day-scaling must not be the primary difficulty lever (that would
+ * let players peak early and coast). Depth difficulty instead comes mainly
+ * from enemy-stat scaling by WAVE DEPTH (sim.ts's enemyHealthScale /
+ * enemyAttackScale), which is day-agnostic. This curve only needs to grow
+ * gently enough that roster growth (board cap, tiers, relics) outpaces it,
+ * so achievable depth still rises day 1 -> 7.
  */
 export function difficultyForDay(day: number): number {
-  return 1 + (day - 1) * 0.55 + (day - 1) * (day - 1) * 0.05;
+  return 1 + (day - 1) * 0.05;
 }
 
 /**
