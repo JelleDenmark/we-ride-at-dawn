@@ -537,7 +537,7 @@
 <main>
   <h1>WE RIDE AT DAWN</h1>
   <p class="sub">
-    week of {build.seasonId} · day {build.day}/{SEASON_DAYS} · rides hourly{CHANNEL === 'dev'
+    Week of {build.seasonId} · day {build.day}/{SEASON_DAYS} · rides hourly{CHANNEL === 'dev'
       ? ' · dev build'
       : ''}
   </p>
@@ -610,7 +610,7 @@
     </div>
     {#if build.teamRelicIds.length > 0}
       <div class="team-relics">
-        team: {build.teamRelicIds.map((r) => RELIC_DEFS[r].name).join(', ')}
+        Team: {build.teamRelicIds.map((r) => RELIC_DEFS[r].name).join(', ')}
       </div>
     {/if}
     </div>
@@ -670,6 +670,10 @@
       <button onclick={() => apply(rerollShop(build))}>↻ reroll · {REROLL_COST} scrap</button>
     </div>
     </div>
+
+    {#if build.board.length === 0 && build.scrap > 0}
+      <p class="onboarding-hint">your warren is empty — spend your {build.scrap} ⚙ to recruit your first rats</p>
+    {/if}
   </div>
 
   <div class="phase-divider"><span>the ride</span></div>
@@ -703,10 +707,10 @@
           +{SCRAP_PER_DEPTH} scrap per depth cleared, every hour · +{interestFor(build.scrap)} interest banked each dawn · harder every dawn
         </p>
         <button class="watch" onclick={watchRide}>▶ watch the next ride</button>
-        <p class="season-best">deepest ride this week: <strong>wave {seasonBest}</strong> · resets Monday</p>
-        <p class="season-kills">rats felled this week: <strong>{seasonKills}</strong></p>
+        <p class="season-best">Deepest ride this week: <strong>wave {seasonBest}</strong> · resets Monday</p>
+        <p class="season-kills">Rats felled this week: <strong>{seasonKills}</strong></p>
         {#if currentDepth > seasonBest}
-          <p class="season-hint">the next ride could push to wave {currentDepth}</p>
+          <p class="season-hint">the next ride will reach wave {currentDepth}</p>
         {/if}
         {#if awaySummary}
           <p class="away">While you were away: {awaySummary.rides} rides · <strong>+{awaySummary.scrap} scrap</strong>.</p>
@@ -735,7 +739,7 @@
 
   <div class="leaderboard">
     <div class="lb-head">
-      <span class="panel-label">deepest riders · week of {build.seasonId}</span>
+      <span class="panel-label">Deepest riders · week of {build.seasonId}</span>
       <button class="lb-refresh" onclick={() => void refreshBoard()} disabled={boardBusy}>
         {boardBusy ? '…' : '↻'}
       </button>
@@ -773,7 +777,7 @@
           setTelemetryEnabled(telemetry);
         }}
       />
-      share anonymous run data to help balance the game
+      share anonymous run data to help sharpen the drains
     </label>
   {/if}
 
@@ -1405,6 +1409,17 @@
     color: var(--ink-dim);
   }
 
+  .onboarding-hint {
+    margin: 14px 0 0;
+    padding: 8px 12px;
+    border-radius: 6px;
+    background: #1d1713;
+    border: 1px solid #2a221a;
+    font-size: 12px;
+    color: var(--ink-dim);
+    text-align: center;
+  }
+
   .ride-log {
     margin-top: 16px;
     padding-top: 10px;
@@ -1444,6 +1459,7 @@
 
   .rl-time {
     min-width: 42px;
+    white-space: nowrap;
     color: var(--ink-dim);
   }
 
@@ -1453,15 +1469,18 @@
 
   .rl-depth {
     min-width: 64px;
+    white-space: nowrap;
   }
 
   .rl-kills {
     min-width: 58px;
+    white-space: nowrap;
     color: var(--ink-dim);
   }
 
   .rl-scrap {
     min-width: 48px;
+    white-space: nowrap;
     color: #c9b891;
   }
 
@@ -1616,12 +1635,16 @@
   }
 
   .lb-kills {
+    flex: 0 0 auto;
+    white-space: nowrap;
     font-size: 12px;
     color: var(--ink-dim);
     font-variant-numeric: tabular-nums;
   }
 
   .lb-depth {
+    flex: 0 0 auto;
+    white-space: nowrap;
     color: #d4af37;
     font-variant-numeric: tabular-nums;
   }
@@ -1672,5 +1695,19 @@
   .name-input:focus {
     outline: none;
     border-color: var(--accent);
+  }
+
+  @media (max-width: 480px) {
+    .lb-row {
+      gap: 6px;
+      padding: 4px 6px;
+      font-size: 13px;
+    }
+
+    .rl-row {
+      gap: 8px;
+      padding: 2px 6px;
+      font-size: 12px;
+    }
   }
 </style>
