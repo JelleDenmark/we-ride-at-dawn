@@ -61,7 +61,30 @@ A running list of small, self-contained improvements (distinct from the big back
 
 - **Shop auto-reroll when emptied (free).** When all stalls have been bought/consumed, automatically reroll the shop **at no scrap cost**, so a player is never left staring at a dead, empty shop. Contained in `core` `shop.ts` (the buy paths + a free-reroll on "shop exhausted") with a test. _(Decide the exact trigger: when every slot is empty, vs. when all unit slots are gone — lean "every slot empty".)_
 - **"harder every dawn" copy fix** — the progression line (`App.svelte:725`, `… interest banked each dawn · harder every dawn`) still claims day-scaling difficulty, which is false post-0.6.0. Reword/remove as part of the broader copy-vs-engine sweep (see the `wrad-copy-vs-engine-audit` memory).
-- **PWA "new version — reload" nudge** — the highest-value bit of the PWA work; being scoped separately (see `PWA-SCOPE.md` once landed). Fixes the stale-tab-after-deploy problem.
+- **PWA "new version — reload" nudge** — ✅ Phase 1 shipped to dev (`updateCheck.ts` + banner). Phases 2–3 (installability, push) still scoped in `PWA-SCOPE.md`.
+
+---
+
+## 3. Proposed near-term features (from Jesper, 2026-07-07)
+
+My read + suggested order. All three are bigger than the quick-wins above. **Order: A → B → C.**
+
+### A. Bench — store rats outside the horde — **strongest; do first**
+Store units that aren't in the fighting horde: (1) hold 2 copies while hunting the 3rd for a merge — kills the merge-3 frustration (same root as the board-cap-starves-a-2nd-Piper report), (2) keep counter-units to swap in against the daily archetype theme.
+- **Design:** bench does NOT count toward `BOARD_CAP` (bench units don't fight); merges **auto-resolve across board+bench** (the whole point). New `BuildState.bench: BoardUnit[]`, persisted + carried across days like the board. Size ~3 to start (5 if tight).
+- **Sim impact: none** — only board units enter `simulate()`, so no golden/determinism change. A `shop.ts` + build-state + UI feature.
+- **Balance:** raises optimization/flexibility, but bench rats never fight → QoL + depth, not raw stat power. Low risk.
+- **Effort:** small–medium.
+
+### B. Buyable horde slots — late-game scrap sink — **promising, needs balance care**
+Supplement (don't fully replace) the passive `boardCapForDay` 5→8 growth with **purchased** slots at an escalating price (10/50/100+). Gives scrap real meaning late game — pairs directly with the flagged near-vestigial interest (see `wrad-interest-tuning`).
+- **Watch:** (1) keep a small passive floor so early/cold-join players aren't gated behind purchases; (2) **if slots can exceed `BOARD_CAP = 8`, that's a real sim/balance change** — the depth curve + enemy wave-depth scaling were tuned around 8 fighting units; (3) a depth→scrap→slots→depth **snowball** could inflate top scores (the interest cap exists partly to damp this).
+- **Must** validate with `npm run balance` before shipping. Resets weekly with the roster.
+- **Effort:** medium; touches core economy (and the sim if it goes past 8).
+
+### C. Split unit shop / relic shop — **lowest priority; validate the need first**
+Independence has some appeal, but the main benefit is **already largely served by the existing freeze** (protect a relic, reroll units). A full split adds phone-first UI cost (two panels, two reroll buttons, more taps) for modest gain.
+- **Recommendation:** don't build a full split yet. If a concrete pain shows up in play, the cheaper fix is a **per-row reroll** (reroll just the unit row or just the relic row), not two shops. Revisit only if freeze proves insufficient.
 
 ---
 ---
