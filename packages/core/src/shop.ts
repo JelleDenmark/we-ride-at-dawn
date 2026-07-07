@@ -203,15 +203,20 @@ export function buyUnit(state: BuildState, slotIndex: number): ActionResult {
   const s = clone(state);
   const cap = boardCapForDay(s.day);
   const fresh: BoardUnit = { defId: def.id, tier: 1, relicIds: [] };
-  // Board first (it's what fights), overflow to the bench if there's room.
+  // Place-then-merge-then-check: put the fresh copy down first so combineAll
+  // gets a chance to resolve a completing trio (which nets fewer units and
+  // frees the space it just took). Board is preferred since it's what fights;
+  // otherwise the copy goes on the bench UNCONDITIONALLY — even when the bench
+  // is already full — as a temporary overflow. If nothing merges, the
+  // post-combine cap checks below reject the buy and the clone `s` (with its
+  // scrap already spent) is discarded, so the caller's state is untouched.
   if (s.board.length < cap) s.board.push(fresh);
-  else if (s.bench.length < BENCH_SIZE) s.bench.push(fresh);
-  else return fail('warren and bench are full');
+  else s.bench.push(fresh);
   s.scrap -= def.cost;
   combineAll(s);
-  // The cap checks run *after* the combine: buying a third-of-a-kind onto a
-  // full board/bench is allowed, since a completing merge nets fewer units
-  // than we started with in that pool.
+  // The real guardrails: run *after* the combine so a third-of-a-kind bought
+  // onto a full board/bench is allowed (a completing merge shrank the pool),
+  // while a buy that merged nothing and left the overflow in place is rejected.
   if (s.board.length > cap) return fail('the warren is full');
   if (s.bench.length > BENCH_SIZE) return fail('the bench is full');
   s.shop.slots[slotIndex] = { kind: 'empty' };

@@ -590,7 +590,15 @@ describe('bench', () => {
     };
     const res = buyUnit(s, 0);
     expect(res.ok).toBe(false);
-    if (!res.ok) expect(res.reason).toMatch(/warren and bench/);
+    // Place-then-merge-then-check: the fresh copy overflows onto the full
+    // bench, nothing merges, so the post-combine bench-cap guardrail rejects it.
+    if (!res.ok) expect(res.reason).toMatch(/bench is full/);
+    // And the rejected buy leaves scrap and state untouched (the clone is
+    // discarded on fail — over-placement never leaks).
+    expect(buyUnit(s, 0).ok).toBe(false);
+    expect(s.scrap).toBe(20);
+    expect(s.board).toHaveLength(5);
+    expect(s.bench).toHaveLength(3);
   });
 
   it('a 3rd copy merges across board+bench: 2 on bench + buy 1 (board full) lands on the bench', () => {
@@ -626,6 +634,95 @@ describe('bench', () => {
       expect(merged.defId).toBe('gutter-runt');
       expect(merged.tier).toBe(2);
       expect(merged.relicIds.sort()).toEqual(['rusted-nail', 'tail-charm']);
+    }
+  });
+
+  it('buys the 3rd copy for a trio even when board AND bench are full (2 on bench)', () => {
+    // The player report: board full and bench full, with two copies of X on
+    // the bench. Buying the third X from the shop must complete the merge
+    // WITHOUT forcing a manual bench-sell first.
+    const base = newBuild('2026-07-04', 1); // boardCapForDay(1) = 5
+    const s = {
+      ...base,
+      scrap: 20,
+      board: [
+        { defId: 'dire-rat', tier: 1, relicIds: [] },
+        { defId: 'gnawer', tier: 1, relicIds: [] },
+        { defId: 'rat-piper', tier: 1, relicIds: [] },
+        { defId: 'brood-mother', tier: 1, relicIds: [] },
+        { defId: 'bone-priest', tier: 1, relicIds: [] },
+      ],
+      // Bench full (BENCH_SIZE = 3): two merge candidates + one bystander.
+      bench: [
+        { defId: 'gutter-runt', tier: 1, relicIds: ['rusted-nail'] },
+        { defId: 'gutter-runt', tier: 1, relicIds: ['tail-charm'] },
+        { defId: 'plague-bearer', tier: 1, relicIds: [] },
+      ],
+      shop: {
+        ...base.shop,
+        slots: [{ kind: 'unit' as const, defId: 'gutter-runt' }, ...base.shop.slots.slice(1)],
+      },
+    };
+    const gutterRuntCost = UNIT_DEFS['gutter-runt'].cost;
+    const res = buyUnit(s, 0);
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      // Board untouched; bench shrank from 3 to 2 (the trio collapsed to one).
+      expect(res.state.board).toEqual(s.board);
+      expect(res.state.board.length).toBeLessThanOrEqual(boardCapForDay(1));
+      expect(res.state.bench).toHaveLength(2);
+      expect(res.state.bench.length).toBeLessThanOrEqual(BENCH_SIZE);
+      const merged = res.state.bench.find((u) => u.defId === 'gutter-runt')!;
+      expect(merged.tier).toBe(2);
+      expect(merged.relicIds.sort()).toEqual(['rusted-nail', 'tail-charm']);
+      expect(res.state.bench.some((u) => u.defId === 'plague-bearer')).toBe(true);
+      // Scrap was spent on the third copy.
+      expect(res.state.scrap).toBe(20 - gutterRuntCost);
+      // The slot emptied.
+      expect(res.state.shop.slots[0]).toEqual({ kind: 'empty' });
+    }
+    // The original state is never mutated by the (successful) buy.
+    expect(s.scrap).toBe(20);
+    expect(s.bench).toHaveLength(3);
+  });
+
+  it('buys the 3rd copy for a trio even when board AND bench are full (2 on board)', () => {
+    // Variant: the two existing copies fight on the board while the bench is
+    // full of bystanders. The merged tier-2 lands on the board (scanned first).
+    const base = newBuild('2026-07-04', 1); // boardCapForDay(1) = 5
+    const s = {
+      ...base,
+      scrap: 20,
+      board: [
+        { defId: 'gutter-runt', tier: 1, relicIds: ['rusted-nail'] },
+        { defId: 'gutter-runt', tier: 1, relicIds: ['tail-charm'] },
+        { defId: 'rat-piper', tier: 1, relicIds: [] },
+        { defId: 'brood-mother', tier: 1, relicIds: [] },
+        { defId: 'bone-priest', tier: 1, relicIds: [] },
+      ],
+      bench: [
+        { defId: 'plague-bearer', tier: 1, relicIds: [] },
+        { defId: 'warren-warden', tier: 1, relicIds: [] },
+        { defId: 'dire-rat', tier: 1, relicIds: [] },
+      ],
+      shop: {
+        ...base.shop,
+        slots: [{ kind: 'unit' as const, defId: 'gutter-runt' }, ...base.shop.slots.slice(1)],
+      },
+    };
+    const gutterRuntCost = UNIT_DEFS['gutter-runt'].cost;
+    const res = buyUnit(s, 0);
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      // Board shrank from 5 to 4 (trio collapsed), bench untouched.
+      expect(res.state.board).toHaveLength(4);
+      expect(res.state.board.length).toBeLessThanOrEqual(boardCapForDay(1));
+      expect(res.state.bench).toEqual(s.bench);
+      expect(res.state.bench.length).toBeLessThanOrEqual(BENCH_SIZE);
+      const merged = res.state.board.find((u) => u.defId === 'gutter-runt')!;
+      expect(merged.tier).toBe(2);
+      expect(merged.relicIds.sort()).toEqual(['rusted-nail', 'tail-charm']);
+      expect(res.state.scrap).toBe(20 - gutterRuntCost);
     }
   });
 
