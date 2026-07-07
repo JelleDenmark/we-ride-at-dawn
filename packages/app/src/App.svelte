@@ -627,7 +627,7 @@
     <div class="shop-panel">
     <div class="panel-label row-label">
       <span>the scrap-market</span>
-      <span>❄ keeps a stall for later</span>
+      <span>❄ keeps a stall when you reroll</span>
     </div>
     <div class="board">
       {#each build.shop.slots as slot, i}
@@ -741,7 +741,7 @@
                 <li class="rl-row" class:deepest={r.depth === seasonBest && r.depth > 0}>
                   <span class="rl-time">{fmtRideHour(r.hour)}</span>
                   <span class="rl-depth">wave {r.depth}{r.depth === seasonBest && r.depth > 0 ? ' ★' : ''}</span>
-                  <span class="rl-kills">{r.enemiesDefeated} felled</span>
+                  <span class="rl-kills">{r.enemiesDefeated ?? 0} felled</span>
                   <span class="rl-scrap">+{r.scrap} ⚙</span>
                   <!-- Riding until the last rat falls is the normal end of a ride;
                        only the rare full clear gets a badge. -->
