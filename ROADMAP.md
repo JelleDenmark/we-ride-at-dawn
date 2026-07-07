@@ -77,10 +77,10 @@ Store units that aren't in the fighting horde: (1) hold 2 copies while hunting t
 - **Effort:** small–medium.
 
 ### B. Buyable horde slots — late-game scrap sink — **promising, needs balance care**
-Supplement (don't fully replace) the passive `boardCapForDay` 5→8 growth with **purchased** slots at an escalating price (10/50/100+). Gives scrap real meaning late game — pairs directly with the flagged near-vestigial interest (see `wrad-interest-tuning`).
-- **Watch:** (1) keep a small passive floor so early/cold-join players aren't gated behind purchases; (2) **if slots can exceed `BOARD_CAP = 8`, that's a real sim/balance change** — the depth curve + enemy wave-depth scaling were tuned around 8 fighting units; (3) a depth→scrap→slots→depth **snowball** could inflate top scores (the interest cap exists partly to damp this).
-- **Must** validate with `npm run balance` before shipping. Resets weekly with the roster.
-- **Effort:** medium; touches core economy (and the sim if it goes past 8).
+Supplement (don't fully replace) the passive `boardCapForDay` growth with **purchased** slots at an escalating price. Gives scrap real meaning late game — pairs directly with the flagged near-vestigial interest (see `wrad-interest-tuning`).
+- **Decided (2026-07-07):** stays **capped at `BOARD_CAP = 8`** — purchases fill in the (roughly 5→8) range rather than exceeding 8, so the sim/depth-curve tuning (built around 8 fighting units) is untouched. Keep a small passive floor so early/cold-join players aren't gated behind purchases.
+- **Price it from simulation:** before setting the price ladder, use `npm run balance` to **estimate the marginal depth-value of one extra board slot** (sim the same roster at N vs N+1 slots across days/strategies) and price each step proportional to that value — a fair sink, not a trap, and not a snowball. Then still watch the depth→scrap→slots→depth feedback in telemetry.
+- **Effort:** medium; core economy only (no sim change, since it stays ≤8).
 
 ### C. Split unit shop / relic shop — **lowest priority; validate the need first**
 Independence has some appeal, but the main benefit is **already largely served by the existing freeze** (protect a relic, reroll units). A full split adds phone-first UI cost (two panels, two reroll buttons, more taps) for modest gain.
