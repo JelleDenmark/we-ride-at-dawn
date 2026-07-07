@@ -260,8 +260,14 @@ export function simulate(
         break;
       }
       case 'revive': {
-        const corpse = fallen[source.side].shift();
-        if (!corpse || board.length >= BOARD_CAP) break;
+        // Raise the oldest fallen ally — but never the caster itself. A
+        // fainting unit is pushed to `fallen` *before* its own faint trigger
+        // fires, so shifting the first corpse would resurrect the reviver
+        // forever (a lone Bone-Priest was clearing the whole gauntlet,
+        // unkillable). Skip the source and raise the next-oldest ally.
+        const corpseIdx = fallen[source.side].findIndex((c) => c !== source);
+        if (corpseIdx === -1 || board.length >= BOARD_CAP) break;
+        const [corpse] = fallen[source.side].splice(corpseIdx, 1);
         corpse.health = effect.health * tier;
         corpse.poison = 0;
         board.splice(index, 0, corpse);

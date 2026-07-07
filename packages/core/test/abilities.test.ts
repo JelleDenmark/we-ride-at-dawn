@@ -72,6 +72,19 @@ describe('unit abilities', () => {
     expect(revives[0].unit.health).toBe(1);
   });
 
+  it('a lone reviver cannot revive itself (no immortality exploit)', () => {
+    // A fainting unit is queued into `fallen` before its own faint fires, so
+    // reviving "the first corpse" used to resurrect the reviver itself,
+    // forever — a lone Bone-Priest cleared all 45 waves unkillable.
+    const { events, result } = simulate(
+      lineup({ defId: 'bone-priest' }),
+      gauntletOf([dummy(2, 50)])
+    );
+    expect(ofType(events, 'revive').length).toBe(0);
+    expect(result.wavesCleared).toBe(0);
+    expect(result.survivors.length).toBe(0);
+  });
+
   it('Warren-Warden buffs every rat behind it at start of battle', () => {
     const { events } = simulate(
       lineup({ defId: 'warren-warden' }, { defId: 'gutter-runt' }, { defId: 'dire-rat' }),
