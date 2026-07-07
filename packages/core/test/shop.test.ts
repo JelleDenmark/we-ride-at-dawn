@@ -4,9 +4,12 @@ import {
   buyUnit,
   buyRelic,
   sellUnit,
+  sellBenchUnit,
   rerollShop,
   toggleFreeze,
   moveUnit,
+  benchUnit,
+  deployUnit,
   lineupFromBuild,
   advanceAfterDawn,
   boardCapForDay,
@@ -17,6 +20,7 @@ import {
   INTEREST_CAP,
   DAILY_SCRAP,
   REROLL_COST,
+  BENCH_SIZE,
   type BuildState,
 } from '../src/shop';
 import { UNIT_DEFS } from '../src/data/units';
@@ -68,7 +72,18 @@ describe('shop basics', () => {
         { defId: 'bone-priest', tier: 1, relicIds: [] },
       ],
     };
-    expect(buyUnit(full, unitSlot(s)).ok).toBe(false);
+    // A full board alone now overflows to the bench, so a real "no room"
+    // rejection needs the bench full too.
+    expect(buyUnit(full, unitSlot(s)).ok).toBe(true);
+    const noRoom = {
+      ...full,
+      bench: [
+        { defId: 'plague-bearer', tier: 1, relicIds: [] },
+        { defId: 'warren-warden', tier: 1, relicIds: [] },
+        { defId: 'gutter-runt', tier: 1, relicIds: [] },
+      ],
+    };
+    expect(buyUnit(noRoom, unitSlot(s)).ok).toBe(false);
   });
 
   it('allows a buy from a full board when it completes a combine', () => {
@@ -404,5 +419,279 @@ describe('tiers in battle', () => {
       units: [{ defId: 'gnawer', tier: 2, relicIds: ['rusted-nail'] }],
       teamRelicIds: ['filth-totem'],
     });
+  });
+
+  it('bench units never enter the fighting lineup, even if benched units outnumber the board', () => {
+    const s = {
+      ...newBuild('2026-07-03'),
+      board: [{ defId: 'gnawer', tier: 1, relicIds: [] }],
+      bench: [
+        { defId: 'dire-rat', tier: 1, relicIds: [] },
+        { defId: 'rat-piper', tier: 2, relicIds: [] },
+      ],
+    };
+    // The core invariant the whole bench feature depends on: simulate() only
+    // ever sees board units. lineupFromBuild is the only bridge from
+    // BuildState to Lineup, so asserting its output ignores bench is
+    // equivalent to asserting simulate() never sees benched rats.
+    expect(lineupFromBuild(s).units).toEqual([{ defId: 'gnawer', tier: 1, relicIds: [] }]);
+    expect(lineupFromBuild(s).units.some((u) => u.defId === 'dire-rat' || u.defId === 'rat-piper')).toBe(
+      false
+    );
+  });
+});
+
+describe('bench', () => {
+  it('newBuild starts with an empty bench', () => {
+    expect(newBuild('2026-07-03').bench).toEqual([]);
+  });
+
+  it('buying overflows to the bench once the board is at its day cap', () => {
+    const base = newBuild('2026-07-04', 1); // boardCapForDay(1) = 5
+    const s = {
+      ...base,
+      scrap: 20,
+      board: [
+        { defId: 'dire-rat', tier: 1, relicIds: [] },
+        { defId: 'gnawer', tier: 1, relicIds: [] },
+        { defId: 'rat-piper', tier: 1, relicIds: [] },
+        { defId: 'brood-mother', tier: 1, relicIds: [] },
+        { defId: 'bone-priest', tier: 1, relicIds: [] },
+      ],
+      shop: {
+        ...base.shop,
+        slots: [{ kind: 'unit' as const, defId: 'plague-bearer' }, ...base.shop.slots.slice(1)],
+      },
+    };
+    const res = buyUnit(s, 0);
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.state.board).toHaveLength(5);
+      expect(res.state.bench).toHaveLength(1);
+      expect(res.state.bench[0].defId).toBe('plague-bearer');
+    }
+  });
+
+  it('fails when both the board and the bench are full and no merge completes', () => {
+    const base = newBuild('2026-07-04', 1);
+    const s = {
+      ...base,
+      scrap: 20,
+      board: [
+        { defId: 'dire-rat', tier: 1, relicIds: [] },
+        { defId: 'gnawer', tier: 1, relicIds: [] },
+        { defId: 'rat-piper', tier: 1, relicIds: [] },
+        { defId: 'brood-mother', tier: 1, relicIds: [] },
+        { defId: 'bone-priest', tier: 1, relicIds: [] },
+      ],
+      bench: [
+        { defId: 'plague-bearer', tier: 1, relicIds: [] },
+        { defId: 'warren-warden', tier: 1, relicIds: [] },
+        { defId: 'gutter-runt', tier: 1, relicIds: [] },
+      ],
+      shop: {
+        ...base.shop,
+        slots: [{ kind: 'unit' as const, defId: 'dire-rat' }, ...base.shop.slots.slice(1)],
+      },
+    };
+    const res = buyUnit(s, 0);
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reason).toMatch(/warren and bench/);
+  });
+
+  it('a 3rd copy merges across board+bench: 2 on bench + buy 1 (board full) lands on the bench', () => {
+    const base = newBuild('2026-07-04', 1); // boardCapForDay(1) = 5, keep it full
+    const s = {
+      ...base,
+      scrap: 20,
+      board: [
+        { defId: 'dire-rat', tier: 1, relicIds: [] },
+        { defId: 'gnawer', tier: 1, relicIds: [] },
+        { defId: 'rat-piper', tier: 1, relicIds: [] },
+        { defId: 'brood-mother', tier: 1, relicIds: [] },
+        { defId: 'bone-priest', tier: 1, relicIds: [] },
+      ],
+      bench: [
+        { defId: 'gutter-runt', tier: 1, relicIds: ['rusted-nail'] },
+        { defId: 'gutter-runt', tier: 1, relicIds: ['tail-charm'] },
+      ],
+      shop: {
+        ...base.shop,
+        slots: [{ kind: 'unit' as const, defId: 'gutter-runt' }, ...base.shop.slots.slice(1)],
+      },
+    };
+    const res = buyUnit(s, 0);
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      // The board is full, so the bought copy overflows to the bench —
+      // none of the three gutter-runt copies was ever on the board, so the
+      // merged unit lands on the bench, not the board.
+      expect(res.state.board).toEqual(s.board);
+      expect(res.state.bench).toHaveLength(1);
+      const merged = res.state.bench[0];
+      expect(merged.defId).toBe('gutter-runt');
+      expect(merged.tier).toBe(2);
+      expect(merged.relicIds.sort()).toEqual(['rusted-nail', 'tail-charm']);
+    }
+  });
+
+  it('a merge spanning board+bench lands on the board (board scanned first)', () => {
+    const base = newBuild('2026-07-03');
+    const s = {
+      ...base,
+      scrap: 20,
+      board: [{ defId: 'gutter-runt', tier: 1, relicIds: ['rusted-nail'] }],
+      bench: [{ defId: 'gutter-runt', tier: 1, relicIds: ['tail-charm'] }],
+      shop: {
+        ...base.shop,
+        slots: [{ kind: 'unit' as const, defId: 'gutter-runt' }, ...base.shop.slots.slice(1)],
+      },
+    };
+    const res = buyUnit(s, 0);
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.state.bench).toEqual([]);
+      expect(res.state.board).toHaveLength(1);
+      expect(res.state.board[0].tier).toBe(2);
+      expect(res.state.board[0].relicIds.sort()).toEqual(['rusted-nail', 'tail-charm']);
+    }
+  });
+
+  it('benchUnit moves a board unit to the bench, respecting the bench cap', () => {
+    const base = newBuild('2026-07-03');
+    const s = {
+      ...base,
+      board: [
+        { defId: 'dire-rat', tier: 1, relicIds: [] },
+        { defId: 'gnawer', tier: 1, relicIds: [] },
+      ],
+      bench: [
+        { defId: 'rat-piper', tier: 1, relicIds: [] },
+        { defId: 'brood-mother', tier: 1, relicIds: [] },
+        { defId: 'bone-priest', tier: 1, relicIds: [] },
+      ],
+    };
+    expect(benchUnit(s, 0).ok).toBe(false); // bench already at BENCH_SIZE
+    const room = { ...s, bench: s.bench.slice(0, BENCH_SIZE - 1) };
+    const res = benchUnit(room, 0);
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.state.board.map((u) => u.defId)).toEqual(['gnawer']);
+      expect(res.state.bench.map((u) => u.defId)).toEqual(['rat-piper', 'brood-mother', 'dire-rat']);
+    }
+    expect(benchUnit(s, 99).ok).toBe(false); // nothing there
+  });
+
+  it('deployUnit moves a bench unit onto the board, respecting the day cap', () => {
+    const base = newBuild('2026-07-04', 1); // boardCapForDay(1) = 5
+    const full = {
+      ...base,
+      board: [
+        { defId: 'dire-rat', tier: 1, relicIds: [] },
+        { defId: 'gnawer', tier: 1, relicIds: [] },
+        { defId: 'rat-piper', tier: 1, relicIds: [] },
+        { defId: 'brood-mother', tier: 1, relicIds: [] },
+        { defId: 'bone-priest', tier: 1, relicIds: [] },
+      ],
+      bench: [{ defId: 'plague-bearer', tier: 1, relicIds: [] }],
+    };
+    expect(deployUnit(full, 0).ok).toBe(false); // board is at its day cap
+
+    const withRoom = { ...full, board: full.board.slice(0, 3) };
+    const res = deployUnit(withRoom, 0, 0);
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.state.bench).toEqual([]);
+      expect(res.state.board[0].defId).toBe('plague-bearer');
+      expect(res.state.board).toHaveLength(4);
+    }
+    expect(deployUnit(withRoom, 99).ok).toBe(false); // nothing on the bench there
+  });
+
+  it('deploying a bench unit that completes a trio merges immediately', () => {
+    const base = newBuild('2026-07-03');
+    const s = {
+      ...base,
+      board: [
+        { defId: 'gutter-runt', tier: 1, relicIds: ['rusted-nail'] },
+        { defId: 'gutter-runt', tier: 1, relicIds: [] },
+      ],
+      bench: [{ defId: 'gutter-runt', tier: 1, relicIds: ['tail-charm'] }],
+    };
+    const res = deployUnit(s, 0);
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.state.bench).toEqual([]);
+      expect(res.state.board).toHaveLength(1);
+      expect(res.state.board[0].tier).toBe(2);
+      expect(res.state.board[0].relicIds.sort()).toEqual(['rusted-nail', 'tail-charm']);
+    }
+  });
+
+  it('sellBenchUnit refunds half cost (scaled by tier) and removes the unit', () => {
+    const s = {
+      ...newBuild('2026-07-03'),
+      bench: [
+        { defId: 'dire-rat', tier: 1, relicIds: [] },
+        { defId: 'gutter-runt', tier: 2, relicIds: [] },
+      ],
+    };
+    const afterDire = sellBenchUnit(s, 0);
+    expect(afterDire.ok).toBe(true);
+    if (afterDire.ok) {
+      expect(afterDire.state.scrap).toBe(DAILY_SCRAP + 4);
+      expect(afterDire.state.bench).toHaveLength(1);
+    }
+    const afterRunt = sellBenchUnit(s, 1);
+    expect(afterRunt.ok).toBe(true);
+    if (afterRunt.ok) expect(afterRunt.state.scrap).toBe(DAILY_SCRAP + 2);
+    expect(sellBenchUnit(s, 99).ok).toBe(false);
+  });
+
+  it('advanceAfterDawn carries the bench to the next day (deep-copied)', () => {
+    const day1 = {
+      ...newBuild('2026-07-04', 1),
+      bench: [{ defId: 'gnawer', tier: 2, relicIds: ['rusted-nail'] }],
+    };
+    const day2 = advanceAfterDawn(day1, '2026-07-05');
+    expect(day2.bench).toEqual(day1.bench);
+    expect(day2.bench).not.toBe(day1.bench);
+    expect(day2.bench[0]).not.toBe(day1.bench[0]);
+  });
+
+  it('a new expedition (after the final day) starts with an empty bench', () => {
+    const lastDay = {
+      ...newBuild('2026-07-10', SEASON_DAYS),
+      bench: [{ defId: 'dire-rat', tier: 1, relicIds: [] }],
+    };
+    const next = advanceAfterDawn(lastDay, '2026-07-11');
+    expect(next.bench).toEqual([]);
+  });
+
+  it('when the bench is empty, combineAll behaves exactly like the old board-only combine', () => {
+    const base = newBuild('2026-07-03');
+    const s = {
+      ...base,
+      scrap: 20,
+      board: [
+        { defId: 'gutter-runt', tier: 1, relicIds: ['rusted-nail'] },
+        { defId: 'dire-rat', tier: 1, relicIds: [] },
+        { defId: 'gutter-runt', tier: 1, relicIds: ['tail-charm'] },
+      ],
+      bench: [] as BuildState['bench'],
+      shop: {
+        ...base.shop,
+        slots: [{ kind: 'unit' as const, defId: 'gutter-runt' }, ...base.shop.slots.slice(1)],
+      },
+    };
+    const after = buyUnit(s, 0);
+    expect(after.ok).toBe(true);
+    if (after.ok) {
+      expect(after.state.board).toHaveLength(2);
+      expect(after.state.bench).toEqual([]);
+      const merged = after.state.board.find((u) => u.defId === 'gutter-runt')!;
+      expect(merged.tier).toBe(2);
+      expect(merged.relicIds.sort()).toEqual(['rusted-nail', 'tail-charm']);
+    }
   });
 });

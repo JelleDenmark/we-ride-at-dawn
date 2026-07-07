@@ -21,14 +21,18 @@
     canRecruit,
     buyRelic,
     sellUnit,
+    sellBenchUnit,
     sellRefund,
     rerollShop,
     toggleFreeze,
     moveUnit,
+    benchUnit,
+    deployUnit,
     lineupFromBuild,
     unitStats,
     REROLL_COST,
     BOARD_CAP,
+    BENCH_SIZE,
     type ActionResult,
     type BattleResult,
     type BuildState,
@@ -199,7 +203,7 @@
   }
 
   let pendingRelic = $state<number | null>(null);
-  let inspect = $state<{ area: 'shop' | 'board'; index: number } | null>(null);
+  let inspect = $state<{ area: 'shop' | 'board' | 'bench'; index: number } | null>(null);
   let notice = $state('');
 
   const TRIGGER_WHEN: Record<string, string> = {
@@ -506,6 +510,13 @@
     inspect = { area: 'board', index: boardIndex };
   }
 
+  function clickBenchUnit(benchIndex: number) {
+    // Relics are pinned to fighters, not bench rats — a bench tap while
+    // arming a relic just does nothing (the board stays the valid target).
+    if (pendingRelic !== null) return;
+    inspect = { area: 'bench', index: benchIndex };
+  }
+
   function recruitFromCard(i: number) {
     if (apply(buyUnit(build, i))) inspect = null;
   }
@@ -532,6 +543,21 @@
   function sellFromCard() {
     if (inspect?.area !== 'board') return;
     if (apply(sellUnit(build, inspect.index))) inspect = null;
+  }
+
+  function benchFromCard() {
+    if (inspect?.area !== 'board') return;
+    if (apply(benchUnit(build, inspect.index))) inspect = null;
+  }
+
+  function deployFromCard() {
+    if (inspect?.area !== 'bench') return;
+    if (apply(deployUnit(build, inspect.index))) inspect = null;
+  }
+
+  function sellBenchFromCard() {
+    if (inspect?.area !== 'bench') return;
+    if (apply(sellBenchUnit(build, inspect.index))) inspect = null;
   }
 
   function freeze(i: number, e: Event) {
@@ -653,6 +679,39 @@
         Team: {build.teamRelicIds.map((r) => RELIC_DEFS[r].name).join(', ')}
       </div>
     {/if}
+    </div>
+
+    <div class="bench-panel">
+    <div class="panel-label row-label">
+      <span>the bench · {build.bench.length}/{BENCH_SIZE}</span>
+      <span>held back — never fights</span>
+    </div>
+    <div class="board bench-board">
+      {#each build.bench as unit, bi}
+        {@const stats = unitStats(unit)}
+        <button
+          class="tile unit-tile bench-tile"
+          class:selected={inspect?.area === 'bench' && inspect.index === bi}
+          onclick={() => clickBenchUnit(bi)}
+        >
+          {#if ART_URL[unit.defId]}
+            <img class="portrait" src={ART_URL[unit.defId]} alt="" />
+          {/if}
+          <span class="tile-name">{UNIT_DEFS[unit.defId].name}{unit.tier > 1 ? ` ★${unit.tier}` : ''}</span>
+          <span class="tile-stats">{stats.attack}/{stats.health}</span>
+          <span class="tile-sub">
+            {#if unit.relicIds.length > 0}
+              ✦ {unit.relicIds.map((r) => RELIC_DEFS[r].name).join(', ')}
+            {:else}
+              {UNIT_DEFS[unit.defId].desc ?? ''}
+            {/if}
+          </span>
+        </button>
+      {/each}
+      {#each Array.from({ length: Math.max(0, BENCH_SIZE - build.bench.length) }) as _}
+        <div class="tile empty-tile">empty</div>
+      {/each}
+    </div>
     </div>
 
     <div class="shop-panel">
@@ -887,11 +946,12 @@
             {#if owned}<div class="card-warn">the horde already carries one</div>
             {:else if !afford}<div class="card-warn">not enough scrap</div>{/if}
           {/if}
-        {:else}
+        {:else if ins.area === 'board'}
           {@const unit = build.board[ins.index]}
           {#if unit}
             {@const def = UNIT_DEFS[unit.defId]}
             {@const stats = unitStats(unit)}
+            {@const benchFull = build.bench.length >= BENCH_SIZE}
             <div class="card-head">
               {#if ART_URL[unit.defId]}<img class="card-portrait" src={ART_URL[unit.defId]} alt="" />{/if}
               <div>
@@ -909,9 +969,36 @@
             <div class="card-actions">
               <button disabled={ins.index === 0} onclick={() => moveFromCard(-1)}>front ▶</button>
               <button disabled={ins.index >= build.board.length - 1} onclick={() => moveFromCard(1)}>◀ back</button>
+              <button disabled={benchFull} onclick={benchFromCard}>bench</button>
               <button onclick={sellFromCard}>sell · +{sellRefund(unit)}</button>
               <button onclick={() => (inspect = null)}>close</button>
             </div>
+            {#if benchFull}<div class="card-warn">the bench is full</div>{/if}
+          {/if}
+        {:else}
+          {@const unit = build.bench[ins.index]}
+          {#if unit}
+            {@const def = UNIT_DEFS[unit.defId]}
+            {@const stats = unitStats(unit)}
+            {@const boardFull = build.board.length >= boardCapForDay(build.day)}
+            <div class="card-head">
+              {#if ART_URL[unit.defId]}<img class="card-portrait" src={ART_URL[unit.defId]} alt="" />{/if}
+              <div>
+                <div class="card-name">{def.name}{unit.tier > 1 ? ` ★${unit.tier}` : ''}</div>
+                <div class="card-stats">{stats.attack}/{stats.health}</div>
+              </div>
+            </div>
+            <p class="card-ability">{abilitySentence(unit.defId)}</p>
+            <p class="card-hint">benched rats never fight — deploy to send this one to the horde</p>
+            {#if unit.relicIds.length > 0}
+              <p class="card-relics">✦ {unit.relicIds.map((r) => RELIC_DEFS[r].name).join(', ')}</p>
+            {/if}
+            <div class="card-actions">
+              <button class="primary" disabled={boardFull} onclick={deployFromCard}>deploy</button>
+              <button onclick={sellBenchFromCard}>sell · +{sellRefund(unit)}</button>
+              <button onclick={() => (inspect = null)}>close</button>
+            </div>
+            {#if boardFull}<div class="card-warn">the warren is full</div>{/if}
           {/if}
         {/if}
       </div>
@@ -1115,6 +1202,14 @@
     background: #1c150f;
   }
 
+  .bench-panel {
+    margin-top: 8px;
+    padding: 8px 12px 10px;
+    border: 1px dashed #4a3520;
+    border-radius: 10px;
+    background: #191310;
+  }
+
   .shop-panel {
     margin-top: 14px;
     padding: 10px 12px 12px;
@@ -1182,6 +1277,15 @@
 
   .horde-board .tile {
     direction: ltr;
+  }
+
+  .bench-board {
+    grid-template-columns: repeat(3, 1fr);
+    max-width: 280px;
+  }
+
+  .bench-tile {
+    opacity: 0.92;
   }
 
   .tile {

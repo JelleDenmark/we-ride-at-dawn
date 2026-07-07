@@ -5,6 +5,12 @@ import { CHANNEL } from './env';
 // same origin.
 const NS = CHANNEL === 'prod' ? 'wrad' : 'wrad-dev';
 
+/** Builds saved before the bench feature shipped have no `bench` field —
+ * default it to empty so upgrading players don't hit `undefined.length`. */
+function migrateBuild(build: BuildState): BuildState {
+  return build.bench ? build : { ...build, bench: [] };
+}
+
 /** The horde currently being built for the next dawn (build.date = target ride date). */
 export function savePending(build: BuildState): void {
   try {
@@ -17,7 +23,7 @@ export function savePending(build: BuildState): void {
 export function loadPending(): BuildState | null {
   try {
     const raw = localStorage.getItem(`${NS}:pending`);
-    return raw ? (JSON.parse(raw) as BuildState) : null;
+    return raw ? migrateBuild(JSON.parse(raw) as BuildState) : null;
   } catch {
     return null;
   }
