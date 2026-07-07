@@ -53,3 +53,13 @@ end;
 $function$;
 
 grant execute on function public.submit_score(text, uuid, text, integer, integer, jsonb, bigint) to anon;
+
+-- 3. CRITICAL: adding p_kills changes the arity, so the CREATE OR REPLACE above
+--    did NOT replace the original 6-arg function — it created a SECOND overload.
+--    A 6-arg call (the pre-0.6.0 client, which omits p_kills) then matches BOTH
+--    functions and PostgREST returns 300 PGRST203 ("could not choose the best
+--    candidate"), so every legacy submit fails silently. Drop the old 6-arg
+--    function so 6-arg calls resolve unambiguously to the new one via the
+--    p_kills default. (This was missed on first apply and broke prod submits
+--    2026-07-06→07 until dropped.)
+drop function if exists public.submit_score(text, uuid, text, integer, integer, jsonb);
