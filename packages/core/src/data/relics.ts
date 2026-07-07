@@ -14,6 +14,9 @@ export interface RelicDef {
   healPerTick?: number;
   /** Survive one otherwise-lethal hit at 1 health, once per battle (Tail-Charm). */
   surviveLethal?: boolean;
+  /** Overkill damage that fells the front foe carries to the next enemy in
+   * line, once, no chaining (Gore-Cleaver). */
+  cleaveOverkill?: boolean;
 }
 
 export const RELIC_DEFS: Record<string, RelicDef> = {
@@ -40,5 +43,9 @@ export const RELIC_DEFS: Record<string, RelicDef> = {
   'filth-totem': {
     id: 'filth-totem', name: 'Filth Totem', scope: 'team', cost: 6,
     desc: 'all rats +0/+1', health: 1,
+  },
+  'gore-cleaver': {
+    id: 'gore-cleaver', name: 'Gore-Cleaver', scope: 'unit', cost: 5,
+    desc: 'overkill carries to the next foe', cleaveOverkill: true,
   },
 };

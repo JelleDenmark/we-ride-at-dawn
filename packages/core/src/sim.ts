@@ -349,9 +349,23 @@ export function simulate(
       front.firstAttackDone = true;
       foe.firstAttackDone = true;
 
+      const foeHealthBefore = foe.health;
       applyDamage(foe, damageOut, 'attack');
       applyDamage(front, damageIn, 'attack');
       damageThisWave += damageOut;
+
+      // Gore-Cleaver: overkill damage that actually fells the front foe
+      // carries to the next enemy in line, once, no chaining. Guard against
+      // Tail-Charm (or any future surviveLethal) actually saving the foe —
+      // check post-applyDamage health, not just the raw overkill math.
+      if (front.relics.some((r) => r.cleaveOverkill) && foe.health <= 0) {
+        const overkill = damageOut - foeHealthBefore;
+        const next = enemies[1];
+        if (overkill > 0 && next) {
+          events.push({ type: 'relicProc', targetId: front.instanceId, relicId: 'gore-cleaver', name: 'Gore-Cleaver' });
+          applyDamage(next, overkill, 'attack');
+        }
+      }
 
       if (front.ability?.trigger === 'afterAttack') applyEffect(front, 0, false);
       if (foe.ability?.trigger === 'afterAttack') applyEffect(foe, 0, false);

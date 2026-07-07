@@ -327,15 +327,17 @@ describe('idle economy', () => {
 });
 
 describe('difficulty escalation', () => {
-  it('later expedition days field costlier gauntlets from the same date', () => {
+  it('difficulty no longer scales by expedition day — it is a constant 1', () => {
     const spend = (day: number) =>
       generateGauntlet('2026-07-04', day).waves.reduce(
         (s, w) => s + w.units.reduce((a, u) => a + u.cost, 0),
         0
       );
     expect(difficultyForDay(1)).toBe(1);
-    expect(difficultyForDay(7)).toBeGreaterThan(1);
-    expect(spend(7)).toBeGreaterThan(spend(1));
+    expect(difficultyForDay(7)).toBe(1);
+    // Same date, no day-scaling left: spend is now day-invariant (waves
+    // still escalate by wave INDEX within a gauntlet, just not by day).
+    expect(spend(7)).toBe(spend(1));
   });
 
   it('keeps the same theme regardless of day', () => {

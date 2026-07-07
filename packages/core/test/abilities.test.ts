@@ -145,6 +145,42 @@ describe('relics', () => {
     expect(ofType(events, 'death').length).toBe(1);
   });
 
+  it('Gore-Cleaver carries overkill damage to the next enemy in line, once', () => {
+    // Dire-Rat deals 4; front foe has 1 health, so 3 damage overkills onto
+    // the next enemy (10 health), leaving it at 7 (10 - 3).
+    const { events } = simulate(
+      lineup({ defId: 'dire-rat', relicIds: ['gore-cleaver'] }),
+      gauntletOf([dummy(0, 1), dummy(0, 10)])
+    );
+    const procs = ofType(events, 'relicProc').filter((p) => p.relicId === 'gore-cleaver');
+    expect(procs.length).toBe(1);
+    const damages = ofType(events, 'damage');
+    // First hit fells the front foe (1 dmg absorbed, 3 overkill); the
+    // carried damage event is the 3 onto the second enemy.
+    const carried = damages.find((d) => d.amount === 3);
+    expect(carried).toBeDefined();
+    expect(carried?.remainingHealth).toBe(7);
+  });
+
+  it('Gore-Cleaver does not carry when there is no overkill', () => {
+    const { events } = simulate(
+      lineup({ defId: 'dire-rat', relicIds: ['gore-cleaver'] }),
+      gauntletOf([dummy(0, 100), dummy(0, 10)])
+    );
+    expect(ofType(events, 'relicProc').some((p) => p.relicId === 'gore-cleaver')).toBe(false);
+  });
+
+  it('Gore-Cleaver does not chain past the second enemy in a single clash', () => {
+    // Massive overkill against a weak front foe with two more enemies behind
+    // it: the carried hit lands once on enemies[1] and never chains onward
+    // to enemies[2], even though it would also be lethal there.
+    const { events } = simulate(
+      lineup({ defId: 'dire-rat', relicIds: ['gore-cleaver'] }),
+      gauntletOf([dummy(0, 1), dummy(0, 1), dummy(0, 1)])
+    );
+    expect(ofType(events, 'relicProc').filter((p) => p.relicId === 'gore-cleaver').length).toBe(1);
+  });
+
   it('Filth Totem grants the whole horde +1 health, including summons', () => {
     const { events } = simulate(
       { units: [{ defId: 'rat-piper' }], teamRelicIds: ['filth-totem'] },

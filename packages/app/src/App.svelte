@@ -28,6 +28,7 @@
     lineupFromBuild,
     unitStats,
     REROLL_COST,
+    BOARD_CAP,
     type ActionResult,
     type BattleResult,
     type BuildState,
@@ -235,6 +236,10 @@
         break;
     }
     return `${TRIGGER_WHEN[def.ability.trigger]} it ${what}. Effects scale with tier.`;
+  }
+
+  function isSummoner(defId: string): boolean {
+    return UNIT_DEFS[defId]?.ability?.effect.kind === 'summon';
   }
 
   let stageEl: HTMLDivElement;
@@ -816,6 +821,9 @@
               </div>
             </div>
             <p class="card-ability">{abilitySentence(def.id)}</p>
+            {#if isSummoner(def.id)}
+              <p class="card-hint">summons pause when your warren is full ({BOARD_CAP})</p>
+            {/if}
             <p class="card-hint">recruit three of a kind and they merge into one stronger ★ rat</p>
             <div class="card-actions">
               <button class="primary" disabled={!recruitable} onclick={() => recruitFromCard(ins.index)}>
@@ -861,6 +869,9 @@
               </div>
             </div>
             <p class="card-ability">{abilitySentence(unit.defId)}</p>
+            {#if isSummoner(unit.defId)}
+              <p class="card-hint">summons pause when your warren is full ({BOARD_CAP})</p>
+            {/if}
             {#if unit.relicIds.length > 0}
               <p class="card-relics">✦ {unit.relicIds.map((r) => RELIC_DEFS[r].name).join(', ')}</p>
             {/if}

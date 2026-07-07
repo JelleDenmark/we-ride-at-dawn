@@ -50,16 +50,19 @@ function weightedPick<T>(rng: Rng, items: T[], weight: (item: T) => number): T {
 
 /**
  * Difficulty multiplier for a given expedition day (day 1 = baseline).
- * Kept MODEST by design: the leaderboard metric is max depth over the whole
- * week, so day-scaling must not be the primary difficulty lever (that would
- * let players peak early and coast). Depth difficulty instead comes mainly
- * from enemy-stat scaling by WAVE DEPTH (sim.ts's enemyHealthScale /
- * enemyAttackScale), which is day-agnostic. This curve only needs to grow
- * gently enough that roster growth (board cap, tiers, relics) outpaces it,
- * so achievable depth still rises day 1 -> 7.
+ * Constant **1** for every day: difficulty no longer scales by expedition
+ * day at all. The leaderboard metric is max depth over the whole week, so
+ * day-scaling was never allowed to be the primary lever (that would let
+ * players peak early and coast) — it's now removed entirely rather than just
+ * kept modest. Depth difficulty comes purely from (a) enemy-stat scaling by
+ * WAVE DEPTH (sim.ts's enemyHealthScale / enemyAttackScale), which is
+ * day-agnostic, and (b) roster growth (board cap, tiers, relics) outpacing
+ * that curve as the expedition progresses. Kept as a function (rather than
+ * inlining `1`) purely for API stability — callers and tests still reference
+ * it, and reintroducing day-scaling later (if ever) is a one-line change.
  */
-export function difficultyForDay(day: number): number {
-  return 1 + (day - 1) * 0.05;
+export function difficultyForDay(_day: number): number {
+  return 1;
 }
 
 /**
