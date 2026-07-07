@@ -54,6 +54,16 @@ The game just changed shape. Enemy toughness now **scales with wave depth** (`he
 - Poison: nerf it directly, or counter it purely with `warded` content and let telemetry decide?
 
 ---
+
+## 2. Smaller changes / quick wins
+
+A running list of small, self-contained improvements (distinct from the big backlog above).
+
+- **Shop auto-reroll when emptied (free).** When all stalls have been bought/consumed, automatically reroll the shop **at no scrap cost**, so a player is never left staring at a dead, empty shop. Contained in `core` `shop.ts` (the buy paths + a free-reroll on "shop exhausted") with a test. _(Decide the exact trigger: when every slot is empty, vs. when all unit slots are gone — lean "every slot empty".)_
+- **"harder every dawn" copy fix** — the progression line (`App.svelte:725`, `… interest banked each dawn · harder every dawn`) still claims day-scaling difficulty, which is false post-0.6.0. Reword/remove as part of the broader copy-vs-engine sweep (see the `wrad-copy-vs-engine-audit` memory).
+- **PWA "new version — reload" nudge** — the highest-value bit of the PWA work; being scoped separately (see `PWA-SCOPE.md` once landed). Fixes the stale-tab-after-deploy problem.
+
+---
 ---
 
 # Detailed sections
