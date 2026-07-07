@@ -87,6 +87,18 @@ Independence has some appeal, but the main benefit is **already largely served b
 - **Recommendation:** don't build a full split yet. If a concrete pain shows up in play, the cheaper fix is a **per-row reroll** (reroll just the unit row or just the relic row), not two shops. Revisit only if freeze proves insufficient.
 
 ---
+
+## 4. Balance backlog (from the snowball + unit/relic ranking analysis, `npm run snowball`)
+
+Overall units + relics are well-balanced for this stage. Specific items, in rough priority:
+
+- **Glass Shard is dead weight** (+0.008 depth) — rework. Candidates: (a) fire its first-hit burst **once per wave** instead of once per battle (keeps its identity, minimal change); (b) **life-steal** (% of damage — distinct/attack-scaling, but risks being top-strong, sim at ~25–33%); NOT a flat heal-per-hit (dominated by Fat Tick). Sim options against the WW/gutter/CG board before picking.
+- **Cost ↔ value is loose** ("fix at some point" — Jesper) — value-per-scrap spans ~20× (Warren-Warden **0.178** dominant; gnawer/gutter-runt ~0.01–0.03) and cost barely tracks value (Dire-Rat, priciest at 8, ranks ~4th). A pass to **flatten value-per-scrap**: rein in Warren-Warden's team buff; price down or buff up the laggards so expensive units earn their cost.
+- **Fat Tick / sustain dominance** — top relic (0.142/scrap), and the live board leans on it; mild nerf candidate if we want more relic diversity (not urgent).
+- **Snowball** — a genuine early *power* edge compounds ~3× by day 7 (cash edges get absorbed); wave-depth enemy scaling damps but doesn't erase it. Levers: sub-linear `SCRAP_PER_DEPTH`, catch-up mechanic, steeper late scaling. Slower-burn systemic item.
+- _Not a bug, intentional depth:_ Gore-Cleaver wants a **durable/scaling carry** (Corpse-Glutton's growing health keeps it alive to land cleaves), not "the back line" per se; positioning matters and is self-evident from the rats' flavor (no UI hint needed — Jesper).
+
+---
 ---
 
 # Detailed sections
