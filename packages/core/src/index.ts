@@ -44,6 +44,7 @@ export {
   moveUnit,
   benchUnit,
   deployUnit,
+  swapWithBench,
   lineupFromBuild,
   unitStats,
   DAILY_SCRAP,

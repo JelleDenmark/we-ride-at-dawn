@@ -28,6 +28,7 @@
     moveUnit,
     benchUnit,
     deployUnit,
+    swapWithBench,
     lineupFromBuild,
     unitStats,
     REROLL_COST,
@@ -203,6 +204,10 @@
   }
 
   let pendingRelic = $state<number | null>(null);
+  // Armed "pick a rat to swap out" mode: holds the bench index waiting to be
+  // swapped onto the board. Mirrors pendingRelic's armed-selection pattern;
+  // only one of the two can be armed at a time (arming either clears both).
+  let pendingSwap = $state<number | null>(null);
   let inspect = $state<{ area: 'shop' | 'board' | 'bench'; index: number } | null>(null);
   let notice = $state('');
 
@@ -405,6 +410,7 @@
     saveBuild(build);
     inspect = null;
     pendingRelic = null;
+    pendingSwap = null;
     notice = '';
   }
 
@@ -429,6 +435,7 @@
     saveBuild(build);
     inspect = null;
     pendingRelic = null;
+    pendingSwap = null;
     notice = '';
   }
 
@@ -507,6 +514,10 @@
       if (apply(buyRelic(build, pendingRelic, boardIndex))) pendingRelic = null;
       return;
     }
+    if (pendingSwap !== null) {
+      if (apply(swapWithBench(build, boardIndex, pendingSwap))) pendingSwap = null;
+      return;
+    }
     inspect = { area: 'board', index: boardIndex };
   }
 
@@ -514,6 +525,14 @@
     // Relics are pinned to fighters, not bench rats — a bench tap while
     // arming a relic just does nothing (the board stays the valid target).
     if (pendingRelic !== null) return;
+    // Tapping a (possibly different) bench rat while a swap is armed just
+    // re-arms it on the newly tapped rat, consistent with pendingRelic
+    // letting you re-pick the shop stall before landing on a rat.
+    if (pendingSwap !== null) {
+      pendingSwap = benchIndex;
+      notice = 'pick a rat to swap out';
+      return;
+    }
     inspect = { area: 'bench', index: benchIndex };
   }
 
@@ -528,6 +547,9 @@
       if (apply(buyRelic(build, i))) inspect = null;
     } else {
       // Unit relics need a target: close the card, arm the pick-a-rat mode.
+      // Only one armed-selection mode at a time — arming this one clears
+      // any armed swap.
+      pendingSwap = null;
       pendingRelic = i;
       inspect = null;
       notice = 'pick a rat to carry it';
@@ -555,6 +577,16 @@
     if (apply(deployUnit(build, inspect.index))) inspect = null;
   }
 
+  function swapFromCard() {
+    if (inspect?.area !== 'bench') return;
+    // Only one armed-selection mode at a time — arming this one clears any
+    // armed relic-pin.
+    pendingRelic = null;
+    pendingSwap = inspect.index;
+    inspect = null;
+    notice = 'pick a rat to swap out';
+  }
+
   function sellBenchFromCard() {
     if (inspect?.area !== 'bench') return;
     if (apply(sellBenchUnit(build, inspect.index))) inspect = null;
@@ -574,6 +606,7 @@
     }
     inspect = null;
     pendingRelic = null;
+    pendingSwap = null;
     phase = 'riding';
     result = null;
     player.speed = speed;
@@ -653,7 +686,7 @@
         <button
           class="tile unit-tile"
           class:selected={inspect?.area === 'board' && inspect.index === bi}
-          class:pin-target={pendingRelic !== null}
+          class:pin-target={pendingRelic !== null || pendingSwap !== null}
           onclick={() => clickBoardUnit(bi)}
         >
           {#if ART_URL[unit.defId]}
@@ -692,6 +725,7 @@
         <button
           class="tile unit-tile bench-tile"
           class:selected={inspect?.area === 'bench' && inspect.index === bi}
+          class:arming={pendingSwap === bi}
           onclick={() => clickBenchUnit(bi)}
         >
           {#if ART_URL[unit.defId]}
@@ -989,16 +1023,23 @@
               </div>
             </div>
             <p class="card-ability">{abilitySentence(unit.defId)}</p>
-            <p class="card-hint">benched rats never fight — deploy to send this one to the horde</p>
+            <p class="card-hint">
+              {boardFull
+                ? 'the warren is full — swap this one in for a fighting rat'
+                : 'benched rats never fight — deploy to send this one to the horde'}
+            </p>
             {#if unit.relicIds.length > 0}
               <p class="card-relics">✦ {unit.relicIds.map((r) => RELIC_DEFS[r].name).join(', ')}</p>
             {/if}
             <div class="card-actions">
-              <button class="primary" disabled={boardFull} onclick={deployFromCard}>deploy</button>
+              {#if boardFull}
+                <button class="primary" onclick={swapFromCard}>swap in</button>
+              {:else}
+                <button class="primary" onclick={deployFromCard}>deploy</button>
+              {/if}
               <button onclick={sellBenchFromCard}>sell · +{sellRefund(unit)}</button>
               <button onclick={() => (inspect = null)}>close</button>
             </div>
-            {#if boardFull}<div class="card-warn">the warren is full</div>{/if}
           {/if}
         {/if}
       </div>
@@ -1356,7 +1397,8 @@
     color: #d4af37;
   }
 
-  .relic-tile.arming {
+  .relic-tile.arming,
+  .bench-tile.arming {
     border-color: #d4af37;
     background: #2c2415;
   }

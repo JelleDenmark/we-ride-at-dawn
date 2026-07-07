@@ -10,6 +10,7 @@ import {
   moveUnit,
   benchUnit,
   deployUnit,
+  swapWithBench,
   lineupFromBuild,
   advanceAfterDawn,
   boardCapForDay,
@@ -24,6 +25,7 @@ import {
   type BuildState,
 } from '../src/shop';
 import { UNIT_DEFS } from '../src/data/units';
+import { RELIC_DEFS } from '../src/data/relics';
 import { simulate } from '../src/sim';
 import { generateGauntlet, difficultyForDay } from '../src/gauntlet';
 
@@ -266,6 +268,95 @@ describe('combining', () => {
     const after = must(buyUnit(s, 0)).state;
     const merged = after.board.find((u) => u.defId === 'gutter-runt')!;
     expect(merged.relicIds.sort()).toEqual(['rusted-nail', 'tail-charm']);
+  });
+
+  it('refunds the full relic cost when a duplicate relic is discarded on merge', () => {
+    const base = newBuild('2026-07-03');
+    const nailCost = RELIC_DEFS['rusted-nail'].cost;
+    const s = {
+      ...base,
+      scrap: 20,
+      board: [
+        { defId: 'gutter-runt', tier: 1, relicIds: ['rusted-nail'] },
+        { defId: 'gutter-runt', tier: 1, relicIds: ['rusted-nail'] },
+      ],
+      shop: {
+        ...base.shop,
+        slots: [{ kind: 'unit' as const, defId: 'gutter-runt' }, ...base.shop.slots.slice(1)],
+      },
+    };
+    const after = must(buyUnit(s, 0)).state;
+    const merged = after.board.find((u) => u.defId === 'gutter-runt')!;
+    expect(merged.relicIds).toEqual(['rusted-nail']);
+    // Started with 20 scrap, spent gutter-runt's cost buying the third copy,
+    // then refunded one duplicate Rusted Nail in full.
+    const gutterRuntCost = UNIT_DEFS['gutter-runt'].cost;
+    expect(after.scrap).toBe(20 - gutterRuntCost + nailCost);
+  });
+
+  it('refunds twice when all three merging copies share the same relic', () => {
+    const base = newBuild('2026-07-03');
+    const nailCost = RELIC_DEFS['rusted-nail'].cost;
+    // combineAll only fires from buyUnit/deployUnit. Two copies sit on the
+    // board and the third sits on the bench; deploying the bench copy onto
+    // the board completes the trio without a fresh (relic-less) shop unit
+    // diluting the shared relic.
+    const s = {
+      ...base,
+      scrap: 20,
+      board: [
+        { defId: 'gutter-runt', tier: 1, relicIds: ['rusted-nail'] },
+        { defId: 'gutter-runt', tier: 1, relicIds: ['rusted-nail'] },
+      ],
+      bench: [{ defId: 'gutter-runt', tier: 1, relicIds: ['rusted-nail'] }],
+    };
+    const after = must(deployUnit(s, 0)).state;
+    const merged = after.board.find((u) => u.defId === 'gutter-runt')!;
+    expect(merged.relicIds).toEqual(['rusted-nail']);
+    expect(after.scrap).toBe(20 + 2 * nailCost);
+  });
+
+  it('does not refund a relic carried by only one of the three copies', () => {
+    const base = newBuild('2026-07-03');
+    const s = {
+      ...base,
+      scrap: 20,
+      board: [
+        { defId: 'gutter-runt', tier: 1, relicIds: ['rusted-nail'] },
+        { defId: 'gutter-runt', tier: 1, relicIds: [] },
+      ],
+      shop: {
+        ...base.shop,
+        slots: [{ kind: 'unit' as const, defId: 'gutter-runt' }, ...base.shop.slots.slice(1)],
+      },
+    };
+    const after = must(buyUnit(s, 0)).state;
+    const merged = after.board.find((u) => u.defId === 'gutter-runt')!;
+    expect(merged.relicIds).toEqual(['rusted-nail']);
+    const gutterRuntCost = UNIT_DEFS['gutter-runt'].cost;
+    expect(after.scrap).toBe(20 - gutterRuntCost);
+  });
+
+  it('a unit carrying two relics where only one is shared refunds just that one', () => {
+    const base = newBuild('2026-07-03');
+    const nailCost = RELIC_DEFS['rusted-nail'].cost;
+    const s = {
+      ...base,
+      scrap: 20,
+      board: [
+        { defId: 'gutter-runt', tier: 1, relicIds: ['rusted-nail', 'tail-charm'] },
+        { defId: 'gutter-runt', tier: 1, relicIds: ['rusted-nail'] },
+      ],
+      shop: {
+        ...base.shop,
+        slots: [{ kind: 'unit' as const, defId: 'gutter-runt' }, ...base.shop.slots.slice(1)],
+      },
+    };
+    const after = must(buyUnit(s, 0)).state;
+    const merged = after.board.find((u) => u.defId === 'gutter-runt')!;
+    expect(merged.relicIds.sort()).toEqual(['rusted-nail', 'tail-charm']);
+    const gutterRuntCost = UNIT_DEFS['gutter-runt'].cost;
+    expect(after.scrap).toBe(20 - gutterRuntCost + nailCost);
   });
 });
 
@@ -692,6 +783,89 @@ describe('bench', () => {
       const merged = after.state.board.find((u) => u.defId === 'gutter-runt')!;
       expect(merged.tier).toBe(2);
       expect(merged.relicIds.sort()).toEqual(['rusted-nail', 'tail-charm']);
+    }
+  });
+});
+
+describe('swapping bench and board', () => {
+  it('exchanges the two units, leaving counts unchanged', () => {
+    const s = {
+      ...newBuild('2026-07-03'),
+      board: [
+        { defId: 'dire-rat', tier: 1, relicIds: [] },
+        { defId: 'gnawer', tier: 2, relicIds: ['rusted-nail'] },
+      ],
+      bench: [{ defId: 'rat-piper', tier: 1, relicIds: [] }],
+    };
+    const res = swapWithBench(s, 1, 0);
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.state.board.map((u) => u.defId)).toEqual(['dire-rat', 'rat-piper']);
+      expect(res.state.bench.map((u) => u.defId)).toEqual(['gnawer']);
+      expect(res.state.bench[0].tier).toBe(2);
+      expect(res.state.bench[0].relicIds).toEqual(['rusted-nail']);
+      expect(res.state.board).toHaveLength(2);
+      expect(res.state.bench).toHaveLength(1);
+    }
+  });
+
+  it('rejects invalid board or bench indices', () => {
+    const s = {
+      ...newBuild('2026-07-03'),
+      board: [{ defId: 'dire-rat', tier: 1, relicIds: [] }],
+      bench: [{ defId: 'gnawer', tier: 1, relicIds: [] }],
+    };
+    expect(swapWithBench(s, 99, 0).ok).toBe(false);
+    expect(swapWithBench(s, 0, 99).ok).toBe(false);
+    expect(swapWithBench(s, -1, 0).ok).toBe(false);
+  });
+
+  it('works when both the board and the bench are at capacity', () => {
+    const base = newBuild('2026-07-04', 1); // boardCapForDay(1) = 5
+    const s = {
+      ...base,
+      board: [
+        { defId: 'dire-rat', tier: 1, relicIds: [] },
+        { defId: 'gnawer', tier: 1, relicIds: [] },
+        { defId: 'rat-piper', tier: 1, relicIds: [] },
+        { defId: 'brood-mother', tier: 1, relicIds: [] },
+        { defId: 'bone-priest', tier: 1, relicIds: [] },
+      ],
+      bench: [
+        { defId: 'plague-bearer', tier: 1, relicIds: [] },
+        { defId: 'warren-warden', tier: 1, relicIds: [] },
+        { defId: 'gutter-runt', tier: 1, relicIds: [] },
+      ],
+    };
+    const res = swapWithBench(s, 2, 1);
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.state.board).toHaveLength(5);
+      expect(res.state.bench).toHaveLength(3);
+      expect(res.state.board[2].defId).toBe('warren-warden');
+      expect(res.state.bench[1].defId).toBe('rat-piper');
+    }
+  });
+
+  it('a swap alone cannot complete a merge (the combined multiset is unchanged)', () => {
+    const s = {
+      ...newBuild('2026-07-03'),
+      board: [
+        { defId: 'gutter-runt', tier: 1, relicIds: [] },
+        { defId: 'gutter-runt', tier: 1, relicIds: [] },
+        { defId: 'dire-rat', tier: 1, relicIds: [] },
+      ],
+      bench: [{ defId: 'gutter-runt', tier: 1, relicIds: [] }],
+    };
+    // Swapping the dire-rat for the bench gutter-runt would put all three
+    // gutter-runts on the board — combineAll (run defensively) must merge
+    // them, proving the post-swap combineAll pass is live, not a no-op.
+    const res = swapWithBench(s, 2, 0);
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      const merged = res.state.board.find((u) => u.defId === 'gutter-runt');
+      expect(merged?.tier).toBe(2);
+      expect(res.state.bench.map((u) => u.defId)).toEqual(['dire-rat']);
     }
   });
 });

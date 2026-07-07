@@ -168,10 +168,18 @@ function combineAll(state: BuildState): void {
       const [first, second, third] = matches;
       first.u.tier += 1;
       // Merged veterans pool their trinkets, but the one-of-each rule holds:
-      // duplicates across the three copies collapse into a single relic.
-      first.u.relicIds = [
-        ...new Set([...first.u.relicIds, ...second.u.relicIds, ...third.u.relicIds]),
-      ];
+      // duplicates across the three copies collapse into a single relic. A
+      // relic carried by more than one copy would otherwise be silently
+      // destroyed for free, so each discarded duplicate is refunded in full.
+      const allRelics = [...first.u.relicIds, ...second.u.relicIds, ...third.u.relicIds];
+      const counts = new Map<string, number>();
+      for (const id of allRelics) counts.set(id, (counts.get(id) ?? 0) + 1);
+      let refund = 0;
+      for (const [id, count] of counts) {
+        if (count > 1) refund += (count - 1) * (RELIC_DEFS[id]?.cost ?? 0);
+      }
+      state.scrap += refund;
+      first.u.relicIds = [...new Set(allRelics)];
       // Remove the other two copies from whichever pool they occupy, higher
       // index first so splicing one doesn't shift the other's index.
       for (const rest of [second, third].sort((a, b) => b.idx - a.idx)) {
@@ -330,6 +338,22 @@ export function deployUnit(state: BuildState, benchIndex: number, toBoardIndex?:
       ? s.board.length
       : toBoardIndex;
   s.board.splice(insertAt, 0, moved);
+  combineAll(s);
+  return { ok: true, state: s };
+}
+
+/** Swap a board rat for a bench rat directly — no sale needed even when both
+ * are full, since the counts on each side are unchanged. Runs `combineAll`
+ * afterward defensively for consistency/idempotency, though a pure swap
+ * can't complete a trio (the combined multiset is unchanged). */
+export function swapWithBench(state: BuildState, boardIndex: number, benchIndex: number): ActionResult {
+  if (!state.board[boardIndex]) return fail('no rat there to swap out');
+  if (!state.bench[benchIndex]) return fail('no rat there to swap in');
+  const s = clone(state);
+  const boardUnit = s.board[boardIndex];
+  const benchUnit = s.bench[benchIndex];
+  s.board[boardIndex] = benchUnit;
+  s.bench[benchIndex] = boardUnit;
   combineAll(s);
   return { ok: true, state: s };
 }
