@@ -1,52 +1,73 @@
 # We Ride at Dawn — Handoff Summary
 
-_Last updated 2026-07-04. Companion docs: `plan.md` (full decisions/milestones), `we-ride-at-dawn-spec.md` (original spec). Deeper background lives in Claude Code memory._
+_Last updated **2026-07-07**. **Prod is live on v0.6.0.** Companion docs: **`ROADMAP.md`** (future ideas backlog — read this for what's next), `plan.md` (full decision/milestone history), `we-ride-at-dawn-spec.md` (original spec), `PATCH-0.6.0.md` (the 0.6.0 patch rundown). Deeper background + operational gotchas live in Claude Code memory._
 
 ## What it is
-A grimy dark-fantasy **idle auto-battler**. Build a horde of rats; it auto-rides a gauntlet every hour and hauls back scrap by how deep it pushed. Spend scrap to grow the horde, or leave it running. Wrapped in an escalating 7-day expedition that resets weekly.
+A grimy dark-fantasy **idle auto-battler**. Build a horde of rats; it auto-rides a gauntlet every hour and hauls back scrap by how deep it pushed. Spend scrap to grow the horde, or leave it running. Wrapped in a **synchronized 7-day expedition** that resets weekly (Monday 06:00 CET); a global leaderboard ranks by **deepest wave reached that week**.
 
 ## Stack & ops
-- **Monorepo (npm workspaces), TypeScript.** `packages/core` = pure deterministic game logic (PRNG, seed, gauntlet, sim, shop/economy, seasons) with **54 Vitest tests** + golden-log hashes. `packages/app` = Svelte 5 + PixiJS v8 (shop UI + replay). No game logic in `app`.
-- **Repo:** GitHub `JelleDenmark/we-ride-at-dawn` (public).
-- **Deploy:** two channels off one GitHub Pages site. `master` → **prod** at `…github.io/we-ride-at-dawn/`; `dev` branch → **`/dev/`**. Any push auto-deploys via Actions. Develop on `dev`, merge to `master` when approved.
-- **⚠ GitHub Pages deploy step is flaky** ("Deployment failed, try again later" — infra, not our build). Fix: rerun the failed job, or `gh workflow run "Deploy to GitHub Pages" --ref <branch>` for a fresh run.
-- **⚠ Deploy race — never push `dev` and `master` back-to-back.** The one workflow rebuilds the *whole* site (prod-from-`master` **and** dev-from-`dev`, each at its branch HEAD *at run time*) and deploys all of it, with `concurrency: cancel-in-progress`. If you push `dev` then merge+push `master` seconds later, the dev-triggered run builds prod from the *pre-merge* master and its deploy can land last — pinning prod to the old build while dev looks fine. (Bit us at the 0.5.0 go-live; prod stuck on 0.4.5 until a clean `gh run rerun` of the master run.) **Rule:** push one branch, let its deploy fully finish, then push the other — or just re-run the master deploy after merging to be safe.
-- **User works from a phone — I (Claude) run all git/deploy/verification.** Don't ask them to run terminal commands.
-- **Dev-only testing toolbar** (on `/dev/`): `⏩ +6h income`, `⏭ next day` (crosses week boundaries too), `+10 scrap`, `fresh build`, speed 1×/2×/4×, `skip`.
-- **Analysis tools:** `npm run balance` (strategy depth report), `packages/core/scripts/economy.ts` (idle-creep sim).
+- **Monorepo (npm workspaces), TypeScript.** `packages/core` = pure deterministic game logic (PRNG, seed, gauntlet, sim, shop/economy, seasons) with **65 Vitest tests** + golden-log hashes. `packages/app` = Svelte 5 + PixiJS v8 (shop UI + battle replay). **No game logic lives in `app`.**
+- **Repo:** GitHub `JelleDenmark/we-ride-at-dawn` (public). Develop on `dev`, ship by fast-forwarding `master`.
+- **Deploy:** two channels off one GitHub Pages site. `master` → **prod** at `…github.io/we-ride-at-dawn/`; `dev` branch → **`/dev/`**. Any push auto-deploys via Actions. Version string lives in `packages/app/src/telemetry.ts` (`APP_VERSION`); `-dev` suffix is added for the dev channel via `VITE_CHANNEL`.
+- **⚠ Deploy race — never push `dev` and `master` back-to-back.** The one workflow rebuilds the *whole* site (prod-from-`master` **and** dev-from-`dev`, each at its branch HEAD *at run time*) with `concurrency: cancel-in-progress`. Push one branch, **watch its deploy fully finish (`gh run watch`)**, then push the other. After any prod deploy, **verify the served bundle hash + version yourself** — a green check alone is not proof. (Bit us at 0.5.0 go-live; prod stuck on 0.4.5 until a clean rerun.)
+- **⚠ GitHub Pages deploy step is flaky** ("Deployment failed, try again later" = infra, not our build). Fix: `gh run rerun <id> --failed`, or an empty commit.
+- **⚠ Supabase RPC arity gotcha** (bit us on the 0.6.0 kills migration — see Leaderboard backend below and the `supabase-rpc-arity-gotcha` memory).
+- **User works from a phone — I (Claude) run all git/deploy/verification/SQL.** Don't ask them to run terminal commands. (When a SQL migration needs the Supabase dashboard, hand them the exact statements to paste.)
+- **Dev-only testing toolbar** (on `/dev/`): `⏩ +6h income`, `⏭ next day` (crosses week boundaries), `+10 scrap`, `fresh build`, theme readout, speed 1×/2×/4×, `skip`.
+- **Analysis tools:** `npm run balance` (strategy depth report), `npm run balance:depth` (per-expedition-day achievable-depth curve + relic on/off deltas), `packages/core/scripts/economy.ts` (idle-creep sim).
 
-## Current core loop (SHIPPED TO PROD)
-- Horde rides **hourly** → **+1 scrap per depth** cleared. Income accrues live + offline (≤24h/visit). Depth/income update live as you build.
-- **Hourly variance (dev-only, 2026-07-05):** each ride's waves reshuffle under the fixed daily theme (`generateGauntlet(date, day, hour)`, hour = absolute hour bucket; hourless calls byte-identical for golden logs). Shuffle-only — same budgets/quotas, ±1–2 waves depth swing. Income loop simulates each elapsed hour; **ride log** (last 24: time·depth·scrap·survivors, ★ on the best) shown in the idle panel. **Season best = completed rides only** (preview no longer counts); best ride's hour stored + sent as `rideHour` inside the lineup jsonb for P4 re-sim.
-- **Interest:** paid **daily at dawn**, 5% of bank, **floored, capped at +5** (moved off hourly after a creep sim showed hourly interest was the snowball engine).
-- **Costs ×2, starting scrap 24** (early affordability unchanged; idle scrap worth ~half in units).
-- **7-day expedition:** difficulty steps each dawn (`difficultyForDay`), board cap grows 5→8, scrap carries across days, full reset after day 7.
-- **3 promo infographics** hosted at `…/we-ride-at-dawn/promo/` (gameplay, minions/relics, economy) + gallery `index.html`.
+## Live game — the 0.6.0 core loop
+- Horde rides **hourly** → **+1 scrap per depth** cleared (`SCRAP_PER_DEPTH = 1`). Income accrues live + offline (≤24h per visit, `OFFLINE_RIDE_CAP`). Depth/income update live as you build.
+- **Hourly variance (shuffle-only):** each ride reshuffles wave composition under the fixed **daily theme** (`generateGauntlet(date, day, hour)`; hourless calls stay byte-identical for golden logs). Same budgets/archetype quotas, ~±1–2 wave swing; the scout report stays truthful all day.
+- **Ride log** (last 24 rides: time · depth · **N felled** · scrap, ★ on the season-best row, ⚑ badge on a full clear). Shown in the idle panel.
+- **Season best = completed rides only** (the "watch the next ride" preview does not count). The best ride's hour is stored and sent as `rideHour` inside the lineup jsonb for future anti-cheat re-sim.
+- **"Rats felled this week"** (`seasonKills`): cumulative enemies defeated across completed rides, climbs all week, resets Monday. Shown in the idle panel + per ride-log row + leaderboard rows. It's the **leaderboard tiebreak** behind depth.
+- **7-day expedition:** board cap grows **5→8** across the week, scrap carries across days, full reset after day 7 / at the Monday season boundary.
+- **Replay** ("▶ watch the next ride"): a live preview of the current build. **All players** now get **1×/2×/4× speed** controls + a **"⏭ to final wave"** button (fast-forwards to the last wave, then plays it at normal speed) — previously dev-only.
+- **3 promo infographics** at `…/we-ride-at-dawn/promo/` (gameplay, minions/relics, economy) + gallery.
 
-## Key decisions
-- **Hourly ride variance: shuffle-only, completed-rides-only scoring** *(2026-07-05)* — waves reshuffle per hour under the fixed daily theme (scout report stays truthful); no budget jitter (leaderboard stays mostly skill). Weekly best counts only rides that actually ran; the setting ride's hour rides along in the score payload for anti-cheat. Ride log keeps last 24. Deferred to later: tap-a-log-row to replay that ride (needs lineup stored per row).
-- **Relics: one of each per carrier** *(2026-07-05)* — a rat carries each trinket once, the horde carries each team relic once; merges pool relics but dedupe. Chosen over single-slot/2-slot caps: kills degenerate Rusted-Nail stacking and the no-op duplicate Tail-Charm while keeping combos (Nail+Shard+Charm). Enforced in `core` `buyRelic`/`combineAll` with tests.
-- **Genre:** pivoted from a daily-dawn puzzle to an **idle auto-battler** (dropped the "shared daily puzzle" + "starving economy" pillars — user's call).
-- **Leaderboard score = deepest depth reached during the week** (headline).
-- **Synchronized weeks:** Monday 06:00 CET → Sunday. Expedition day = ISO weekday; `seasonId` = that week's Monday. **Latecomers join cold** at the current day's difficulty (empty horde), equalized by Monday reset.
-- **Leaderboard scope:** global weekly board first; friend groups later.
-- **Player identity:** **require a name** — one-time prompt, themed default (e.g. "Gutter-Warlord"), renameable, keyed by the existing anonymous **device UUID** (upsert best-per-device). Names may collide harmlessly.
-- **Anti-cheat:** deferred (P4). Server re-simulates submitted lineups with the same `core`.
+## Combat & balance model (0.6.0 — the big rework this release)
+- **Front-clash sim:** the frontmost horde unit trades simultaneous damage with the frontmost enemy; **overkill past a kill is discarded** (unless a cleave relic carries it). No back-row targeting; AoE only via specific relics/abilities.
+- **Depth ceiling raised 12 → 45** (`WAVE_COUNT`). It's an aspirational horizon — strong play reaches ~10–16, nobody's near 45.
+- **Difficulty scales by WAVE DEPTH, not by day.** Enemy stats scale on wave index `w` at instantiation in `sim.ts`: health `×(1 + 0.35·w + 0.012·w²)`, attack `×(1 + 0.08·w)` — so deep foes are **HP sponges** and attack finally matters. **Day-scaling was removed** (`difficultyForDay` returns **1**); the wave-budget quadratic was cut `0.15 → 0.05`. Per-day achievable depth is **monotonic ~4 (day 1) → ~12 (day 7), peaking day 7** — you go deeper because your roster grew, not because early days were easier. This was a deliberate fix so there's **no "peak mid-week and coast"** incentive (the leaderboard metric is max depth over the whole week).
+- **Gore-Cleaver relic** (unit, cost 5, `cleaveOverkill`): a killing blow carries its overkill to the next foe (single target, no chaining). It's the lever that makes attack scale against the HP-sponge curve — but it's **back-loaded** (weak early, ~17× Rusted Nail's depth delta but still modest in absolute terms, ~+0.25 waves at day 7). Making attack *punchier* (an execute / on-kill relic) is a roadmap item.
+- **New tanky enemy:** Sluice-Bulwark (atk 2 / hp 16, armored). No SVG art yet (falls back to a rect in replay).
+- **Relics — one of each per carrier:** a rat carries each trinket once, the horde each team relic once; merges pool trinkets but dedupe. Kills degenerate Rusted-Nail stacking and no-op duplicate Tail-Charm while keeping combos.
+- **Poison note:** poison is flat-per-tick and depth-independent, so it scales *relatively* better as foes get tankier — a one-off sim showed it did **not** dominate attack builds, but it hasn't had a broad roster sweep (watch it).
 
-## Leaderboard build — partitioned (in progress)
-- **P1 — Synchronized weekly seasons (client-only): ✅ DONE on `dev`, verified.** Core: `weekdayFor`, `seasonIdFor`, `BuildState.seasonId`. Horde + season-best reset Monday; cold-join; season-best depth tracked & persisted (`saveSeasonBest`). Reset guard compares season dates so dev fast-forward isn't undone.
-- **P2 — Supabase leaderboard backend: ✅ DONE, verified.** Project `wvrllhiktnkvbpclmrpq`. Table `public.scores` (season_id, device_id, name, depth, day, lineup, updated_at; PK (season_id, device_id)) with **public read** RLS. Writes only via `submit_score(p_season, p_device, p_name, p_depth, p_day, p_lineup)` RPC (security-definer, keeps each device's best depth, granted to `anon`). Verified: RPC → 204, board read → 200. Publishable key already in `packages/app/src/telemetry.ts` (`sb_publishable_6S2kGgYAI2gRLhfRxXBY3A_E_mIgpAi`), URL `https://wvrllhiktnkvbpclmrpq.supabase.co`.
-- **P3 — Leaderboard UI: ✅ DONE on `dev`, verified.** New `packages/app/src/leaderboard.ts` (submit/fetch/rank + themed-name generator; reuses telemetry's `deviceId`). App wiring in `App.svelte`: (1) one-time **name-entry modal** (themed default like "Blight-Fang", renameable via a "rename" button; rename modal has a cancel, first-run doesn't) — name stored in `wrad:name` (not channel-namespaced: same warlord on prod+dev); (2) **auto-submit** season-best via `submit_score` on any improvement (signature-guarded so unchanged scores don't re-POST; also resubmits on rename to update the displayed name); (3) **ranked top-20 panel** (GET `/rest/v1/scores?season_id=eq.<id>&order=depth.desc,updated_at.asc&limit=20`) with the player's own row highlighted ("· you"), plus a "your rank #N" line (via `content-range` count of depth>mine) when they're outside the top 20. Board refreshes on mount, every 60s, on submit, and on the manual ↻. Verified end-to-end against live Supabase: submit → row appears, rename → row updates, board renders with highlight. `npm run build` clean.
-  - **Channel isolation (resolved):** the `scores` table is shared, so dev builds now ride a **`dev-`-prefixed season** (`boardSeason()` in `leaderboard.ts`, keyed off `CHANNEL`). Dev submits/reads `dev-<monday>`, prod uses the bare `<monday>`; the panel still shows the real week date. Prod board stays pristine; no schema/RPC change needed. (Prod-side validation still lands in P4.)
-- **P4 — Anti-cheat re-simulation: ⬜ LATER.** Supabase Edge Function re-runs `core` sim to validate submitted depth; reject mismatches.
+## Economy & shop
+- **Costs are ~2× a baseline; starting scrap 24** (`DAILY_SCRAP`). Cheapest units cost 2–6, so a fresh player can recruit ~4–6 rats immediately (a first-run hint now says so).
+- **Interest:** paid **daily at dawn**, 5% of bank, floored, **capped at +5** (`INTEREST_RATE 0.05`, `INTEREST_CAP 5`). **⚠ Likely near-vestigial now** that depth 10+ (≈10+ scrap/hour) is easy — flagged to re-examine next sim run (see `wrad-interest-tuning` memory + ROADMAP economy notes).
+- **Shop:** 4 unit slots + 2 relic slots (`rollOfferings`, deterministic per date/roll). **Reroll costs 1 scrap**; **freeze** holds a stall **through a reroll only** (it resets every dawn — the copy now honestly says "keeps a stall when you reroll", not "for later").
+- **Owned team relics are excluded from the shop** (0.6.0 fix): a team relic can only be held once, so `rollOfferings` filters owned ones and buying one clears any sibling stall — no more dead unbuyable Filth-Totem slot. Unit relics still reappear (a second copy can go on another rat).
+- **Board cap** grows 5→8 across the week (`BOARD_CAP = 8` hard max, incl. summons). **Summons stop when the board is full** — so a second summoner (e.g. two Rat-Pipers) can be starved once the board caps out; there's now a clarity hint on summoner cards ("summons pause when your warren is full (8)"). A proper summon-build rework is a roadmap item.
 
-## Pending / next steps
-1. ~~P3 leaderboard UI~~ ✅ done on `dev`.
-2. **Ship to prod: ✅ LIVE 2026-07-06.** Merged `dev` → `master`; the synchronized season `2026-07-06` started Monday 06:00 CET (client-side rollover). **Prod verified serving 0.5.0** (`index-DHZ62lrD.js`; markers "cleared the drains" / "watch the next ride"), dev serving 0.5.0-dev, launch board empty. Legacy prod players cold-reset into the sync week on first visit. "Wiped" de-emphasized: log rows show time·depth·scrap, only a full 12-wave clear gets a "⚑ cleared the drains!" badge (survivors matter nowhere else — leaderboard is depth-only). *(Go-live initially failed silently — see the deploy-race warning in Stack & ops; prod was stuck on 0.4.5 until a clean rerun of the master deploy.)*
-3. **P4 anti-cheat** later.
-4. **Minor — clean the board before real testers.** Anon key can't delete (read-only + RPC-insert-only), so remove via SQL / service role. **Prod** seasons still hold pre-isolation test rows: `00000000-…-0009` "Test-Warlord" depth 7 and `00000000-…-0001` "Probe-Warlord" depth 3 (season `2026-06-29`); plus a dev-era row on `2026-07-06` (device `dfea602b-…`, depth 8) written before the `dev-` prefix landed. Dev QA now lives harmlessly under `dev-2026-07-06`. Wipe the bare-season rows before launch: `delete from scores where season_id not like 'dev-%';` (or target the specific device ids).
-5. **Open tuning knobs** (untested guesses): idle income rate, difficulty/board/scrap curves, whether "deepest depth" needs a tiebreak. Use `npm run balance` + real telemetry.
-6. **Later:** friend groups; switch nothing else — sync weeks already support it.
+## Leaderboard & Supabase backend
+- **Project `wvrllhiktnkvbpclmrpq`**, URL `https://wvrllhiktnkvbpclmrpq.supabase.co`. Publishable key in `packages/app/src/telemetry.ts` (`sb_publishable_6S2kGgYAI2gRLhfRxXBY3A_E_mIgpAi`).
+- **Table `public.scores`** — `(season_id, device_id, name, depth, day, lineup jsonb, kills bigint, updated_at)`, PK `(season_id, device_id)`, **public-read** RLS. Writes only via the `submit_score` RPC.
+- **RPC `submit_score(p_season, p_device, p_name, p_depth, p_day, p_lineup, p_kills default 0)`** — security-definer upsert: keeps best depth (`greatest`), keeps `greatest(kills)` (monotonic season total), sanitizes name (`left(coalesce(nullif(p_name,''),'Warlord'),24)`), clamps `greatest(p_depth,0)`. Granted to `anon`.
+- **⚠ RPC arity bug (fixed 2026-07-07):** the kills migration added `p_kills` (6→7 args), and `CREATE OR REPLACE` with a new arity **creates a second overload** instead of replacing. 6-arg (pre-0.6.0) callers then matched both → PostgREST `300 PGRST203` → **prod submits failed silently, freezing the board 2026-07-06→07**. Fixed by dropping the old 6-arg function (`drop function if exists public.submit_score(text, uuid, text, integer, integer, jsonb);`). Migration file corrected; both 6- and 7-arg calls verified → 204. **Lesson (memory `supabase-rpc-arity-gotcha`): after any RPC signature change, drop the old signature and verify a 204 for every deployed client's arg shape.**
+- **Client (`packages/app/src/leaderboard.ts`):** `submitScore` sends `p_kills`; `fetchTop` orders `depth.desc,kills.desc,updated_at.asc`; `fetchRank` counts riders strictly deeper **or** tied-depth-more-kills (`or=(depth.gt.X,and(depth.eq.X,kills.gt.Y))`). Board refreshes on mount, every 60s, on submit, and via the ↻ button.
+- **Channel isolation:** the table is shared, so dev writes/reads a **`dev-`-prefixed season** (`boardSeason()` keyed on `CHANNEL`); prod uses the bare `<monday>`. Prod board stays clean.
+- **Player identity:** one-time themed name (e.g. "Gutter-Warlord"), renameable, keyed by the anonymous **device UUID** (from telemetry). Names may collide harmlessly. Portable identity (magic-link/recovery code) is a roadmap prerequisite for friend groups/streaks.
+
+## Deploy state (as of 2026-07-07)
+- **Prod: v0.6.0**, verified serving `index-RbDxdpOe.js` (byte-identical to a local prod-channel build) with version marker `0.6.0`.
+- **Dev: v0.6.0-dev.**
+- `master` = the full 0.6.0 batch (`8da39d3`). `origin/dev` trails local `dev` by a doc-only commit (the migration-record fix) — safe to sync when convenient.
+- **This week's board is mixed-curve:** 0.6.0 shipped mid-week (2026-07-07), so pre-existing depth-4/5 scores (old 12-wave curve) sit beside new depth-scaled rides; it self-normalizes as players ride and **fully resets clean next Monday**. (For future balance changes, prefer shipping at the Monday reset.)
+
+## What's next
+**See `ROADMAP.md` for the full forward backlog** — an overnight 5-agent Opus design panel across: new archetypes & minions (incl. a poison-immune `warded` line), relics/combat-systems/meta-progression (Gore-Cleaver shipped; execute/on-kill next, all-time board, damage-type RPS), seasons & weekly anomalies (`anomalyFor(seasonId)` with a depth-neutral/distorting fairness firewall), easter eggs & lore (Rat King, 45-clear payoff, world bible), and retention/social/growth (**share card + celebrated PB**, PWA install + push, onboarding, friend groups). It leads with a synthesized **Now / Next / Later** priority view.
+
+**Immediate open items (tuning + gaps):**
+1. **Interest** — likely negligible now; re-test next sim (`wrad-interest-tuning` memory).
+2. **Attack punchiness** — Gore-Cleaver is back-loaded; consider an execute/on-kill relic so attack feels impactful earlier.
+3. **Poison** — passed a single check, not a broad sweep; watch for dominance.
+4. **Summon-build rework** — board cap starves a 2nd summoner; clarity hint shipped, real fix pending.
+5. **P4 anti-cheat (deferred):** a Supabase Edge Function re-runs `core` to validate submitted depth against `(seasonId, day, rideHour, lineup)`. Note: the cumulative `kills` total can't be re-simulated from one ride — validate depth per ride, and consider bounding per-submission kill jumps.
+6. **Friend groups** — global board ships first; sync weeks already support it (gate behind portable identity).
+7. **Housekeeping:** two throwaway diagnostic rows may linger under season `diag-overload-2026-07-07` (`delete from scores where season_id = 'diag-overload-2026-07-07';`).
 
 ## URLs
 - Play (prod): https://jelledenmark.github.io/we-ride-at-dawn/
