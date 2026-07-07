@@ -1,6 +1,7 @@
 // Discord "Feedback & Support" bot for We Ride at Dawn (WRAD).
 // Runs as a Supabase Edge Function acting as Discord's Interactions Endpoint.
-// Storage is Discord-only: submissions are posted as embeds with a thread each.
+// Submissions are posted as embeds with a thread each, and also recorded
+// best-effort in the private Supabase `feedback` table.
 import { verifyDiscordSignature } from "./verify.ts";
 
 const DISCORD_BOT_TOKEN = Deno.env.get("DISCORD_BOT_TOKEN") ?? "";
@@ -147,7 +148,10 @@ async function postMessage(embed: unknown): Promise<string | null> {
   return msg.id ?? null;
 }
 
-async function createThread(messageId: string, name: string): Promise<void> {
+async function createThread(
+  messageId: string,
+  name: string,
+): Promise<string | null> {
   try {
     const res = await fetch(
       `${DISCORD_API}/channels/${CHANNEL_ID}/messages/${messageId}/threads`,
@@ -159,9 +163,55 @@ async function createThread(messageId: string, name: string): Promise<void> {
     );
     if (!res.ok) {
       console.error("createThread failed", res.status, await res.text());
+      return null;
     }
+    const thread = await res.json();
+    return thread.id ?? null;
   } catch (e) {
     console.error("createThread error", e);
+    return null;
+  }
+}
+
+// ---- Supabase persistence (best-effort secondary record) ------------------
+// SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are auto-injected into edge
+// functions. The service role bypasses RLS, so it can write to the private
+// `feedback` table (which has RLS on and no policies). Failures here MUST NOT
+// affect the user's response — Discord posting stays the source of truth.
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
+const SUPABASE_SERVICE_ROLE_KEY =
+  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+
+async function saveFeedback(row: {
+  type: ReportType;
+  author_name: string;
+  author_id: string;
+  guild_id: string | null;
+  channel_id: string;
+  message_id: string;
+  thread_id: string | null;
+  content: Record<string, string>;
+}): Promise<void> {
+  try {
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+      console.error("saveFeedback skipped: missing SUPABASE env");
+      return;
+    }
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/feedback`, {
+      method: "POST",
+      headers: {
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+      },
+      body: JSON.stringify(row),
+    });
+    if (!res.ok) {
+      console.error("saveFeedback failed", res.status, await res.text());
+    }
+  } catch (e) {
+    console.error("saveFeedback error", e);
   }
 }
 
@@ -313,9 +363,23 @@ Deno.serve(async (req: Request) => {
     );
 
     const messageId = await postMessage(embed);
+    let threadId: string | null = null;
     if (messageId) {
       const threadName = truncate(`${title}: ${firstAnswer}`, 90);
-      await createThread(messageId, threadName);
+      threadId = await createThread(messageId, threadName);
+
+      // Best-effort: also record the submission in Supabase. Never let this
+      // change the user's response or throw (see saveFeedback).
+      await saveFeedback({
+        type: reportType,
+        author_name: submitter.name,
+        author_id: submitter.id,
+        guild_id: interaction.guild_id ?? null,
+        channel_id: CHANNEL_ID,
+        message_id: messageId,
+        thread_id: threadId,
+        content: values,
+      });
     }
 
     return json({
