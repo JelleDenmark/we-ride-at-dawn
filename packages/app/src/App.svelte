@@ -69,6 +69,7 @@
     isMe,
     type BoardRow,
   } from './leaderboard';
+  import { startUpdateCheck } from './updateCheck';
 
   function addDay(date: string): string {
     return new Date(Date.parse(`${date}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
@@ -247,6 +248,22 @@
   let phase: 'idle' | 'riding' | 'done' = $state('idle');
   let result: BattleResult | null = $state(null);
 
+  // Stale-tab fix (PWA-SCOPE.md Phase 1): a deployed build never reaches an
+  // already-open tab on its own. `updateAvailable` flips true when the
+  // poller notices `./index.html` now points at a different entry bundle
+  // than the one this tab booted with; `updateDismissed` hides the banner
+  // until the next detection re-shows it (simple by design).
+  let updateAvailable = $state(false);
+  let updateDismissed = $state(false);
+
+  function dismissUpdateBanner() {
+    updateDismissed = true;
+  }
+
+  function reloadForUpdate() {
+    location.reload();
+  }
+
   onMount(() => {
     // Persist the income clock on first ever load so offline hours accrue
     // from here on (without this, each reload would reset the baseline).
@@ -255,6 +272,10 @@
     // Load the board now, then keep it loosely fresh while the tab is open.
     void refreshBoard();
     const boardId = setInterval(() => void refreshBoard(), 60_000);
+    const stopUpdateCheck = startUpdateCheck(() => {
+      updateDismissed = false;
+      updateAvailable = true;
+    });
     void (async () => {
       player = new ReplayPlayer();
       await player.init(stageEl);
@@ -262,6 +283,7 @@
     return () => {
       clearInterval(id);
       clearInterval(boardId);
+      stopUpdateCheck();
     };
   });
 
@@ -543,7 +565,16 @@
   }
 </script>
 
-<main>
+{#if updateAvailable && !updateDismissed}
+  <div class="update-banner" role="status">
+    <button class="update-banner-reload" onclick={reloadForUpdate}>
+      ⚔ a fresh build rode in — tap to reload
+    </button>
+    <button class="update-banner-dismiss" onclick={dismissUpdateBanner} aria-label="dismiss">✕</button>
+  </div>
+{/if}
+
+<main class:update-banner-open={updateAvailable && !updateDismissed}>
   <h1>WE RIDE AT DAWN</h1>
   <p class="sub">
     Week of {build.seasonId} · day {build.day}/{SEASON_DAYS} · rides hourly{CHANNEL === 'dev'
@@ -913,11 +944,54 @@
 </main>
 
 <style>
+  .update-banner {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 100;
+    display: flex;
+    align-items: stretch;
+    justify-content: center;
+    background: var(--accent);
+    border-bottom: 1px solid #7a3018;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+  }
+
+  .update-banner-reload {
+    flex: 1;
+    max-width: 940px;
+    padding: 8px 12px;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: bold;
+    color: #f5ead2;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+  }
+
+  .update-banner-dismiss {
+    padding: 8px 14px;
+    font-family: inherit;
+    font-size: 13px;
+    color: #f5ead2;
+    background: transparent;
+    border: none;
+    border-left: 1px solid #7a3018;
+    cursor: pointer;
+    opacity: 0.85;
+  }
+
   main {
     max-width: 940px;
     margin: 0 auto;
     padding: 24px 16px 48px;
     text-align: center;
+  }
+
+  main.update-banner-open {
+    padding-top: 60px;
   }
 
   h1 {
