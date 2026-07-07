@@ -74,21 +74,34 @@ export type ActionResult = { ok: true; state: BuildState } | { ok: false; reason
 const SHOP_UNIT_POOL = Object.values(UNIT_DEFS).filter((u) => u.id !== 'pup');
 const SHOP_RELIC_POOL = Object.values(RELIC_DEFS);
 
-/** Offerings are a pure function of (date, roll #) so rerolls are deterministic. */
-export function rollOfferings(date: string, roll: number): ShopSlot[] {
+/**
+ * Offerings are deterministic for a given (date, roll #, owned team relics).
+ * A team relic the horde already carries can never be bought again, so it's
+ * filtered out of the pool rather than rolled as a dead, unbuyable stall.
+ * With no owned team relics the pool is the full set, so callers that omit the
+ * argument (and the golden path) are byte-identical to before.
+ */
+export function rollOfferings(
+  date: string,
+  roll: number,
+  ownedTeamRelics: readonly string[] = []
+): ShopSlot[] {
   const rng = xorshift128(fnv1a(`${date}#shop#${roll}`));
+  const relicPool = SHOP_RELIC_POOL.filter(
+    (r) => !(r.scope === 'team' && ownedTeamRelics.includes(r.id))
+  );
   const slots: ShopSlot[] = [];
   for (let i = 0; i < SHOP_UNIT_SLOTS; i++) {
     slots.push({ kind: 'unit', defId: SHOP_UNIT_POOL[rng.int(SHOP_UNIT_POOL.length)].id });
   }
   for (let i = 0; i < SHOP_RELIC_SLOTS; i++) {
-    slots.push({ kind: 'relic', relicId: SHOP_RELIC_POOL[rng.int(SHOP_RELIC_POOL.length)].id });
+    slots.push({ kind: 'relic', relicId: relicPool[rng.int(relicPool.length)].id });
   }
   return slots;
 }
 
-export function newBuild(date: string, day = 1): BuildState {
-  const slots = rollOfferings(date, 0);
+export function newBuild(date: string, day = 1, ownedTeamRelics: readonly string[] = []): BuildState {
+  const slots = rollOfferings(date, 0, ownedTeamRelics);
   return {
     date,
     seasonId: seasonIdFor(date),
@@ -107,7 +120,7 @@ export function newBuild(date: string, day = 1): BuildState {
  */
 export function advanceAfterDawn(build: BuildState, nextDate: string): BuildState {
   if (build.day >= SEASON_DAYS) return newBuild(nextDate, 1);
-  const next = newBuild(nextDate, build.day + 1);
+  const next = newBuild(nextDate, build.day + 1, build.teamRelicIds);
   next.board = build.board.map((u) => ({ ...u, relicIds: [...u.relicIds] }));
   next.teamRelicIds = [...build.teamRelicIds];
   // Scrap is accumulated idle income — it carries across days, not reset.
@@ -191,6 +204,18 @@ export function buyRelic(state: BuildState, slotIndex: number, targetIndex?: num
   else s.board[targetIndex!].relicIds.push(relic.id);
   s.shop.slots[slotIndex] = { kind: 'empty' };
   s.shop.frozen[slotIndex] = false;
+  // A team relic can only be held once, so clear any *other* stall in the
+  // current shop still offering it — it just became unbuyable. (Future rolls
+  // already exclude it via rollOfferings.)
+  if (relic.scope === 'team') {
+    for (let i = 0; i < s.shop.slots.length; i++) {
+      const other = s.shop.slots[i];
+      if (other.kind === 'relic' && other.relicId === relic.id) {
+        s.shop.slots[i] = { kind: 'empty' };
+        s.shop.frozen[i] = false;
+      }
+    }
+  }
   return { ok: true, state: s };
 }
 
@@ -213,7 +238,7 @@ export function rerollShop(state: BuildState): ActionResult {
   const s = clone(state);
   s.scrap -= REROLL_COST;
   s.shop.rolls += 1;
-  const fresh = rollOfferings(s.date, s.shop.rolls);
+  const fresh = rollOfferings(s.date, s.shop.rolls, s.teamRelicIds);
   s.shop.slots = s.shop.slots.map((old, i) =>
     s.shop.frozen[i] && old.kind !== 'empty' ? old : fresh[i]
   );

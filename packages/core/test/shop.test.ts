@@ -180,6 +180,35 @@ describe('relics in the shop', () => {
     // Duplicate team relic: rejected.
     expect(buyRelic(s, 1).ok).toBe(false);
   });
+
+  it('an owned team relic leaves the shop and never re-rolls', () => {
+    const base = newBuild('2026-07-03');
+    let s = {
+      ...base,
+      scrap: 50,
+      teamRelicIds: [] as string[],
+      shop: {
+        ...base.shop,
+        // The same team relic offered in two stalls at once.
+        slots: [
+          { kind: 'relic' as const, relicId: 'filth-totem' },
+          { kind: 'relic' as const, relicId: 'filth-totem' },
+          ...base.shop.slots.slice(2),
+        ],
+      },
+    };
+    // Buying one clears the sibling stall offering the same team relic.
+    s = must(buyRelic(s, 0)).state;
+    expect(s.teamRelicIds).toEqual(['filth-totem']);
+    expect(s.shop.slots[0]).toEqual({ kind: 'empty' });
+    expect(s.shop.slots[1]).toEqual({ kind: 'empty' });
+    // And it never returns on later rerolls.
+    for (let n = 0; n < 12; n++) {
+      s = must(rerollShop({ ...s, scrap: 50 })).state;
+      const stillThere = s.shop.slots.some((sl) => sl.kind === 'relic' && sl.relicId === 'filth-totem');
+      expect(stillThere).toBe(false);
+    }
+  });
 });
 
 describe('combining', () => {
