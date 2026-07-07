@@ -326,6 +326,10 @@ export function simulate(
     );
     events.push({ type: 'waveStart', wave: w + 1, enemies: enemies.map(view) });
     damageThisWave = 0;
+    // First-hit relics (Glass Shard) fire anew each wave — clear the horde's
+    // "already swung" flag at every wave start. Enemies are re-instantiated
+    // per wave, so they begin fresh already.
+    for (const u of horde) u.firstAttackDone = false;
 
     fireStartOfBattle(horde);
     fireStartOfBattle(enemies);

@@ -26,7 +26,7 @@ export const RELIC_DEFS: Record<string, RelicDef> = {
   },
   'glass-shard': {
     id: 'glass-shard', name: 'Glass Shard', scope: 'unit', cost: 4,
-    desc: '+3 dmg on first hit', firstHitBonus: 3,
+    desc: '+3 dmg on the first hit of each wave', firstHitBonus: 3,
   },
   'weeping-boil': {
     id: 'weeping-boil', name: 'Weeping Boil', scope: 'unit', cost: 4,
