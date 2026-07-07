@@ -270,7 +270,7 @@ describe('combining', () => {
     expect(merged.relicIds.sort()).toEqual(['rusted-nail', 'tail-charm']);
   });
 
-  it('refunds the full relic cost when a duplicate relic is discarded on merge', () => {
+  it('refunds half the relic cost when a duplicate relic is discarded on merge', () => {
     const base = newBuild('2026-07-03');
     const nailCost = RELIC_DEFS['rusted-nail'].cost;
     const s = {
@@ -289,12 +289,13 @@ describe('combining', () => {
     const merged = after.board.find((u) => u.defId === 'gutter-runt')!;
     expect(merged.relicIds).toEqual(['rusted-nail']);
     // Started with 20 scrap, spent gutter-runt's cost buying the third copy,
-    // then refunded one duplicate Rusted Nail in full.
+    // then refunded one duplicate Rusted Nail at half cost.
     const gutterRuntCost = UNIT_DEFS['gutter-runt'].cost;
-    expect(after.scrap).toBe(20 - gutterRuntCost + nailCost);
+    const nailRefund = Math.max(1, Math.floor(nailCost / 2));
+    expect(after.scrap).toBe(20 - gutterRuntCost + nailRefund);
   });
 
-  it('refunds twice when all three merging copies share the same relic', () => {
+  it('refunds twice (at half each) when all three merging copies share the same relic', () => {
     const base = newBuild('2026-07-03');
     const nailCost = RELIC_DEFS['rusted-nail'].cost;
     // combineAll only fires from buyUnit/deployUnit. Two copies sit on the
@@ -313,7 +314,8 @@ describe('combining', () => {
     const after = must(deployUnit(s, 0)).state;
     const merged = after.board.find((u) => u.defId === 'gutter-runt')!;
     expect(merged.relicIds).toEqual(['rusted-nail']);
-    expect(after.scrap).toBe(20 + 2 * nailCost);
+    const nailRefund = Math.max(1, Math.floor(nailCost / 2));
+    expect(after.scrap).toBe(20 + 2 * nailRefund);
   });
 
   it('does not refund a relic carried by only one of the three copies', () => {
@@ -356,7 +358,8 @@ describe('combining', () => {
     const merged = after.board.find((u) => u.defId === 'gutter-runt')!;
     expect(merged.relicIds.sort()).toEqual(['rusted-nail', 'tail-charm']);
     const gutterRuntCost = UNIT_DEFS['gutter-runt'].cost;
-    expect(after.scrap).toBe(20 - gutterRuntCost + nailCost);
+    const nailRefund = Math.max(1, Math.floor(nailCost / 2));
+    expect(after.scrap).toBe(20 - gutterRuntCost + nailRefund);
   });
 });
 

@@ -170,13 +170,16 @@ function combineAll(state: BuildState): void {
       // Merged veterans pool their trinkets, but the one-of-each rule holds:
       // duplicates across the three copies collapse into a single relic. A
       // relic carried by more than one copy would otherwise be silently
-      // destroyed for free, so each discarded duplicate is refunded in full.
+      // destroyed for free, so each discarded duplicate is refunded at half
+      // its cost (matching the unit sell rate — a full refund let you buy
+      // power for free early on).
       const allRelics = [...first.u.relicIds, ...second.u.relicIds, ...third.u.relicIds];
       const counts = new Map<string, number>();
       for (const id of allRelics) counts.set(id, (counts.get(id) ?? 0) + 1);
       let refund = 0;
       for (const [id, count] of counts) {
-        if (count > 1) refund += (count - 1) * (RELIC_DEFS[id]?.cost ?? 0);
+        const cost = RELIC_DEFS[id]?.cost;
+        if (count > 1 && cost !== undefined) refund += (count - 1) * Math.max(1, Math.floor(cost / 2));
       }
       state.scrap += refund;
       first.u.relicIds = [...new Set(allRelics)];
