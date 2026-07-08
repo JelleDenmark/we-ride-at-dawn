@@ -32,7 +32,7 @@
     lineupFromBuild,
     unitStats,
     REROLL_COST,
-    combatCapForDay,
+    BOARD_CAP,
     BENCH_SIZE,
     type ActionResult,
     type BattleResult,
@@ -847,7 +847,7 @@
           <div class="stat"><span class="stat-big">{formatCountdown(secondsToNextHour)}</span><span class="stat-lbl">rides in</span></div>
         </div>
         <p class="idle-note">
-          +{SCRAP_PER_DEPTH} scrap per depth cleared, every hour · +{interestFor(build.scrap)} interest banked each dawn · harder every dawn
+          +{SCRAP_PER_DEPTH} scrap per depth cleared, every hour · +{interestFor(build.scrap)} interest banked each dawn · gets tougher deeper
         </p>
         <button class="watch" onclick={watchRide}>▶ watch the next ride</button>
         <p class="season-best">Deepest ride this week: <strong>wave {seasonBest}</strong> · resets Monday</p>
@@ -947,7 +947,7 @@
             </div>
             <p class="card-ability">{abilitySentence(def.id)}</p>
             {#if isSummoner(def.id)}
-              <p class="card-hint">summoned rats fight beyond your warren's size (up to {combatCapForDay(build.day)} in the drains)</p>
+              <p class="card-hint">summons pause when your warren is full ({BOARD_CAP})</p>
             {/if}
             <p class="card-hint">recruit three of a kind and they merge into one stronger ★ rat</p>
             <div class="card-actions">
@@ -996,7 +996,7 @@
             </div>
             <p class="card-ability">{abilitySentence(unit.defId)}</p>
             {#if isSummoner(unit.defId)}
-              <p class="card-hint">summoned rats fight beyond your warren's size (up to {combatCapForDay(build.day)} in the drains)</p>
+              <p class="card-hint">summons pause when your warren is full ({BOARD_CAP})</p>
             {/if}
             {#if unit.relicIds.length > 0}
               <p class="card-relics">✦ {unit.relicIds.map((r) => RELIC_DEFS[r].name).join(', ')}</p>
