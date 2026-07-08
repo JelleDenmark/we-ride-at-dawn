@@ -6,9 +6,14 @@ import { CHANNEL } from './env';
 const NS = CHANNEL === 'prod' ? 'wrad' : 'wrad-dev';
 
 /** Builds saved before the bench feature shipped have no `bench` field —
- * default it to empty so upgrading players don't hit `undefined.length`. */
+ * default it to empty so upgrading players don't hit `undefined.length`.
+ * Builds saved before buyable horde slots (issue #9) have no `purchasedSlots`
+ * field — default it to 0, which is byte-identical to pre-feature behavior. */
 function migrateBuild(build: BuildState): BuildState {
-  return build.bench ? build : { ...build, bench: [] };
+  const withBench = build.bench ? build : { ...build, bench: [] };
+  return withBench.purchasedSlots === undefined
+    ? { ...withBench, purchasedSlots: 0 }
+    : withBench;
 }
 
 /** The horde currently being built for the next dawn (build.date = target ride date). */

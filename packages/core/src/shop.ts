@@ -37,9 +37,66 @@ export function boardCapForDay(day: number): number {
  * board plus `COMBAT_CAP_BONUS` of summon headroom (7,7,8,8,9,9,10 on days
  * 1–7). Recruiting still stops at `boardCapForDay`; the extra slots exist only
  * so a summoner's pups aren't silently swallowed by a full warren.
+ *
+ * This is the pure, day-only calculation (no purchased slots) — kept for
+ * callers that only have a day number. Builds that may have bought extra
+ * board slots (see `SLOT_PRICES`/`buyBoardSlot`) must use `combatCapForBuild`
+ * instead, since a purchased slot raises the recruitable board and combat
+ * must always have room for every recruited rat plus the summon headroom.
  */
 export function combatCapForDay(day: number): number {
   return boardCapForDay(day) + COMBAT_CAP_BONUS;
+}
+
+/**
+ * Late-game scrap sink (issue #9): buy extra board slots beyond the day's
+ * natural `boardCapForDay`, up to the hard `BOARD_CAP = 8` ceiling. Purchased
+ * slots persist for the rest of the expedition (carried by `advanceAfterDawn`,
+ * reset to 0 on a fresh season by `newBuild`) and stack additively on top of
+ * whatever the day's own cap is: `effectiveBoardCap = min(BOARD_CAP,
+ * boardCapForDay(day) + purchasedSlots)`.
+ *
+ * Prices are derived from `scripts/slot-value.ts`, which sims a strong,
+ * actively-improving roster's average wave-depth at each purchasable-slot
+ * count across a full 7-day expedition (bought day 1, held all week) and
+ * converts the wave-depth delta into scrap via `SCRAP_PER_DEPTH` (1 scrap per
+ * wave, per hourly ride, ×24 rides/day). Derived weekly scrap-equivalent
+ * values came out at ~36 / ~20 / ~7 for the 1st/2nd/3rd slot (diminishing —
+ * each slot buys less depth as the board nears the hard cap and overkill
+ * damage stops being useful). Since even the most valuable (1st) slot's
+ * entire week of value barely exceeds one day's scrap stipend
+ * (`DAILY_SCRAP = 24`), pricing at raw value wouldn't trivialize the economy —
+ * but a flat/declining ladder would make the *later* slots strictly worse
+ * buys than the first, which reads as a bug rather than "rare late-game
+ * luxury." So the ladder is rounded up and forced strictly increasing:
+ * scarcer real estate near the hard cap costs more even though its raw
+ * depth-payback is smaller — that premium is what makes it a genuine
+ * end-of-run scrap sink rather than a rational early buy.
+ */
+export const SLOT_PRICES: readonly number[] = [36, 40, 44];
+
+/** How many rats the board may hold given the day's natural cap plus any
+ * board slots this build has purchased, hard-capped at `BOARD_CAP`. */
+export function effectiveBoardCap(state: Pick<BuildState, 'day' | 'purchasedSlots'>): number {
+  return Math.min(BOARD_CAP, boardCapForDay(state.day) + (state.purchasedSlots ?? 0));
+}
+
+/**
+ * Combat headroom for a specific build: the build's *effective* (possibly
+ * purchase-expanded) board cap plus `COMBAT_CAP_BONUS` summon headroom. Always
+ * at least as large as the recruited board, so buying slots can never starve
+ * a summoner — the purchased headroom and the summon headroom stack rather
+ * than compete.
+ */
+export function combatCapForBuild(state: Pick<BuildState, 'day' | 'purchasedSlots'>): number {
+  return effectiveBoardCap(state) + COMBAT_CAP_BONUS;
+}
+
+/** Scrap cost of the next board slot this build could buy, or `undefined` if
+ * it's already at (or the natural cap already reached) `BOARD_CAP`. */
+export function nextSlotPrice(state: Pick<BuildState, 'day' | 'purchasedSlots'>): number | undefined {
+  if (effectiveBoardCap(state) >= BOARD_CAP) return undefined;
+  return SLOT_PRICES[state.purchasedSlots ?? 0];
 }
 
 // Synchronized seasons: a week runs Monday→Sunday, so the expedition day
@@ -78,6 +135,10 @@ export interface BuildState {
   /** Rats held out of the fight — never enter `simulate`. See BENCH_SIZE. */
   bench: BoardUnit[];
   teamRelicIds: string[];
+  /** Extra board slots bought this expedition beyond the day's natural
+   * `boardCapForDay` (see `SLOT_PRICES`/`buyBoardSlot`). 0..SLOT_PRICES.length,
+   * carried across days by `advanceAfterDawn`, reset by `newBuild`. */
+  purchasedSlots: number;
   shop: {
     slots: ShopSlot[];
     frozen: boolean[];
@@ -126,6 +187,7 @@ export function newBuild(date: string, day = 1, ownedTeamRelics: readonly string
     board: [],
     bench: [],
     teamRelicIds: [],
+    purchasedSlots: 0,
     shop: { slots, frozen: slots.map(() => false), rolls: 0 },
   };
 }
@@ -141,6 +203,10 @@ export function advanceAfterDawn(build: BuildState, nextDate: string): BuildStat
   next.board = build.board.map((u) => ({ ...u, relicIds: [...u.relicIds] }));
   next.bench = (build.bench ?? []).map((u) => ({ ...u, relicIds: [...u.relicIds] }));
   next.teamRelicIds = [...build.teamRelicIds];
+  // Purchased board slots are an expedition-scoped upgrade, same lifetime as
+  // the roster/relics they were bought to support — reset by newBuild only
+  // when the season itself ends (the `build.day >= SEASON_DAYS` branch above).
+  next.purchasedSlots = build.purchasedSlots ?? 0;
   // Scrap is accumulated idle income — it carries across days, not reset.
   next.scrap = build.scrap;
   return next;
@@ -211,7 +277,7 @@ export function buyUnit(state: BuildState, slotIndex: number): ActionResult {
   const def = UNIT_DEFS[slot.defId];
   if (state.scrap < def.cost) return fail('not enough scrap');
   const s = clone(state);
-  const cap = boardCapForDay(s.day);
+  const cap = effectiveBoardCap(s);
   const fresh: BoardUnit = { defId: def.id, tier: 1, relicIds: [] };
   // Place-then-merge-then-check: put the fresh copy down first so combineAll
   // gets a chance to resolve a completing trio (which nets fewer units and
@@ -370,7 +436,7 @@ export function benchUnit(state: BuildState, boardIndex: number): ActionResult {
 export function deployUnit(state: BuildState, benchIndex: number, toBoardIndex?: number): ActionResult {
   const unit = state.bench[benchIndex];
   if (!unit) return fail('nothing to deploy');
-  if (state.board.length >= boardCapForDay(state.day)) return fail('the warren is full');
+  if (state.board.length >= effectiveBoardCap(state)) return fail('the warren is full');
   const s = clone(state);
   const [moved] = s.bench.splice(benchIndex, 1);
   const insertAt =
@@ -402,8 +468,25 @@ export function lineupFromBuild(state: BuildState): Lineup {
   return {
     units: state.board.map((u) => ({ defId: u.defId, tier: u.tier, relicIds: u.relicIds })),
     teamRelicIds: state.teamRelicIds,
-    combatCap: combatCapForDay(state.day),
+    combatCap: combatCapForBuild(state),
   };
+}
+
+/**
+ * Buy the next board slot beyond the day's natural cap (see `SLOT_PRICES`).
+ * Fails once the build's effective board cap already reached `BOARD_CAP` —
+ * either because all purchasable slots are bought, or because the day's own
+ * `boardCapForDay` growth reached the hard cap on its own (day 7).
+ */
+export function buyBoardSlot(state: BuildState): ActionResult {
+  if (effectiveBoardCap(state) >= BOARD_CAP) return fail('the warren is already at its hard cap');
+  const price = SLOT_PRICES[state.purchasedSlots ?? 0];
+  if (price === undefined) return fail('no more slots to buy');
+  if (state.scrap < price) return fail('not enough scrap');
+  const s = clone(state);
+  s.scrap -= price;
+  s.purchasedSlots = (s.purchasedSlots ?? 0) + 1;
+  return { ok: true, state: s };
 }
 
 export function unitStats(unit: BoardUnit): { attack: number; health: number } {

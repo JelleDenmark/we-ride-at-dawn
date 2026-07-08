@@ -17,6 +17,11 @@ import {
   advanceAfterDawn,
   boardCapForDay,
   combatCapForDay,
+  combatCapForBuild,
+  effectiveBoardCap,
+  buyBoardSlot,
+  nextSlotPrice,
+  SLOT_PRICES,
   SEASON_DAYS,
   interestFor,
   weekdayFor,
@@ -31,6 +36,7 @@ import { UNIT_DEFS } from '../src/data/units';
 import { RELIC_DEFS } from '../src/data/relics';
 import { simulate } from '../src/sim';
 import { generateGauntlet, difficultyForDay } from '../src/gauntlet';
+import { BOARD_CAP } from '../src/sim';
 
 const unitSlot = (s: BuildState): number => s.shop.slots.findIndex((x) => x.kind === 'unit');
 const relicSlot = (s: BuildState): number => s.shop.slots.findIndex((x) => x.kind === 'relic');
@@ -1025,6 +1031,166 @@ describe('swapping bench and board', () => {
       const merged = res.state.board.find((u) => u.defId === 'gutter-runt');
       expect(merged?.tier).toBe(2);
       expect(res.state.bench.map((u) => u.defId)).toEqual(['dire-rat']);
+    }
+  });
+});
+
+describe('buyable horde slots (issue #9)', () => {
+  it('newBuild starts with zero purchased slots', () => {
+    expect(newBuild('2026-07-04', 1).purchasedSlots).toBe(0);
+  });
+
+  it('effectiveBoardCap is the day cap when nothing has been purchased', () => {
+    for (let day = 1; day <= 7; day++) {
+      expect(effectiveBoardCap({ day, purchasedSlots: 0 })).toBe(boardCapForDay(day));
+    }
+  });
+
+  it('effectiveBoardCap adds purchased slots on top of the day cap, hard-capped at BOARD_CAP', () => {
+    expect(effectiveBoardCap({ day: 1, purchasedSlots: 1 })).toBe(boardCapForDay(1) + 1);
+    expect(effectiveBoardCap({ day: 1, purchasedSlots: 3 })).toBe(BOARD_CAP); // 5 + 3 = 8
+    expect(effectiveBoardCap({ day: 1, purchasedSlots: 99 })).toBe(BOARD_CAP); // clamped
+    expect(effectiveBoardCap({ day: 7, purchasedSlots: 1 })).toBe(BOARD_CAP); // already 8 naturally
+  });
+
+  it('buyBoardSlot charges the ladder price in order and increments purchasedSlots', () => {
+    let s = { ...newBuild('2026-07-04', 1), scrap: 200 };
+    for (let i = 0; i < SLOT_PRICES.length; i++) {
+      const price = SLOT_PRICES[i];
+      const before = s.scrap;
+      const res = buyBoardSlot(s);
+      expect(res.ok).toBe(true);
+      if (res.ok) {
+        expect(res.state.scrap).toBe(before - price);
+        expect(res.state.purchasedSlots).toBe(i + 1);
+        s = res.state;
+      }
+    }
+    // BOARD_CAP reached (5 natural + 3 purchased = 8) — no more slots to buy.
+    expect(effectiveBoardCap(s)).toBe(BOARD_CAP);
+    expect(buyBoardSlot(s).ok).toBe(false);
+    expect(nextSlotPrice(s)).toBeUndefined();
+  });
+
+  it('the price ladder is strictly increasing', () => {
+    for (let i = 1; i < SLOT_PRICES.length; i++) expect(SLOT_PRICES[i]).toBeGreaterThan(SLOT_PRICES[i - 1]);
+  });
+
+  it('rejects buying a slot without enough scrap', () => {
+    const s = { ...newBuild('2026-07-04', 1), scrap: SLOT_PRICES[0] - 1 };
+    const res = buyBoardSlot(s);
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reason).toMatch(/not enough scrap/);
+  });
+
+  it('rejects buying once the day already reached BOARD_CAP naturally (day 7)', () => {
+    const s = { ...newBuild('2026-07-10', SEASON_DAYS), scrap: 999 };
+    expect(boardCapForDay(SEASON_DAYS)).toBe(BOARD_CAP);
+    const res = buyBoardSlot(s);
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reason).toMatch(/hard cap/);
+  });
+
+  it('nextSlotPrice reports the upcoming price, then undefined once maxed', () => {
+    let s = { ...newBuild('2026-07-04', 1), scrap: 200 };
+    expect(nextSlotPrice(s)).toBe(SLOT_PRICES[0]);
+    for (const price of SLOT_PRICES) {
+      expect(nextSlotPrice(s)).toBe(price);
+      s = (buyBoardSlot(s) as { ok: true; state: BuildState }).state;
+    }
+    expect(nextSlotPrice(s)).toBeUndefined();
+  });
+
+  it('a purchased slot raises the recruitable board beyond the day cap', () => {
+    const base = newBuild('2026-07-04', 1); // boardCapForDay(1) = 5
+    let s = { ...base, scrap: 200 };
+    s = (buyBoardSlot(s) as { ok: true; state: BuildState }).state; // purchasedSlots = 1, cap = 6
+    s = {
+      ...s,
+      board: [
+        { defId: 'dire-rat', tier: 1, relicIds: [] },
+        { defId: 'gnawer', tier: 1, relicIds: [] },
+        { defId: 'rat-piper', tier: 1, relicIds: [] },
+        { defId: 'brood-mother', tier: 1, relicIds: [] },
+        { defId: 'bone-priest', tier: 1, relicIds: [] },
+      ],
+      shop: {
+        ...s.shop,
+        slots: [{ kind: 'unit' as const, defId: 'plague-bearer' }, ...s.shop.slots.slice(1)],
+      },
+    };
+    // Without the purchased slot this would overflow to the bench (see the
+    // "buying overflows to the bench" test) — with it, the 6th rat fits on
+    // the board itself.
+    const res = buyUnit(s, 0);
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.state.board).toHaveLength(6);
+      expect(res.state.bench).toHaveLength(0);
+    }
+  });
+
+  it('deployUnit respects the purchased-slot-expanded cap too', () => {
+    const base = newBuild('2026-07-04', 1); // boardCapForDay(1) = 5
+    let s = { ...base, scrap: 200 };
+    s = (buyBoardSlot(s) as { ok: true; state: BuildState }).state; // cap = 6
+    s = {
+      ...s,
+      board: [
+        { defId: 'dire-rat', tier: 1, relicIds: [] },
+        { defId: 'gnawer', tier: 1, relicIds: [] },
+        { defId: 'rat-piper', tier: 1, relicIds: [] },
+        { defId: 'brood-mother', tier: 1, relicIds: [] },
+        { defId: 'bone-priest', tier: 1, relicIds: [] },
+      ],
+      bench: [{ defId: 'plague-bearer', tier: 1, relicIds: [] }],
+    };
+    // Board is at the *natural* day cap (5) but under the purchase-expanded
+    // cap (6), so deploying from the bench should now succeed.
+    const res = deployUnit(s, 0);
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.state.board).toHaveLength(6);
+  });
+
+  it('purchasedSlots carries forward across days within the same expedition', () => {
+    let s = { ...newBuild('2026-07-04', 1), scrap: 200 };
+    s = (buyBoardSlot(s) as { ok: true; state: BuildState }).state;
+    expect(s.purchasedSlots).toBe(1);
+    const day2 = advanceAfterDawn(s, '2026-07-05');
+    expect(day2.purchasedSlots).toBe(1);
+    expect(effectiveBoardCap(day2)).toBe(boardCapForDay(2) + 1);
+  });
+
+  it('purchasedSlots resets when a new expedition (season) begins', () => {
+    let s = { ...newBuild('2026-07-10', SEASON_DAYS - 1), scrap: 200 };
+    s = (buyBoardSlot(s) as { ok: true; state: BuildState }).state;
+    const lastDay = advanceAfterDawn(s, '2026-07-11'); // still within the season
+    expect(lastDay.purchasedSlots).toBe(1);
+    const nextSeason = advanceAfterDawn({ ...lastDay, day: SEASON_DAYS }, '2026-07-12');
+    expect(nextSeason.purchasedSlots).toBe(0);
+  });
+
+  it('combatCapForBuild always has room for the effective board cap plus summon headroom', () => {
+    for (let day = 1; day <= 7; day++) {
+      for (let purchasedSlots = 0; purchasedSlots <= SLOT_PRICES.length; purchasedSlots++) {
+        const build = { day, purchasedSlots };
+        expect(combatCapForBuild(build)).toBe(effectiveBoardCap(build) + 2);
+        expect(combatCapForBuild(build)).toBeGreaterThanOrEqual(effectiveBoardCap(build));
+      }
+    }
+  });
+
+  it('lineupFromBuild uses combatCapForBuild, not the plain day-based combatCapForDay, once slots are purchased', () => {
+    let s = { ...newBuild('2026-07-04', 1), scrap: 200 };
+    s = (buyBoardSlot(s) as { ok: true; state: BuildState }).state; // cap now 6, day cap still 5
+    const lineup = lineupFromBuild(s);
+    expect(lineup.combatCap).toBe(combatCapForBuild(s));
+    expect(lineup.combatCap).toBeGreaterThan(combatCapForDay(s.day));
+  });
+
+  it('at zero purchased slots, combatCapForBuild matches the pre-existing combatCapForDay (no regression)', () => {
+    for (let day = 1; day <= 7; day++) {
+      expect(combatCapForBuild({ day, purchasedSlots: 0 })).toBe(combatCapForDay(day));
     }
   });
 });
