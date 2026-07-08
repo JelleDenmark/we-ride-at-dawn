@@ -6,6 +6,8 @@ import {
   sellUnit,
   sellBenchUnit,
   rerollShop,
+  autoRerollShop,
+  isShopDead,
   toggleFreeze,
   moveUnit,
   benchUnit,
@@ -138,6 +140,61 @@ describe('shop basics', () => {
     expect(rolled.shop.rolls).toBe(1);
     expect(rolled.shop.slots[i]).toEqual(s.shop.slots[i]);
     expect(rolled.shop.frozen[i]).toBe(true);
+  });
+
+  it('isShopDead detects when all slots are empty', () => {
+    const s = newBuild('2026-07-03');
+    expect(isShopDead(s)).toBe(false);
+    // Empty all slots manually
+    const allEmpty = {
+      ...s,
+      shop: {
+        ...s.shop,
+        slots: Array(6).fill({ kind: 'empty' as const }),
+      },
+    };
+    expect(isShopDead(allEmpty)).toBe(true);
+  });
+
+  it('autoRerollShop fails if shop is not dead', () => {
+    const s = newBuild('2026-07-03');
+    expect(autoRerollShop(s).ok).toBe(false);
+  });
+
+  it('autoRerollShop rerolls for free when all slots are empty', () => {
+    const base = newBuild('2026-07-03');
+    const allEmpty = {
+      ...base,
+      scrap: 5,
+      shop: {
+        ...base.shop,
+        slots: Array(6).fill({ kind: 'empty' as const }),
+      },
+    };
+    const rolled = must(autoRerollShop(allEmpty)).state;
+    // No scrap was deducted
+    expect(rolled.scrap).toBe(5);
+    // rolls counter DOES advance (it's just rollOfferings' seed, not a
+    // player-facing count) so a subsequent manual reroll can't collide with
+    // this roll number and hand back the same shop
+    expect(rolled.shop.rolls).toBe(base.shop.rolls + 1);
+    // But the slots should be refreshed (not all empty anymore)
+    expect(rolled.shop.slots.some((slot) => slot.kind !== 'empty')).toBe(true);
+  });
+
+  it('a manual reroll after an auto-reroll does not repeat the same offerings', () => {
+    const base = newBuild('2026-07-03');
+    const allEmpty = {
+      ...base,
+      scrap: 10,
+      shop: {
+        ...base.shop,
+        slots: Array(6).fill({ kind: 'empty' as const }),
+      },
+    };
+    const afterAuto = must(autoRerollShop(allEmpty)).state;
+    const afterManual = must(rerollShop(afterAuto)).state;
+    expect(afterManual.shop.slots).not.toEqual(afterAuto.shop.slots);
   });
 
   it('repositioning reorders the board', () => {

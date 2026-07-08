@@ -24,6 +24,7 @@
     sellBenchUnit,
     sellRefund,
     rerollShop,
+    autoRerollShop,
     toggleFreeze,
     moveUnit,
     benchUnit,
@@ -503,6 +504,20 @@
     return false;
   }
 
+  /** Apply an action and auto-reroll the shop if all stalls are bought.
+   * Used for actions that can empty shop slots (buyUnit, buyRelic). */
+  function applyAndAutoReroll(res: ActionResult): boolean {
+    if (apply(res)) {
+      const autoRoll = autoRerollShop(build);
+      if (autoRoll.ok) {
+        build = autoRoll.state;
+        saveBuild(build);
+      }
+      return true;
+    }
+    return false;
+  }
+
   // Tapping a stall opens its inspect card; the card houses the buy/pin
   // action, so nothing is spent by accident.
   function clickShopSlot(i: number) {
@@ -512,7 +527,7 @@
 
   function clickBoardUnit(boardIndex: number) {
     if (pendingRelic !== null) {
-      if (apply(buyRelic(build, pendingRelic, boardIndex))) pendingRelic = null;
+      if (applyAndAutoReroll(buyRelic(build, pendingRelic, boardIndex))) pendingRelic = null;
       return;
     }
     if (pendingSwap !== null) {
@@ -538,14 +553,14 @@
   }
 
   function recruitFromCard(i: number) {
-    if (apply(buyUnit(build, i))) inspect = null;
+    if (applyAndAutoReroll(buyUnit(build, i))) inspect = null;
   }
 
   function pinRelicFromCard(i: number) {
     const slot = build.shop.slots[i];
     if (slot.kind !== 'relic') return;
     if (RELIC_DEFS[slot.relicId].scope === 'team') {
-      if (apply(buyRelic(build, i))) inspect = null;
+      if (applyAndAutoReroll(buyRelic(build, i))) inspect = null;
     } else {
       // Unit relics need a target: close the card, arm the pick-a-rat mode.
       // Only one armed-selection mode at a time — arming this one clears
