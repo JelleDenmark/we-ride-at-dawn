@@ -89,6 +89,8 @@ interface BattleUnit {
   poison: number;
   firstAttackDone: boolean;
   tailCharmUsed: boolean;
+  /** A corpse may be raised once per battle. Guards the two-reviver loop. */
+  raised: boolean;
 }
 
 /**
@@ -146,6 +148,7 @@ export function simulate(
       poison: 0,
       firstAttackDone: false,
       tailCharmUsed: false,
+      raised: false,
     };
   };
 
@@ -260,14 +263,22 @@ export function simulate(
         break;
       }
       case 'revive': {
-        // Raise the oldest fallen ally — but never the caster itself. A
-        // fainting unit is pushed to `fallen` *before* its own faint trigger
-        // fires, so shifting the first corpse would resurrect the reviver
-        // forever (a lone Bone-Priest was clearing the whole gauntlet,
-        // unkillable). Skip the source and raise the next-oldest ally.
-        const corpseIdx = fallen[source.side].findIndex((c) => c !== source);
+        // Raise the oldest fallen ally — never the caster, and never a corpse
+        // that has already been raised once.
+        //
+        // Two guards, two separate exploits. A fainting unit is pushed to
+        // `fallen` *before* its own faint trigger fires, so raising the first
+        // corpse resurrected the reviver forever (a lone Bone-Priest cleared
+        // the whole gauntlet, unkillable — fixed in 0.6.2). Skipping only the
+        // caster was not enough: two Bone-Priests each raise the *other's*
+        // corpse, which dies, re-enters `fallen`, and gets raised again — an
+        // immortal pair that full-cleared all 45 waves for 12 scrap. The
+        // `raised` flag makes resurrection a once-per-corpse resource, so any
+        // reviver ring is finite no matter how many priests you stack.
+        const corpseIdx = fallen[source.side].findIndex((c) => c !== source && !c.raised);
         if (corpseIdx === -1 || board.length >= BOARD_CAP) break;
         const [corpse] = fallen[source.side].splice(corpseIdx, 1);
+        corpse.raised = true;
         corpse.health = effect.health * tier;
         corpse.poison = 0;
         board.splice(index, 0, corpse);
