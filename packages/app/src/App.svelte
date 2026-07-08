@@ -212,7 +212,8 @@
   let notice = $state('');
 
   const TRIGGER_WHEN: Record<string, string> = {
-    startOfBattle: 'At the start of battle,',
+    startOfBattle: 'At the start of the ride,',
+    startOfWave: 'At the start of every wave,',
     faint: 'When it faints,',
     afterAttack: 'After it attacks,',
     allyFaint: 'Whenever a friendly rat faints,',
