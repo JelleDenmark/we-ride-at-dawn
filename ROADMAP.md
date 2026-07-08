@@ -103,6 +103,12 @@ Overall units + relics are well-balanced for this stage. Specific items, in roug
 - _Not a bug, intentional depth:_ Gore-Cleaver wants a **durable/scaling carry** (Corpse-Glutton's growing health keeps it alive to land cleaves), not "the back line" per se; positioning matters and is self-evident from the rats' flavor (no UI hint needed — Jesper).
 
 ---
+
+## 5. Security hardening backlog (parked, from a review pass 2026-07-08)
+
+A security review of the live game and backend surfaced several hardening items around the leaderboard's trust boundary, player identity, and database access policies. One urgent item was already fixed live (a database access-control gap); the rest is bigger work — deliberately **parked**, not scheduled yet. Full findings are kept out of this repo's public docs until the remaining items are addressed. Tracked in [issue #19](https://github.com/JelleDenmark/we-ride-at-dawn/issues/19). Overlaps with the existing **P4 anti-cheat** item above (server-side score re-simulation) — that item should absorb this backlog once picked up.
+
+---
 ---
 
 # Detailed sections
