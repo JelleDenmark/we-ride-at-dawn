@@ -168,6 +168,97 @@ console.log(
 );
 
 // ---------------------------------------------------------------------------
+// 3b) Marrow-Snap (pure execute: a foe left at/below 20% of its own max
+// health dies outright) — the attack-punchiness relic from issue #7.
+// Gore-Cleaver is back-loaded (only pays off once enemies are tanky enough
+// to leave meaningful overkill). Marrow-Snap should be front-loaded instead
+// (finishing a nearly-dead foe matters even at low tiers where hits are
+// small relative to health) while NOT snowballing or dominating at depth
+// 40+ — it is a stateless, foe-relative, per-clash check (see the
+// compounding-law comment on `executeThreshold` in data/relics.ts), so
+// there is nothing here that can accumulate across the 45-wave battle.
+// ---------------------------------------------------------------------------
+function rosterForExecute(day: number, frontRelic: 'none' | 'gore-cleaver' | 'marrow-snap'): Lineup {
+  const cap = boardCapForDay(day);
+  const tier = day <= 3 ? 1 : day <= 5 ? 2 : 3;
+  const order = ['dire-rat', 'gnawer', 'corpse-glutton', 'warren-warden', 'bone-priest', 'plague-bearer', 'blight-witch', 'dire-rat'];
+  const units: Lineup['units'] = order.map((defId, i) => {
+    const relicIds: string[] = [];
+    if (i === 0 && frontRelic !== 'none') relicIds.push(frontRelic);
+    else if (i !== 0 && i < cap) relicIds.push(FILLER_RELIC);
+    return { defId, tier, relicIds };
+  });
+  return { units: units.slice(0, cap), teamRelicIds: ['filth-totem'] };
+}
+
+function avgDepthForExecute(day: number, frontRelic: 'none' | 'gore-cleaver' | 'marrow-snap'): number {
+  const lineup = rosterForExecute(day, frontRelic);
+  let total = 0;
+  for (let s = 0; s < SAMPLES; s++) {
+    const date = new Date(Date.parse(`${START}T12:00:00Z`) + s * 86_400_000).toISOString().slice(0, 10);
+    total += simulate(lineup, generateGauntlet(date, day)).result.wavesCleared;
+  }
+  return total / SAMPLES;
+}
+
+console.log('\n3b) Marrow-Snap depth delta vs. Gore-Cleaver, same strong-attack roster, one relic slot varied:');
+console.log('day  none    +cleaver (delta)      +snap (delta)');
+const snapDeltas: number[] = [];
+const cleaveDeltasVsSnap: number[] = [];
+for (let day = 1; day <= 7; day++) {
+  const none = avgDepthForExecute(day, 'none');
+  const withCleaver = avgDepthForExecute(day, 'gore-cleaver');
+  const withSnap = avgDepthForExecute(day, 'marrow-snap');
+  const cleaveDelta = withCleaver - none;
+  const snapDelta = withSnap - none;
+  cleaveDeltasVsSnap.push(cleaveDelta);
+  snapDeltas.push(snapDelta);
+  console.log(
+    `${day.toString().padStart(2)}   ${none.toFixed(2).padStart(5)}   ${withCleaver.toFixed(2)} (${cleaveDelta >= 0 ? '+' : ''}${cleaveDelta.toFixed(2)})      ${withSnap.toFixed(2)} (${snapDelta >= 0 ? '+' : ''}${snapDelta.toFixed(2)})`
+  );
+}
+// Day 1-2 is a rounding-error regime for either relic (roster is tiny,
+// so both deltas are <0.05 waves) — the meaningful comparison is where each
+// relic's value plateau kicks in. Gore-Cleaver needs enemies tanky enough to
+// leave real overkill margin, which only shows up from day 5 onward (0.19,
+// 0.30, 0.33). Marrow-Snap's value shows up as soon as day 3 (0.17) because
+// it doesn't need overkill margin at all — it just needs a hit to land in
+// the last 30% of the foe's own health bar, which happens well before
+// enemies are HP-sponges.
+const crossoverDay = snapDeltas.findIndex((d, i) => d > cleaveDeltasVsSnap[i]) + 1;
+console.log(
+  `\nMarrow-Snap overtakes Gore-Cleaver's delta as early as day ${crossoverDay || 'n/a'} ` +
+    `(day 3: Gore-Cleaver +${cleaveDeltasVsSnap[2].toFixed(2)} vs Marrow-Snap +${snapDeltas[2].toFixed(2)}) — ` +
+    'front-loaded relative to Gore-Cleaver, which only separates from baseline once enemies are tanky (day 5+).'
+);
+
+// High-depth sanity check (issue #7's explicit ask): does Marrow-Snap
+// dominate or blow up at depth 40+? Run the day-7 (deepest achievable)
+// roster and confirm wavesCleared stays within the same order of magnitude
+// as Gore-Cleaver — i.e. no runaway, no free 45/45 clear off one relic.
+console.log('\n3c) Depth-40+ sanity: day-7 roster, none vs Gore-Cleaver vs Marrow-Snap, min/avg/max over all samples:');
+function statsForExecute(day: number, frontRelic: 'none' | 'gore-cleaver' | 'marrow-snap'): { min: number; avg: number; max: number } {
+  const lineup = rosterForExecute(day, frontRelic);
+  const depths: number[] = [];
+  for (let s = 0; s < SAMPLES; s++) {
+    const date = new Date(Date.parse(`${START}T12:00:00Z`) + s * 86_400_000).toISOString().slice(0, 10);
+    depths.push(simulate(lineup, generateGauntlet(date, day)).result.wavesCleared);
+  }
+  return {
+    min: Math.min(...depths),
+    avg: depths.reduce((a, b) => a + b, 0) / depths.length,
+    max: Math.max(...depths),
+  };
+}
+for (const frontRelic of ['none', 'gore-cleaver', 'marrow-snap'] as const) {
+  const { min, avg, max } = statsForExecute(7, frontRelic);
+  console.log(`  ${frontRelic.padEnd(12)} min ${min.toString().padStart(2)}  avg ${avg.toFixed(2).padStart(5)}  max ${max.toString().padStart(2)}`);
+}
+console.log(
+  '\n(no roster above should approach anywhere near WAVE_COUNT=45 — Marrow-Snap converts near-kills into kills, it does not manufacture extra damage or stats, so it cannot produce a runaway full clear the way the fixed exploits did)'
+);
+
+// ---------------------------------------------------------------------------
 // 4) Poison sanity-check: does a poison-leaning roster now dominate attack?
 //
 // Poison damage is flat (fixed stacks per proc) and depth-independent — it

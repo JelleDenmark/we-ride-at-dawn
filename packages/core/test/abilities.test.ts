@@ -197,6 +197,57 @@ describe('relics', () => {
     expect(ofType(events, 'relicProc').filter((p) => p.relicId === 'gore-cleaver').length).toBe(1);
   });
 
+  it('Marrow-Snap executes a foe left at or below the threshold instead of a sliver', () => {
+    // Dire-Rat deals 4; foe has 5 max health, so the hit leaves it at 1
+    // (1/5 = 20%, at/below the 30% threshold) — Marrow-Snap finishes it off.
+    const { events } = simulate(
+      lineup({ defId: 'dire-rat', relicIds: ['marrow-snap'] }),
+      gauntletOf([dummy(0, 5)])
+    );
+    const procs = ofType(events, 'relicProc').filter((p) => p.relicId === 'marrow-snap');
+    expect(procs.length).toBe(1);
+    const foeId = ofType(events, 'waveStart')[0].enemies[0].instanceId;
+    // The regular 4-damage hit leaves the foe at 1 (dire-rat's own damageIn
+    // from the foe's 0 attack is a separate event on a different target,
+    // floored to 1 by the armor-floor rule — unrelated to this check); the
+    // execute's 1-damage finishing blow then brings the foe to 0.
+    const foeDamages = ofType(events, 'damage').filter((d) => d.targetId === foeId);
+    expect(foeDamages.map((d) => d.amount)).toEqual([4, 1]);
+    expect(foeDamages[foeDamages.length - 1].remainingHealth).toBe(0);
+    expect(ofType(events, 'death').length).toBe(1);
+  });
+
+  it('Marrow-Snap does not proc above the threshold', () => {
+    const { events } = simulate(
+      lineup({ defId: 'dire-rat', relicIds: ['marrow-snap'] }),
+      gauntletOf([dummy(0, 100)])
+    );
+    expect(ofType(events, 'relicProc').some((p) => p.relicId === 'marrow-snap')).toBe(false);
+  });
+
+  it('Marrow-Snap does not proc when the hit already kills outright', () => {
+    // A hit that already fells the foe is a normal kill, not an execute.
+    const { events } = simulate(
+      lineup({ defId: 'dire-rat', relicIds: ['marrow-snap'] }),
+      gauntletOf([dummy(0, 3)])
+    );
+    expect(ofType(events, 'relicProc').some((p) => p.relicId === 'marrow-snap')).toBe(false);
+    expect(ofType(events, 'death').length).toBe(1);
+  });
+
+  it('Marrow-Snap zeroes overkill so it does not also feed a stacked Gore-Cleaver', () => {
+    // Both relics on one rat: Marrow-Snap fires first (foe at 20% survives
+    // to a sliver, then gets finished at exactly 0 overkill), so Gore-Cleaver
+    // never sees positive overkill to carry — no double-dipping two relics
+    // off one clash.
+    const { events } = simulate(
+      lineup({ defId: 'dire-rat', relicIds: ['marrow-snap', 'gore-cleaver'] }),
+      gauntletOf([dummy(0, 5), dummy(0, 10)])
+    );
+    expect(ofType(events, 'relicProc').some((p) => p.relicId === 'marrow-snap')).toBe(true);
+    expect(ofType(events, 'relicProc').some((p) => p.relicId === 'gore-cleaver')).toBe(false);
+  });
+
   it('Filth Totem grants the whole horde +1 health, including summons', () => {
     const { events } = simulate(
       { units: [{ defId: 'rat-piper' }], teamRelicIds: ['filth-totem'] },

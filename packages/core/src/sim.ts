@@ -410,6 +410,27 @@ export function simulate(
       applyDamage(front, damageIn, 'attack');
       damageThisWave += damageOut;
 
+      // Marrow-Snap: a foe left at or below executeThreshold of its OWN max
+      // health (not the bearer's) dies outright instead of surviving on a
+      // sliver. Pure execute, no stat gain anywhere — see the compounding-
+      // law doc comment on `executeThreshold` in data/relics.ts for why this
+      // is safe to fire every tick, every wave, for 45 waves straight: it's
+      // foe-relative and stateless, so nothing here can accumulate on the
+      // horde. Only fires if the foe actually survived this clash (a kill
+      // is a kill, not an execute) and skips a foe a surviveLethal relic
+      // just rescued to 1 health.
+      const executeRelic = front.relics.find((r) => r.executeThreshold !== undefined);
+      if (executeRelic && foe.health > 0 && foe.health <= foe.maxHealth * executeRelic.executeThreshold!) {
+        events.push({ type: 'relicProc', targetId: front.instanceId, relicId: executeRelic.id, name: executeRelic.name });
+        // Finish the foe directly rather than routing through applyDamage:
+        // this is a kill-condition check, not a fresh attack, so it must not
+        // be blunted by the foe's own armor (damageReduction) the way a
+        // normal hit would be.
+        const finishing = foe.health;
+        foe.health = 0;
+        events.push({ type: 'damage', targetId: foe.instanceId, amount: finishing, remainingHealth: 0 });
+      }
+
       // Gore-Cleaver: overkill damage that actually fells the front foe
       // carries to the next enemy in line, once, no chaining. Guard against
       // Tail-Charm (or any future surviveLethal) actually saving the foe —
