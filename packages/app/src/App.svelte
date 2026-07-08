@@ -32,7 +32,7 @@
     lineupFromBuild,
     unitStats,
     REROLL_COST,
-    BOARD_CAP,
+    combatCapForDay,
     BENCH_SIZE,
     type ActionResult,
     type BattleResult,
@@ -212,7 +212,8 @@
   let notice = $state('');
 
   const TRIGGER_WHEN: Record<string, string> = {
-    startOfBattle: 'At the start of battle,',
+    startOfBattle: 'At the start of the ride,',
+    startOfWave: 'At the start of every wave,',
     faint: 'When it faints,',
     afterAttack: 'After it attacks,',
     allyFaint: 'Whenever a friendly rat faints,',
@@ -946,7 +947,7 @@
             </div>
             <p class="card-ability">{abilitySentence(def.id)}</p>
             {#if isSummoner(def.id)}
-              <p class="card-hint">summons pause when your warren is full ({BOARD_CAP})</p>
+              <p class="card-hint">summoned rats fight beyond your warren's size (up to {combatCapForDay(build.day)} in the drains)</p>
             {/if}
             <p class="card-hint">recruit three of a kind and they merge into one stronger ★ rat</p>
             <div class="card-actions">
@@ -995,7 +996,7 @@
             </div>
             <p class="card-ability">{abilitySentence(unit.defId)}</p>
             {#if isSummoner(unit.defId)}
-              <p class="card-hint">summons pause when your warren is full ({BOARD_CAP})</p>
+              <p class="card-hint">summoned rats fight beyond your warren's size (up to {combatCapForDay(build.day)} in the drains)</p>
             {/if}
             {#if unit.relicIds.length > 0}
               <p class="card-relics">✦ {unit.relicIds.map((r) => RELIC_DEFS[r].name).join(', ')}</p>

@@ -14,6 +14,7 @@ import {
   lineupFromBuild,
   advanceAfterDawn,
   boardCapForDay,
+  combatCapForDay,
   SEASON_DAYS,
   interestFor,
   weekdayFor,
@@ -512,6 +513,7 @@ describe('tiers in battle', () => {
     expect(lineupFromBuild(s)).toEqual({
       units: [{ defId: 'gnawer', tier: 2, relicIds: ['rusted-nail'] }],
       teamRelicIds: ['filth-totem'],
+      combatCap: combatCapForDay(s.day),
     });
   });
 

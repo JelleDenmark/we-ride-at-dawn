@@ -9,9 +9,17 @@ const DEF_LOOKUP: Record<string, UnitDef> = {
   ...Object.fromEntries(ENEMY_POOL.map((e) => [e.id, e])),
 };
 
-/** Hard maximum board size (incl. battle summons). The shop's per-day
- * buildable cap (boardCapForDay) grows toward this over an expedition. */
+/** Hard maximum number of rats you may *recruit* onto the board. The shop's
+ * per-day buildable cap (boardCapForDay) grows toward this over an expedition. */
 export const BOARD_CAP = 8;
+/**
+ * Combat leaves this much headroom above the recruitable board, so summons
+ * (Rat-Piper's pups, Brood-Mother's litter, Bone-Priest's revive) always have
+ * somewhere to land. Previously summons silently no-op'd once the warren was
+ * full, which quietly bricked every summoner build the moment you filled your
+ * board — the single most-reported confusion. See `combatCapForDay`.
+ */
+export const COMBAT_CAP_BONUS = 2;
 export const SCORE_PER_WAVE = 100;
 /** Stalemate guard (e.g. two healers out-sustaining each other): the wave is abandoned. */
 export const MAX_TICKS_PER_WAVE = 1000;
@@ -89,9 +97,16 @@ interface BattleUnit {
   poison: number;
   firstAttackDone: boolean;
   tailCharmUsed: boolean;
+  /** Flat armor against 'attack' damage; see UnitDef.damageReduction. */
+  damageReduction: number;
+  /** `startOfBattle` fires once per unit instance, ever — never again on later waves. */
+  startOfBattleFired: boolean;
   /** A corpse may be raised once per battle. Guards the two-reviver loop. */
   raised: boolean;
 }
+
+/** A hit reduced by armor still lands for at least this much. */
+export const MIN_ATTACK_DAMAGE = 1;
 
 /**
  * Pure and deterministic: same (lineup, gauntlet) always yields a
@@ -114,6 +129,9 @@ export function simulate(
     .filter((r): r is RelicDef => r !== undefined && r.scope === 'team');
   const teamAttack = teamRelics.reduce((s, r) => s + (r.attack ?? 0), 0);
   const teamHealth = teamRelics.reduce((s, r) => s + (r.health ?? 0), 0);
+  // Both sides share one in-combat ceiling. Absent (golden logs, tests,
+  // gauntlet-only callers) it's BOARD_CAP, exactly as before.
+  const combatCap = lineup.combatCap ?? BOARD_CAP;
 
   const instantiate = (
     def: UnitDef,
@@ -148,6 +166,8 @@ export function simulate(
       poison: 0,
       firstAttackDone: false,
       tailCharmUsed: false,
+      damageReduction: (def.damageReduction ?? 0) * tier,
+      startOfBattleFired: false,
       raised: false,
     };
   };
@@ -174,7 +194,13 @@ export function simulate(
   events.push({ type: 'battleStart', horde: horde.map(view) });
 
   const applyDamage = (unit: BattleUnit, amount: number, cause: 'attack' | 'poison'): void => {
-    unit.health -= amount;
+    // Armor blunts attacks only — poison is rot, it goes around the hide. The
+    // floor keeps armor from ever producing an unkillable front rat.
+    const dealt =
+      cause === 'attack' && unit.damageReduction > 0
+        ? Math.max(MIN_ATTACK_DAMAGE, amount - unit.damageReduction)
+        : amount;
+    unit.health -= dealt;
     let charmProc = false;
     if (unit.health <= 0 && !unit.tailCharmUsed) {
       const charm = unit.relics.find((r) => r.surviveLethal);
@@ -187,7 +213,7 @@ export function simulate(
     events.push({
       type: cause === 'poison' ? 'poisonTick' : 'damage',
       targetId: unit.instanceId,
-      amount,
+      amount: dealt,
       remainingHealth: unit.health,
     });
     if (charmProc) {
@@ -235,7 +261,7 @@ export function simulate(
       case 'summon': {
         const def = DEF_LOOKUP[effect.unitId];
         for (let i = 0; i < effect.count * tier; i++) {
-          if (board.length >= BOARD_CAP) break;
+          if (board.length >= combatCap) break;
           const summoned = instantiate(def, source.side);
           board.splice(index, 0, summoned);
           events.push({ type: 'summon', side: source.side, index, unit: view(summoned) });
@@ -276,7 +302,7 @@ export function simulate(
         // `raised` flag makes resurrection a once-per-corpse resource, so any
         // reviver ring is finite no matter how many priests you stack.
         const corpseIdx = fallen[source.side].findIndex((c) => c !== source && !c.raised);
-        if (corpseIdx === -1 || board.length >= BOARD_CAP) break;
+        if (corpseIdx === -1 || board.length >= combatCap) break;
         const [corpse] = fallen[source.side].splice(corpseIdx, 1);
         corpse.raised = true;
         corpse.health = effect.health * tier;
@@ -318,9 +344,19 @@ export function simulate(
     }
   };
 
-  const fireStartOfBattle = (board: BattleUnit[]): void => {
+  /**
+   * Entry triggers, fired in board order at the top of every wave:
+   * `startOfWave` for every unit, `startOfBattle` only for units that have
+   * never fired it. See `Ability` in data/units.ts for why the split exists.
+   */
+  const fireEntryTriggers = (board: BattleUnit[]): void => {
     for (const unit of [...board]) {
-      if (unit.ability?.trigger !== 'startOfBattle') continue;
+      const trigger = unit.ability?.trigger;
+      if (trigger !== 'startOfBattle' && trigger !== 'startOfWave') continue;
+      if (trigger === 'startOfBattle') {
+        if (unit.startOfBattleFired) continue;
+        unit.startOfBattleFired = true;
+      }
       const index = board.findIndex((u) => u.instanceId === unit.instanceId);
       if (index === -1) continue;
       applyEffect(unit, index, false);
@@ -342,8 +378,8 @@ export function simulate(
     // per wave, so they begin fresh already.
     for (const u of horde) u.firstAttackDone = false;
 
-    fireStartOfBattle(horde);
-    fireStartOfBattle(enemies);
+    fireEntryTriggers(horde);
+    fireEntryTriggers(enemies);
     resolveDeaths();
 
     let ticks = 0;
@@ -370,7 +406,6 @@ export function simulate(
       front.firstAttackDone = true;
       foe.firstAttackDone = true;
 
-      const foeHealthBefore = foe.health;
       applyDamage(foe, damageOut, 'attack');
       applyDamage(front, damageIn, 'attack');
       damageThisWave += damageOut;
@@ -380,7 +415,10 @@ export function simulate(
       // Tail-Charm (or any future surviveLethal) actually saving the foe —
       // check post-applyDamage health, not just the raw overkill math.
       if (front.relics.some((r) => r.cleaveOverkill) && foe.health <= 0) {
-        const overkill = damageOut - foeHealthBefore;
+        // Carry what actually spilled past the kill, i.e. how far the foe's
+        // health went negative — not the raw swing, which armor may have
+        // blunted before it landed.
+        const overkill = -foe.health;
         const next = enemies[1];
         if (overkill > 0 && next) {
           events.push({ type: 'relicProc', targetId: front.instanceId, relicId: 'gore-cleaver', name: 'Gore-Cleaver' });

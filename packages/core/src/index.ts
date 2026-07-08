@@ -26,6 +26,7 @@ export {
   newBuild,
   advanceAfterDawn,
   boardCapForDay,
+  combatCapForDay,
   weekdayFor,
   seasonIdFor,
   interestFor,
@@ -59,6 +60,8 @@ export {
 export {
   simulate,
   BOARD_CAP,
+  COMBAT_CAP_BONUS,
+  MIN_ATTACK_DAMAGE,
   SCORE_PER_WAVE,
   ENEMY_HEALTH_SCALE_PER_WAVE,
   ENEMY_HEALTH_SCALE_QUADRATIC,

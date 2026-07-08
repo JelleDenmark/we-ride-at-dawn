@@ -257,6 +257,104 @@ describe('revive cannot loop', () => {
   });
 });
 
+describe('startOfBattle fires once per unit, startOfWave every wave', () => {
+  const grinder = (n: number) => gauntletOf(...Array.from({ length: n }, () => [dummy(0, 1)]));
+
+  it('Warren-Warden buffs the horde once, not once per wave', () => {
+    // The compounding bug: 4 tier-3 Wardens re-buffing every wave carried a
+    // 6-attack rat to 241 and full-cleared the 45-wave gauntlet.
+    const { events } = simulate(
+      lineup({ defId: 'warren-warden' }, { defId: 'gutter-runt' }),
+      grinder(10)
+    );
+    expect(ofType(events, 'buff')).toHaveLength(1);
+  });
+
+  it('Rat-Piper still pipes in a pup every wave', () => {
+    const { events } = simulate(lineup({ defId: 'rat-piper' }), grinder(5));
+    expect(ofType(events, 'summon').length).toBeGreaterThan(1);
+  });
+
+  it('Plague-Bearer still re-poisons each wave (poison clears at waveClear)', () => {
+    const { events } = simulate(lineup({ defId: 'plague-bearer' }), grinder(4));
+    expect(ofType(events, 'poisonApplied').length).toBeGreaterThan(1);
+  });
+
+  it("enemies re-instantiate each wave, so their startOfBattle still fires every wave", () => {
+    const summoner: UnitDef = {
+      id: 'summoner', name: 'Summoner', attack: 0, health: 1, cost: 0,
+      ability: { trigger: 'startOfBattle', effect: { kind: 'summon', unitId: 'pup', count: 1 } },
+    };
+    const { events } = simulate(
+      lineup({ defId: 'dire-rat' }),
+      gauntletOf([summoner], [summoner], [summoner])
+    );
+    expect(ofType(events, 'summon').filter((e) => e.side === 'gauntlet')).toHaveLength(3);
+  });
+});
+
+describe('damage reduction (armor)', () => {
+  const armored = (damageReduction: number): UnitDef => ({
+    id: 'armored', name: 'Armored', attack: 1, health: 100, cost: 0, damageReduction,
+  });
+  const poisoner = (stacks: number): UnitDef => ({
+    id: 'poisoner', name: 'Poisoner', attack: 0, health: 100, cost: 0,
+    ability: { trigger: 'startOfBattle', effect: { kind: 'poisonFrontEnemy', stacks } },
+  });
+
+  it('subtracts armor from each incoming attack', () => {
+    // Dire-Rat blunts 2 of every blow: a 3-attack foe lands 1.
+    const { events } = simulate(lineup({ defId: 'dire-rat' }), gauntletOf([dummy(3, 100)]));
+    const onRat = ofType(events, 'damage').filter((e) => e.targetId === 1);
+    expect(onRat.length).toBeGreaterThan(0);
+    expect(onRat.every((e) => e.amount === 1)).toBe(true);
+  });
+
+  it('a hit always lands for at least 1, however thick the hide', () => {
+    // Armor 10 vs Gnawer's 3 attack would be -7; the floor keeps armor from
+    // ever producing an unkillable unit. (The armored one is the foe here, so
+    // we read the damage dealt *to* instanceId 2.)
+    const { events } = simulate(lineup({ defId: 'gnawer' }), gauntletOf([armored(10)]));
+    const onFoe = ofType(events, 'damage').filter((e) => e.targetId === 2);
+    expect(onFoe.length).toBeGreaterThan(0);
+    expect(onFoe.every((e) => e.amount === 1)).toBe(true);
+  });
+
+  it('scales with tier, like every other magnitude', () => {
+    // Tier-2 Dire-Rat: armor 4. A 5-attack foe lands 1.
+    const { events } = simulate(
+      lineup({ defId: 'dire-rat', tier: 2 }),
+      gauntletOf([dummy(5, 100)])
+    );
+    const onRat = ofType(events, 'damage').filter((e) => e.targetId === 1);
+    expect(onRat.every((e) => e.amount === 1)).toBe(true);
+  });
+
+  it('poison bypasses armor — the hide does not stop rot', () => {
+    const { events } = simulate(lineup({ defId: 'dire-rat' }), gauntletOf([poisoner(3)]));
+    const ticks = ofType(events, 'poisonTick').filter((e) => e.targetId === 1);
+    expect(ticks.length).toBeGreaterThan(0);
+    expect(ticks.every((e) => e.amount === 3)).toBe(true);
+  });
+});
+
+describe('combat cap headroom for summons', () => {
+  const fullBoard = (): Lineup['units'] => [
+    { defId: 'rat-piper' },
+    ...Array.from({ length: 7 }, () => ({ defId: 'gutter-runt' })),
+  ];
+
+  it('a full warren starves a summoner when combat has no headroom', () => {
+    const { events } = simulate({ units: fullBoard() }, gauntletOf([dummy(0, 100)]));
+    expect(ofType(events, 'summon')).toHaveLength(0);
+  });
+
+  it('combatCap gives the pups somewhere to land', () => {
+    const { events } = simulate({ units: fullBoard(), combatCap: 10 }, gauntletOf([dummy(0, 100)]));
+    expect(ofType(events, 'summon')).toHaveLength(1);
+  });
+});
+
 describe('golden log regression', () => {
   it('the full showcase battle produces the pinned event-log hash', () => {
     const { events } = simulate(TEST_HORDE, generateGauntlet('2026-01-01'));

@@ -2,7 +2,7 @@ import { fnv1a } from './seed';
 import { xorshift128 } from './prng';
 import { UNIT_DEFS, type Lineup } from './data/units';
 import { RELIC_DEFS } from './data/relics';
-import { BOARD_CAP } from './sim';
+import { BOARD_CAP, COMBAT_CAP_BONUS } from './sim';
 
 export const DAILY_SCRAP = 24;
 export const REROLL_COST = 1;
@@ -30,6 +30,16 @@ export function interestFor(scrap: number): number {
 /** Buildable board size grows over the expedition: 5,5,6,6,7,7,8 (day 1–7). */
 export function boardCapForDay(day: number): number {
   return Math.min(BOARD_CAP, 4 + Math.ceil(day / 2));
+}
+
+/**
+ * How many rats the horde may hold *in combat* on a given day: the buildable
+ * board plus `COMBAT_CAP_BONUS` of summon headroom (7,7,8,8,9,9,10 on days
+ * 1–7). Recruiting still stops at `boardCapForDay`; the extra slots exist only
+ * so a summoner's pups aren't silently swallowed by a full warren.
+ */
+export function combatCapForDay(day: number): number {
+  return boardCapForDay(day) + COMBAT_CAP_BONUS;
 }
 
 // Synchronized seasons: a week runs Monday→Sunday, so the expedition day
@@ -370,6 +380,7 @@ export function lineupFromBuild(state: BuildState): Lineup {
   return {
     units: state.board.map((u) => ({ defId: u.defId, tier: u.tier, relicIds: u.relicIds })),
     teamRelicIds: state.teamRelicIds,
+    combatCap: combatCapForDay(state.day),
   };
 }
 
