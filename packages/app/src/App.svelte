@@ -23,6 +23,7 @@
     sellBenchUnit,
     sellRefund,
     rerollShop,
+    autoRerollShop,
     toggleFreeze,
     moveUnit,
     benchUnit,
@@ -59,6 +60,8 @@
     saveRideLog,
     loadRideLog,
     RIDE_LOG_MAX,
+    loadInstallNudgeDismissed,
+    saveInstallNudgeDismissed,
     type RideLogEntry,
     type LastRide,
   } from './persistence';
@@ -77,6 +80,8 @@
     type BoardRow,
   } from './leaderboard';
   import { startUpdateCheck } from './updateCheck';
+  import { startPwaUpdate } from './pwaUpdate';
+  import { startInstallPromptCapture, promptInstall, isIOS, isStandalone } from './pwaInstall';
 
   function addDay(date: string): string {
     return new Date(Date.parse(`${date}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
@@ -264,16 +269,60 @@
   // already-open tab on its own. `updateAvailable` flips true when the
   // poller notices `./index.html` now points at a different entry bundle
   // than the one this tab booted with; `updateDismissed` hides the banner
-  // until the next detection re-shows it (simple by design).
+  // until the next detection re-shows it (simple by design). Phase 2
+  // (pwaUpdate.ts) feeds the same flag from a waiting service worker, so
+  // there's still only ever one banner regardless of which signal fires.
   let updateAvailable = $state(false);
   let updateDismissed = $state(false);
+  // Set once pwaUpdate.ts has a waiting SW ready to activate; null means
+  // "no SW involved this session" (unsupported browser, or Phase 1's poll
+  // fired instead) and reloadForUpdate falls back to a plain reload.
+  let applyPwaUpdate: ((reload?: boolean) => Promise<void>) | null = null;
 
   function dismissUpdateBanner() {
     updateDismissed = true;
   }
 
   function reloadForUpdate() {
-    location.reload();
+    if (applyPwaUpdate) {
+      // Activates the waiting SW (skipWaiting) and reloads once it's in
+      // control — without this, a plain location.reload() could still be
+      // served by the *old* SW.
+      void applyPwaUpdate(true);
+    } else {
+      location.reload();
+    }
+  }
+
+  // Install nudge (PWA-SCOPE.md Phase 2): ROADMAP.md's retention-loop notes
+  // want this surfaced after the player's first good ride, not cold on
+  // load — `seasonBest > 0` (below) is exactly that gate, and it's already
+  // persisted so a returning player who hasn't installed yet sees it right
+  // away rather than waiting for a fresh "first" ride.
+  let canInstall = $state(false); // beforeinstallprompt captured (Chromium/Android)
+  let installDismissed = $state(loadInstallNudgeDismissed());
+  let installOutcome = $state<'accepted' | 'dismissed' | 'unavailable' | null>(null);
+  const iosInstallEligible = isIOS() && !isStandalone();
+  // The actual "first good ride" gate: seasonBest only climbs from a
+  // completed ride that cleared at least one wave (see the income-loop
+  // effect below), so `seasonBest > 0` is precisely "the player's first
+  // good ride has happened" and stays true afterward all season.
+  let showInstallNudge = $derived(
+    seasonBest > 0 && !installDismissed && (canInstall || iosInstallEligible)
+  );
+  let bannerCount = $derived(
+    (updateAvailable && !updateDismissed ? 1 : 0) + (showInstallNudge ? 1 : 0)
+  );
+
+  function dismissInstallNudge() {
+    installDismissed = true;
+    saveInstallNudgeDismissed();
+  }
+
+  async function doInstall() {
+    const outcome = await promptInstall();
+    installOutcome = outcome;
+    if (outcome !== 'unavailable') dismissInstallNudge();
   }
 
   onMount(() => {
@@ -288,6 +337,22 @@
       updateDismissed = false;
       updateAvailable = true;
     });
+    void startPwaUpdate(() => {
+      updateDismissed = false;
+      updateAvailable = true;
+    }).then((updateSW) => {
+      applyPwaUpdate = updateSW;
+    });
+    const stopInstallCapture = startInstallPromptCapture(
+      () => {
+        canInstall = true;
+      },
+      () => {
+        // Installed via our button or the browser's own UI — stop nudging.
+        canInstall = false;
+        dismissInstallNudge();
+      }
+    );
     void (async () => {
       player = new ReplayPlayer();
       await player.init(stageEl);
@@ -296,6 +361,7 @@
       clearInterval(id);
       clearInterval(boardId);
       stopUpdateCheck();
+      stopInstallCapture();
     };
   });
 
@@ -505,6 +571,20 @@
     return false;
   }
 
+  /** Apply an action and auto-reroll the shop if all stalls are bought.
+   * Used for actions that can empty shop slots (buyUnit, buyRelic). */
+  function applyAndAutoReroll(res: ActionResult): boolean {
+    if (apply(res)) {
+      const autoRoll = autoRerollShop(build);
+      if (autoRoll.ok) {
+        build = autoRoll.state;
+        saveBuild(build);
+      }
+      return true;
+    }
+    return false;
+  }
+
   // Tapping a stall opens its inspect card; the card houses the buy/pin
   // action, so nothing is spent by accident.
   function clickShopSlot(i: number) {
@@ -514,7 +594,7 @@
 
   function clickBoardUnit(boardIndex: number) {
     if (pendingRelic !== null) {
-      if (apply(buyRelic(build, pendingRelic, boardIndex))) pendingRelic = null;
+      if (applyAndAutoReroll(buyRelic(build, pendingRelic, boardIndex))) pendingRelic = null;
       return;
     }
     if (pendingSwap !== null) {
@@ -540,7 +620,7 @@
   }
 
   function recruitFromCard(i: number) {
-    if (apply(buyUnit(build, i))) inspect = null;
+    if (applyAndAutoReroll(buyUnit(build, i))) inspect = null;
   }
 
   // Late-game scrap sink (issue #9): buy a board slot beyond the day's
@@ -554,7 +634,7 @@
     const slot = build.shop.slots[i];
     if (slot.kind !== 'relic') return;
     if (RELIC_DEFS[slot.relicId].scope === 'team') {
-      if (apply(buyRelic(build, i))) inspect = null;
+      if (applyAndAutoReroll(buyRelic(build, i))) inspect = null;
     } else {
       // Unit relics need a target: close the card, arm the pick-a-rat mode.
       // Only one armed-selection mode at a time — arming this one clears
@@ -634,16 +714,41 @@
   }
 </script>
 
-{#if updateAvailable && !updateDismissed}
-  <div class="update-banner" role="status">
-    <button class="update-banner-reload" onclick={reloadForUpdate}>
-      ⚔ a fresh build rode in — tap to reload
-    </button>
-    <button class="update-banner-dismiss" onclick={dismissUpdateBanner} aria-label="dismiss">✕</button>
+{#if (updateAvailable && !updateDismissed) || showInstallNudge}
+  <div class="banner-stack">
+    {#if updateAvailable && !updateDismissed}
+      <div class="update-banner" role="status">
+        <button class="update-banner-reload" onclick={reloadForUpdate}>
+          ⚔ a fresh build rode in — tap to reload
+        </button>
+        <button class="update-banner-dismiss" onclick={dismissUpdateBanner} aria-label="dismiss"
+          >✕</button
+        >
+      </div>
+    {/if}
+    {#if showInstallNudge}
+      <div class="install-banner" role="status">
+        {#if canInstall}
+          <button class="install-banner-action" onclick={doInstall}>
+            🐀 install We Ride at Dawn — ride offline, one tap away
+          </button>
+        {:else}
+          <span class="install-banner-action install-banner-static">
+            🐀 add to Home Screen (Share → Add to Home Screen) to ride offline
+          </span>
+        {/if}
+        <button class="install-banner-dismiss" onclick={dismissInstallNudge} aria-label="dismiss"
+          >✕</button
+        >
+      </div>
+    {/if}
   </div>
 {/if}
 
-<main class:update-banner-open={updateAvailable && !updateDismissed}>
+<main
+  class:update-banner-open={(updateAvailable && !updateDismissed) || showInstallNudge}
+  style:padding-top={bannerCount > 1 ? '104px' : undefined}
+>
   <h1>WE RIDE AT DAWN</h1>
   <p class="sub">
     Week of {build.seasonId} · day {build.day}/{SEASON_DAYS} · rides hourly{CHANNEL === 'dev'
@@ -867,7 +972,7 @@
           <div class="stat"><span class="stat-big">{formatCountdown(secondsToNextHour)}</span><span class="stat-lbl">rides in</span></div>
         </div>
         <p class="idle-note">
-          +{SCRAP_PER_DEPTH} scrap per depth cleared, every hour · +{interestFor(build.scrap)} interest banked each dawn · harder every dawn
+          +{SCRAP_PER_DEPTH} scrap per depth cleared, every hour · +{interestFor(build.scrap)} interest banked each dawn · gets tougher deeper
         </p>
         <button class="watch" onclick={watchRide}>▶ watch the next ride</button>
         <p class="season-best">Deepest ride this week: <strong>wave {seasonBest}</strong> · resets Monday</p>
@@ -1093,21 +1198,36 @@
 </main>
 
 <style>
-  .update-banner {
+  .banner-stack {
     position: fixed;
     top: 0;
     left: 0;
     right: 0;
     z-index: 100;
     display: flex;
+    flex-direction: column;
+  }
+
+  .update-banner,
+  .install-banner {
+    display: flex;
     align-items: stretch;
     justify-content: center;
-    background: var(--accent);
-    border-bottom: 1px solid #7a3018;
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
   }
 
-  .update-banner-reload {
+  .update-banner {
+    background: var(--accent);
+    border-bottom: 1px solid #7a3018;
+  }
+
+  .install-banner {
+    background: var(--ink-dim);
+    border-bottom: 1px solid var(--bg);
+  }
+
+  .update-banner-reload,
+  .install-banner-action {
     flex: 1;
     max-width: 940px;
     padding: 8px 12px;
@@ -1120,16 +1240,28 @@
     cursor: pointer;
   }
 
-  .update-banner-dismiss {
+  .install-banner-static {
+    cursor: default;
+  }
+
+  .update-banner-dismiss,
+  .install-banner-dismiss {
     padding: 8px 14px;
     font-family: inherit;
     font-size: 13px;
     color: #f5ead2;
     background: transparent;
     border: none;
-    border-left: 1px solid #7a3018;
     cursor: pointer;
     opacity: 0.85;
+  }
+
+  .update-banner-dismiss {
+    border-left: 1px solid #7a3018;
+  }
+
+  .install-banner-dismiss {
+    border-left: 1px solid var(--bg);
   }
 
   main {

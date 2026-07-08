@@ -166,3 +166,26 @@ export function loadRideLog(): RideLogEntry[] {
     return [];
   }
 }
+
+/** Whether the player has dismissed the PWA install nudge (PWA-SCOPE.md
+ * Phase 2) — shown once after the first good ride (`seasonBest > 0`),
+ * suppressed permanently once dismissed or once installed. Channel-
+ * namespaced like everything else here, even though installing is a
+ * browser/OS-level action, so a dev-channel dismissal never silently
+ * suppresses the prod nudge (they're different origins-paths, same
+ * localStorage origin). */
+export function loadInstallNudgeDismissed(): boolean {
+  try {
+    return localStorage.getItem(`${NS}:installdismissed`) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function saveInstallNudgeDismissed(): void {
+  try {
+    localStorage.setItem(`${NS}:installdismissed`, '1');
+  } catch {
+    // Non-fatal — worst case the nudge reappears next session.
+  }
+}

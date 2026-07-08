@@ -378,6 +378,28 @@ export function rerollShop(state: BuildState): ActionResult {
   return { ok: true, state: s };
 }
 
+/** Check if all shop slots are empty (every stall has been bought). */
+export function isShopDead(state: BuildState): boolean {
+  return state.shop.slots.every((slot) => slot.kind === 'empty');
+}
+
+/** Auto-reroll the shop for free when all stalls are bought. This does NOT
+ * consume scrap — the only thing that distinguishes this from `rerollShop`.
+ * `shop.rolls` is purely an internal seed counter for `rollOfferings` (never
+ * shown to the player or used for cost scaling), so it must still advance
+ * here — otherwise the next manual reroll would reuse the same roll number
+ * and hand back an identical shop, silently wasting the player's scrap. */
+export function autoRerollShop(state: BuildState): ActionResult {
+  if (!isShopDead(state)) return { ok: false, reason: 'shop is not dead' };
+  const s = clone(state);
+  s.shop.rolls += 1;
+  const fresh = rollOfferings(s.date, s.shop.rolls, s.teamRelicIds);
+  s.shop.slots = s.shop.slots.map((old, i) =>
+    s.shop.frozen[i] && old.kind !== 'empty' ? old : fresh[i]
+  );
+  return { ok: true, state: s };
+}
+
 export function toggleFreeze(state: BuildState, slotIndex: number): ActionResult {
   const slot = state.shop.slots[slotIndex];
   if (!slot || slot.kind === 'empty') return fail('nothing to freeze');
