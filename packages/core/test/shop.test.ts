@@ -174,10 +174,27 @@ describe('shop basics', () => {
     const rolled = must(autoRerollShop(allEmpty)).state;
     // No scrap was deducted
     expect(rolled.scrap).toBe(5);
-    // rolls counter was not incremented (it tracks manual rerolls only)
-    expect(rolled.shop.rolls).toBe(0);
+    // rolls counter DOES advance (it's just rollOfferings' seed, not a
+    // player-facing count) so a subsequent manual reroll can't collide with
+    // this roll number and hand back the same shop
+    expect(rolled.shop.rolls).toBe(base.shop.rolls + 1);
     // But the slots should be refreshed (not all empty anymore)
     expect(rolled.shop.slots.some((slot) => slot.kind !== 'empty')).toBe(true);
+  });
+
+  it('a manual reroll after an auto-reroll does not repeat the same offerings', () => {
+    const base = newBuild('2026-07-03');
+    const allEmpty = {
+      ...base,
+      scrap: 10,
+      shop: {
+        ...base.shop,
+        slots: Array(6).fill({ kind: 'empty' as const }),
+      },
+    };
+    const afterAuto = must(autoRerollShop(allEmpty)).state;
+    const afterManual = must(rerollShop(afterAuto)).state;
+    expect(afterManual.shop.slots).not.toEqual(afterAuto.shop.slots);
   });
 
   it('repositioning reorders the board', () => {

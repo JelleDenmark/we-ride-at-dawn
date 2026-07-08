@@ -318,20 +318,19 @@ export function isShopDead(state: BuildState): boolean {
 }
 
 /** Auto-reroll the shop for free when all stalls are bought. This does NOT
- * consume scrap and does NOT count toward the manual reroll counter, since
- * it's a system reroll to prevent staring at a dead shop, not a paid reroll. */
+ * consume scrap — the only thing that distinguishes this from `rerollShop`.
+ * `shop.rolls` is purely an internal seed counter for `rollOfferings` (never
+ * shown to the player or used for cost scaling), so it must still advance
+ * here — otherwise the next manual reroll would reuse the same roll number
+ * and hand back an identical shop, silently wasting the player's scrap. */
 export function autoRerollShop(state: BuildState): ActionResult {
   if (!isShopDead(state)) return { ok: false, reason: 'shop is not dead' };
   const s = clone(state);
-  // Increment the roll counter to get fresh offerings, but don't deduct scrap
-  // and don't count this against the manual reroll count (s.shop.rolls already
-  // tracks manual rerolls only via rerollShop).
-  const nextRoll = s.shop.rolls + 1;
-  const fresh = rollOfferings(s.date, nextRoll, s.teamRelicIds);
+  s.shop.rolls += 1;
+  const fresh = rollOfferings(s.date, s.shop.rolls, s.teamRelicIds);
   s.shop.slots = s.shop.slots.map((old, i) =>
     s.shop.frozen[i] && old.kind !== 'empty' ? old : fresh[i]
   );
-  // Don't increment s.shop.rolls — keep it tracking manual rerolls only.
   return { ok: true, state: s };
 }
 
