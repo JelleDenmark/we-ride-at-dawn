@@ -6,6 +6,8 @@ import {
   sellUnit,
   sellBenchUnit,
   rerollShop,
+  autoRerollShop,
+  isShopDead,
   toggleFreeze,
   moveUnit,
   benchUnit,
@@ -138,6 +140,44 @@ describe('shop basics', () => {
     expect(rolled.shop.rolls).toBe(1);
     expect(rolled.shop.slots[i]).toEqual(s.shop.slots[i]);
     expect(rolled.shop.frozen[i]).toBe(true);
+  });
+
+  it('isShopDead detects when all slots are empty', () => {
+    const s = newBuild('2026-07-03');
+    expect(isShopDead(s)).toBe(false);
+    // Empty all slots manually
+    const allEmpty = {
+      ...s,
+      shop: {
+        ...s.shop,
+        slots: Array(6).fill({ kind: 'empty' as const }),
+      },
+    };
+    expect(isShopDead(allEmpty)).toBe(true);
+  });
+
+  it('autoRerollShop fails if shop is not dead', () => {
+    const s = newBuild('2026-07-03');
+    expect(autoRerollShop(s).ok).toBe(false);
+  });
+
+  it('autoRerollShop rerolls for free when all slots are empty', () => {
+    const base = newBuild('2026-07-03');
+    const allEmpty = {
+      ...base,
+      scrap: 5,
+      shop: {
+        ...base.shop,
+        slots: Array(6).fill({ kind: 'empty' as const }),
+      },
+    };
+    const rolled = must(autoRerollShop(allEmpty)).state;
+    // No scrap was deducted
+    expect(rolled.scrap).toBe(5);
+    // rolls counter was not incremented (it tracks manual rerolls only)
+    expect(rolled.shop.rolls).toBe(0);
+    // But the slots should be refreshed (not all empty anymore)
+    expect(rolled.shop.slots.some((slot) => slot.kind !== 'empty')).toBe(true);
   });
 
   it('repositioning reorders the board', () => {

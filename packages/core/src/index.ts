@@ -41,6 +41,8 @@ export {
   sellBenchUnit,
   sellRefund,
   rerollShop,
+  autoRerollShop,
+  isShopDead,
   toggleFreeze,
   moveUnit,
   benchUnit,
