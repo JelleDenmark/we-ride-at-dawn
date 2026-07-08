@@ -217,6 +217,43 @@ describe('wave carry-over', () => {
   });
 });
 
+describe('revive cannot loop', () => {
+  const grinder = () => gauntletOf(...Array.from({ length: 45 }, () => [dummy(2, 6)]));
+
+  it('two Bone-Priests cannot raise each other forever', () => {
+    // 12 scrap of tier-1 priests used to full-clear all 45 waves with ~12k
+    // revives: each raised the other's corpse, which died and was raised again.
+    const { events, result } = simulate(
+      lineup({ defId: 'bone-priest' }, { defId: 'bone-priest' }),
+      grinder()
+    );
+    expect(result.wavesCleared).toBeLessThan(3);
+    expect(ofType(events, 'revive').length).toBeLessThanOrEqual(2);
+  });
+
+  it('a corpse is raised at most once per battle', () => {
+    const { events } = simulate(
+      lineup({ defId: 'bone-priest' }, { defId: 'bone-priest' }, { defId: 'bone-priest' }),
+      grinder()
+    );
+    const raised = ofType(events, 'revive').map((e) => e.unit.instanceId);
+    expect(new Set(raised).size).toBe(raised.length);
+  });
+
+  it('a lone Bone-Priest still never raises itself', () => {
+    const { events } = simulate(lineup({ defId: 'bone-priest' }), grinder());
+    expect(ofType(events, 'revive')).toHaveLength(0);
+  });
+
+  it('one priest still raises a fallen ally — the ability is not dead', () => {
+    const { events } = simulate(
+      lineup({ defId: 'gutter-runt' }, { defId: 'bone-priest' }),
+      grinder()
+    );
+    expect(ofType(events, 'revive')).toHaveLength(1);
+  });
+});
+
 describe('golden log regression', () => {
   it('the full showcase battle produces the pinned event-log hash', () => {
     const { events } = simulate(TEST_HORDE, generateGauntlet('2026-01-01'));
