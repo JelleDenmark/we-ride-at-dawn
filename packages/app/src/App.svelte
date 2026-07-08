@@ -11,7 +11,6 @@
     RELIC_DEFS,
     newBuild,
     advanceAfterDawn,
-    boardCapForDay,
     weekdayFor,
     seasonIdFor,
     interestFor,
@@ -32,8 +31,11 @@
     lineupFromBuild,
     unitStats,
     REROLL_COST,
-    combatCapForDay,
+    combatCapForBuild,
     BENCH_SIZE,
+    effectiveBoardCap,
+    nextSlotPrice,
+    buyBoardSlot,
     type ActionResult,
     type BattleResult,
     type BuildState,
@@ -541,6 +543,13 @@
     if (apply(buyUnit(build, i))) inspect = null;
   }
 
+  // Late-game scrap sink (issue #9): buy a board slot beyond the day's
+  // natural cap, up to the hard BOARD_CAP. Not gated behind the inspect
+  // card — it's a standing shop action, like reroll.
+  function buySlot() {
+    apply(buyBoardSlot(build));
+  }
+
   function pinRelicFromCard(i: number) {
     const slot = build.shop.slots[i];
     if (slot.kind !== 'relic') return;
@@ -678,7 +687,7 @@
 
     <div class="horde-panel">
     <div class="panel-label row-label">
-      <span>your horde · {build.board.length}/{boardCapForDay(build.day)}</span>
+      <span>your horde · {build.board.length}/{effectiveBoardCap(build)}</span>
       <span>front → into the drains</span>
     </div>
     <div class="board horde-board">
@@ -704,10 +713,21 @@
           </span>
         </button>
       {/each}
-      {#each Array.from({ length: Math.max(0, boardCapForDay(build.day) - build.board.length) }) as _}
+      {#each Array.from({ length: Math.max(0, effectiveBoardCap(build) - build.board.length) }) as _}
         <div class="tile empty-tile">empty</div>
       {/each}
     </div>
+    {#if nextSlotPrice(build) !== undefined}
+      <div class="market-actions slot-actions">
+        <button
+          class="buy-slot"
+          disabled={build.scrap < (nextSlotPrice(build) ?? Infinity)}
+          onclick={buySlot}
+        >
+          + warren slot ({effectiveBoardCap(build)} → {effectiveBoardCap(build) + 1}) · {nextSlotPrice(build)} scrap
+        </button>
+      </div>
+    {/if}
     {#if build.teamRelicIds.length > 0}
       <div class="team-relics">
         Team: {build.teamRelicIds.map((r) => RELIC_DEFS[r].name).join(', ')}
@@ -947,7 +967,7 @@
             </div>
             <p class="card-ability">{abilitySentence(def.id)}</p>
             {#if isSummoner(def.id)}
-              <p class="card-hint">summoned rats fight beyond your warren's size (up to {combatCapForDay(build.day)} in the drains)</p>
+              <p class="card-hint">summoned rats fight beyond your warren's size (up to {combatCapForBuild(build)} in the drains)</p>
             {/if}
             <p class="card-hint">recruit three of a kind and they merge into one stronger ★ rat</p>
             <div class="card-actions">
@@ -996,7 +1016,7 @@
             </div>
             <p class="card-ability">{abilitySentence(unit.defId)}</p>
             {#if isSummoner(unit.defId)}
-              <p class="card-hint">summoned rats fight beyond your warren's size (up to {combatCapForDay(build.day)} in the drains)</p>
+              <p class="card-hint">summoned rats fight beyond your warren's size (up to {combatCapForBuild(build)} in the drains)</p>
             {/if}
             {#if unit.relicIds.length > 0}
               <p class="card-relics">✦ {unit.relicIds.map((r) => RELIC_DEFS[r].name).join(', ')}</p>
@@ -1015,7 +1035,7 @@
           {#if unit}
             {@const def = UNIT_DEFS[unit.defId]}
             {@const stats = unitStats(unit)}
-            {@const boardFull = build.board.length >= boardCapForDay(build.day)}
+            {@const boardFull = build.board.length >= effectiveBoardCap(build)}
             <div class="card-head">
               {#if ART_URL[unit.defId]}<img class="card-portrait" src={ART_URL[unit.defId]} alt="" />{/if}
               <div>
@@ -1438,6 +1458,15 @@
     border: 1px solid #4a3520;
     border-radius: 6px;
     cursor: pointer;
+  }
+
+  .market-actions button:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+
+  .slot-actions {
+    margin-top: 6px;
   }
 
   .sheet-backdrop {
