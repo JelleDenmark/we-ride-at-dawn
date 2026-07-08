@@ -17,6 +17,17 @@ export interface RelicDef {
   /** Overkill damage that fells the front foe carries to the next enemy in
    * line, once, no chaining (Gore-Cleaver). */
   cleaveOverkill?: boolean;
+  /**
+   * Pure execute (Marrow-Snap): if a clash leaves the foe at or below this
+   * fraction of the FOE's own max health, it dies outright instead of
+   * surviving on a sliver. Compounding-law note: this is stateless and
+   * foe-relative — no stat, health, or attack is ever added to the bearer,
+   * so there is nothing here that can accumulate across the 45-wave battle.
+   * Each wave's enemies are freshly instantiated (see `simulate`'s per-wave
+   * loop), so the "free" HP this saves resets every wave along with them;
+   * it only ever changes the outcome of the single clash it fires on.
+   */
+  executeThreshold?: number;
 }
 
 export const RELIC_DEFS: Record<string, RelicDef> = {
@@ -47,5 +58,9 @@ export const RELIC_DEFS: Record<string, RelicDef> = {
   'gore-cleaver': {
     id: 'gore-cleaver', name: 'Gore-Cleaver', scope: 'unit', cost: 5,
     desc: 'overkill carries to the next foe', cleaveOverkill: true,
+  },
+  'marrow-snap': {
+    id: 'marrow-snap', name: 'Marrow-Snap', scope: 'unit', cost: 5,
+    desc: 'execute foes left at or below 30% health', executeThreshold: 0.3,
   },
 };
