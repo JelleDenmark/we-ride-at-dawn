@@ -263,6 +263,25 @@ describe('relics in the shop', () => {
     expect(buyRelic(s, 1).ok).toBe(false);
   });
 
+  it('The Forgotten Backpack (issue #24) is a team relic bound by the same one-per-horde rule as Filth Totem', () => {
+    const base = newBuild('2026-07-03');
+    const s = {
+      ...base,
+      scrap: 50,
+      teamRelicIds: ['forgotten-backpack'],
+      shop: {
+        ...base.shop,
+        slots: [
+          { kind: 'relic' as const, relicId: 'forgotten-backpack' },
+          ...base.shop.slots.slice(1),
+        ],
+      },
+    };
+    // Already owned — a second copy is rejected exactly like Filth Totem, so
+    // there is no way to double up its whole-horde regen through normal play.
+    expect(buyRelic(s, 0).ok).toBe(false);
+  });
+
   it('hasValidRelicTarget (issue #25): false once every board rat already carries it, or the board is empty', () => {
     const base = newBuild('2026-07-03');
     // Empty board — nothing to pin to at all.

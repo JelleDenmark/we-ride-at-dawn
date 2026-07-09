@@ -129,6 +129,13 @@ export function simulate(
     .filter((r): r is RelicDef => r !== undefined && r.scope === 'team');
   const teamAttack = teamRelics.reduce((s, r) => s + (r.attack ?? 0), 0);
   const teamHealth = teamRelics.reduce((s, r) => s + (r.health ?? 0), 0);
+  // Whole-horde per-tick regen (The Forgotten Backpack). Same shape as a
+  // unit's healPerTick (Fat Tick), just summed across team relics and applied
+  // to every horde unit instead of only the carrier. Compounding-law check:
+  // this is bounded exactly like Fat Tick's regen below — every tick it's
+  // clamped to `maxHealth - health`, so it can never push a unit past its own
+  // health ceiling no matter how many of the 45 waves it runs across.
+  const teamHealPerTick = teamRelics.reduce((s, r) => s + (r.healPerTick ?? 0), 0);
   // Both sides share one in-combat ceiling. Absent (golden logs, tests,
   // gauntlet-only callers) it's BOARD_CAP, exactly as before.
   const combatCap = lineup.combatCap ?? BOARD_CAP;
@@ -386,7 +393,9 @@ export function simulate(
     while (horde.length > 0 && enemies.length > 0 && ticks++ < MAX_TICKS_PER_WAVE) {
       for (const board of [horde, enemies]) {
         for (const unit of board) {
-          const regen = unit.relics.reduce((s, r) => s + (r.healPerTick ?? 0), 0);
+          const regen =
+            unit.relics.reduce((s, r) => s + (r.healPerTick ?? 0), 0) +
+            (unit.side === 'horde' ? teamHealPerTick : 0);
           const amount = Math.min(regen, unit.maxHealth - unit.health);
           if (amount > 0) {
             unit.health += amount;

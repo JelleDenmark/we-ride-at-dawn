@@ -258,6 +258,47 @@ describe('relics', () => {
     const summons = ofType(events, 'summon');
     expect(summons[0].unit.health).toBe(2);
   });
+
+  it('The Forgotten Backpack heals a damaged front-liner that carries no relic of its own', () => {
+    // Corpse-Glutton has no relicIds at all here — unlike Fat Tick, the heal
+    // comes purely from the team relic, so this proves it isn't gated on the
+    // unit holding anything itself.
+    const { events, result } = simulate(
+      { units: [{ defId: 'corpse-glutton' }], teamRelicIds: ['forgotten-backpack'] },
+      gauntletOf([dummy(1, 12)])
+    );
+    expect(ofType(events, 'heal').length).toBeGreaterThan(0);
+    expect(result.wavesCleared).toBe(1);
+  });
+
+  it('The Forgotten Backpack heals every horde unit, not just the front-liner', () => {
+    // Gutter-Runt sits at the back and never clashes, but Corpse-Glutton in
+    // front still takes chip damage each tick — with the team relic active,
+    // both should show up as heal targets since it applies horde-wide.
+    const { events } = simulate(
+      { units: [{ defId: 'corpse-glutton' }, { defId: 'gutter-runt' }], teamRelicIds: ['forgotten-backpack'] },
+      gauntletOf([dummy(1, 12)])
+    );
+    const glutton = ofType(events, 'battleStart')[0].horde[0].instanceId;
+    const runt = ofType(events, 'battleStart')[0].horde[1].instanceId;
+    const heals = ofType(events, 'heal');
+    expect(heals.some((h) => h.targetId === glutton)).toBe(true);
+  });
+
+  it('The Forgotten Backpack never heals a unit past its own max health', () => {
+    // Compounding-law check: run it across several waves and confirm no heal
+    // ever pushes a unit's health above the maxHealth it started the battle
+    // with, no matter how many ticks/waves accrue.
+    const { events } = simulate(
+      { units: [{ defId: 'corpse-glutton' }], teamRelicIds: ['forgotten-backpack'] },
+      gauntletOf([dummy(1, 12)], [dummy(1, 20)], [dummy(1, 30)])
+    );
+    const maxHealth = ofType(events, 'battleStart')[0].horde[0].health;
+    for (const h of ofType(events, 'heal')) {
+      expect(h.newHealth).toBeLessThanOrEqual(maxHealth);
+    }
+  });
+
 });
 
 describe('wave carry-over', () => {

@@ -558,6 +558,18 @@ const teamWith = (() => {
 console.log(
   `\nFilth Totem (team, cost ${RELIC_DEFS['filth-totem'].cost}): whole-horde Δ ${(teamWith - relicBase).toFixed(3)} (Δ/cost ${((teamWith - relicBase) / RELIC_DEFS['filth-totem'].cost).toFixed(4)})`
 );
+
+// Team relic (The Forgotten Backpack, issue #24) — whole-horde per-tick regen.
+const teamWithBackpack = (() => {
+  const units = relicBoard();
+  const ds = RELIC_TEST_DATES.map(
+    (d) => simulate({ units, teamRelicIds: ['forgotten-backpack'] }, generateGauntlet(d, RELIC_DAY)).result.wavesCleared
+  );
+  return avg(ds);
+})();
+console.log(
+  `The Forgotten Backpack (team, cost ${RELIC_DEFS['forgotten-backpack'].cost}): whole-horde Δ ${(teamWithBackpack - relicBase).toFixed(3)} (Δ/cost ${((teamWithBackpack - relicBase) / RELIC_DEFS['forgotten-backpack'].cost).toFixed(4)})`
+);
 console.log(`\nranked by best-placement depth delta: ${relicRows.map((r) => r.id).join(' > ')}`);
 
 // ---------------------------------------------------------------------------
