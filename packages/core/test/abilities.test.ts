@@ -61,10 +61,51 @@ describe('unit abilities', () => {
     expect(buffs[0].newHealth).toBe(3);
   });
 
-  it('Bone-Priest revives the first fallen ally at 1 health', () => {
+  it('t1 Bone-Priest revives the first fallen ally at 1 health', () => {
     const { events } = simulate(
-      lineup({ defId: 'gutter-runt' }, { defId: 'bone-priest' }),
+      lineup({ defId: 'dire-rat' }, { defId: 'bone-priest', tier: 1 }),
       gauntletOf([dummy(2, 50)])
+    );
+    const revives = ofType(events, 'revive');
+    expect(revives.length).toBe(1);
+    expect(revives[0].unit.defId).toBe('dire-rat');
+    expect(revives[0].unit.health).toBe(1);
+  });
+
+  it('t2 Bone-Priest revives the first fallen ally at 10 health', () => {
+    // Warren-Warden at tier 2 has maxHealth 6*3=18, comfortably above the
+    // t2 revive value of 10, so the result isn't accidentally cap-limited.
+    const { events } = simulate(
+      lineup({ defId: 'warren-warden', tier: 2 }, { defId: 'bone-priest', tier: 2 }),
+      gauntletOf([dummy(50, 500)])
+    );
+    const revives = ofType(events, 'revive');
+    expect(revives.length).toBe(1);
+    expect(revives[0].unit.defId).toBe('warren-warden');
+    expect(revives[0].unit.health).toBe(10);
+  });
+
+  it('t3 Bone-Priest revives the first fallen ally at 20 health', () => {
+    // Warren-Warden at tier 3 has maxHealth 6*9=54, comfortably above the
+    // t3 revive value of 20, so the result isn't accidentally cap-limited.
+    const { events } = simulate(
+      lineup({ defId: 'warren-warden', tier: 3 }, { defId: 'bone-priest', tier: 3 }),
+      gauntletOf([dummy(50, 500)])
+    );
+    const revives = ofType(events, 'revive');
+    expect(revives.length).toBe(1);
+    expect(revives[0].unit.defId).toBe('warren-warden');
+    expect(revives[0].unit.health).toBe(20);
+  });
+
+  it('t3 Bone-Priest revive is capped at the corpse\'s own maxHealth', () => {
+    // Gutter-Runt is a 1-health t1 corpse; the 1/10/20 table must not
+    // overheal it past its own ceiling just because the reviver is t3.
+    // The dummy needs enough health to survive long enough for the tier-3
+    // Bone-Priest (attack 9, health 36) to actually die and trigger revive.
+    const { events } = simulate(
+      lineup({ defId: 'gutter-runt', tier: 1 }, { defId: 'bone-priest', tier: 3 }),
+      gauntletOf([dummy(2, 500)])
     );
     const revives = ofType(events, 'revive');
     expect(revives.length).toBe(1);
