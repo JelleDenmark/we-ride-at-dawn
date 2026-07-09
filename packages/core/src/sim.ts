@@ -1,5 +1,5 @@
 import type { Side, UnitDef, Ability, Lineup } from './data/units';
-import { UNIT_DEFS, tierAttackMultiplier, tierHealthMultiplier } from './data/units';
+import { UNIT_DEFS, tierAttackMultiplier, tierHealthMultiplier, reviveHpForTier } from './data/units';
 import { ENEMY_POOL } from './data/enemies';
 import { RELIC_DEFS, type RelicDef } from './data/relics';
 import type { Gauntlet } from './gauntlet';
@@ -362,11 +362,20 @@ export function simulate(
         // immortal pair that full-cleared all 45 waves for 12 scrap. The
         // `raised` flag makes resurrection a once-per-corpse resource, so any
         // reviver ring is finite no matter how many priests you stack.
+        //
+        // Issue #53: revive HP now comes from `reviveHpForTier` (1/10/20)
+        // instead of a flat `health * tier`, capped at the revived corpse's
+        // own `maxHealth` so a low-tier ally can't be overhealed past its
+        // ceiling. This is a magnitude change only, not a frequency one —
+        // `faint` still fires exactly once per unit instance, ever (a unit
+        // only dies once), so the compounding-law bound above still holds
+        // regardless of how steep the HP table gets or how long the battle
+        // (up to 45 waves) runs.
         const corpseIdx = fallen[source.side].findIndex((c) => c !== source && !c.raised);
         if (corpseIdx === -1 || board.length >= combatCap) break;
         const [corpse] = fallen[source.side].splice(corpseIdx, 1);
         corpse.raised = true;
-        corpse.health = effect.health * tier;
+        corpse.health = Math.min(reviveHpForTier(tier), corpse.maxHealth);
         corpse.poison = 0;
         board.splice(index, 0, corpse);
         events.push({ type: 'revive', side: source.side, index, unit: view(corpse) });

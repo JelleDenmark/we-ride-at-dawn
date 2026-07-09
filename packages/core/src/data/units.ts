@@ -25,6 +25,23 @@ export function tierHealthMultiplier(tier: number): number {
   return Math.pow(3, tier - 1);
 }
 
+/**
+ * HP a Bone-Priest's `revive` returns the raised ally at, by tier (issue
+ * #53). Deliberately NOT `tierHealthMultiplier` or any other flat multiplier
+ * of a base value — `revive` fires exactly once per Bone-Priest instance
+ * (its own `faint` trigger, which a unit only hits once), so unlike
+ * per-battle-recurring effects there's no compounding risk in a steep,
+ * hand-tuned curve here. A flat `health * tier` (1/2/3) made merging this
+ * unit nearly pointless since the ability only ever pays out once; this
+ * table (1/10/20) makes tiering up actually matter. Callers must still cap
+ * the result at the revived corpse's own `maxHealth` — see the `revive`
+ * case in sim.ts's `applyEffect`.
+ */
+export function reviveHpForTier(tier: number): number {
+  const table = [1, 10, 20];
+  return table[tier - 1] ?? table[table.length - 1];
+}
+
 export type Effect =
   | { kind: 'summon'; unitId: string; count: number }
   | { kind: 'buffBehind'; attack: number; health: number; all?: boolean }
@@ -41,7 +58,13 @@ export type Effect =
   | { kind: 'poisonFrontEnemy'; stacks: number }
   | { kind: 'poisonTarget'; stacks: number }
   | { kind: 'gainStats'; attack: number; health: number }
-  | { kind: 'revive'; health: number }
+  /**
+   * HP is NOT carried on the effect — it's looked up per-tier via
+   * `reviveHpForTier` at apply time (issue #53), then capped at the
+   * revived corpse's own `maxHealth`. See `reviveHpForTier`'s doc comment
+   * for why a steep table is safe here despite the compounding law.
+   */
+  | { kind: 'revive' }
   /**
    * Watches this unit's OWN side's current front-line unit (not itself) and,
    * every `every`th attack that front unit lands, grants it a one-hit
@@ -202,8 +225,8 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   },
   'bone-priest': {
     id: 'bone-priest', name: 'Bone-Priest', attack: 1, health: 4, cost: 6,
-    desc: 'faint: revives first fallen',
-    ability: { trigger: 'faint', effect: { kind: 'revive', health: 1 } },
+    desc: 'faint: revives first fallen at 1/10/20 HP (tier), capped at their own max',
+    ability: { trigger: 'faint', effect: { kind: 'revive' } },
   },
   'warren-warden': {
     id: 'warren-warden', name: 'Warren-Warden', attack: 2, health: 6, cost: 6,
