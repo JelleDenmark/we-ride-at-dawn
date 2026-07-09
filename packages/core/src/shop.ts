@@ -1,6 +1,6 @@
 import { fnv1a } from './seed';
 import { xorshift128 } from './prng';
-import { UNIT_DEFS, type Lineup } from './data/units';
+import { UNIT_DEFS, type Lineup, tierAttackMultiplier, tierHealthMultiplier } from './data/units';
 import { RELIC_DEFS } from './data/relics';
 import { BOARD_CAP, COMBAT_CAP_BONUS } from './sim';
 
@@ -525,5 +525,8 @@ export function buyBoardSlot(state: BuildState): ActionResult {
 
 export function unitStats(unit: BoardUnit): { attack: number; health: number } {
   const def = UNIT_DEFS[unit.defId];
-  return { attack: def.attack * unit.tier, health: def.health * unit.tier };
+  return {
+    attack: def.attack * tierAttackMultiplier(unit.tier),
+    health: def.health * tierHealthMultiplier(unit.tier),
+  };
 }

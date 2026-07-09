@@ -31,6 +31,7 @@ import {
   DAILY_SCRAP,
   REROLL_COST,
   BENCH_SIZE,
+  unitStats,
   type BuildState,
 } from '../src/shop';
 import { UNIT_DEFS } from '../src/data/units';
@@ -663,16 +664,27 @@ describe('tiers in battle', () => {
     waves: [{ units: [{ id: 'd', name: 'D', attack: 1, health: 50, cost: 0 }] }],
   };
 
-  it('tier multiplies stats and ability magnitude', () => {
+  it('tier multiplies attack by 3^(tier-1) (issue #22) and health linearly, and scales ability magnitude by tier', () => {
     const { events } = simulate(
       { units: [{ defId: 'gnawer', tier: 2 }, { defId: 'gutter-runt' }] },
       gauntlet
     );
     const start = events.find((e) => e.type === 'battleStart')!;
-    expect(start.type === 'battleStart' && start.horde[0].attack).toBe(6);
+    // Gnawer: attack 3, health 1. Tier 2 -> attack x3^(2-1)=3 => 9; health x2 (linear) => 2.
+    expect(start.type === 'battleStart' && start.horde[0].attack).toBe(9);
+    expect(start.type === 'battleStart' && start.horde[0].health).toBe(2);
     expect(start.type === 'battleStart' && start.horde[0].tier).toBe(2);
+    // Ability magnitude scaling is unchanged (still linear in tier, not the
+    // new attack curve) — see the compounding-law note on tierAttackMultiplier.
     const buffEvent = events.find((e) => e.type === 'buff')!;
     expect(buffEvent.type === 'buff' && buffEvent.attack).toBe(4);
+  });
+
+  it('unitStats (shop preview) matches the sim: attack x3^(tier-1), health x tier', () => {
+    const board = (tier: number) => ({ defId: 'gnawer', tier, relicIds: [] });
+    expect(unitStats(board(1))).toEqual({ attack: 3, health: 1 });
+    expect(unitStats(board(2))).toEqual({ attack: 9, health: 2 });
+    expect(unitStats(board(3))).toEqual({ attack: 27, health: 3 });
   });
 
   it('lineupFromBuild carries tiers and relics into the sim input', () => {
