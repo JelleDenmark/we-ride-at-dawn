@@ -1,0 +1,15 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <!-- Ward-Weaver: woven ward charm held up, eyes fixed forward (watches the front rat: every 3rd attack, shields it) -->
+  <path d="M14 52 Q3 51 5 39 Q5 33 10 32" fill="none" stroke="#5e3120" stroke-width="2.4" stroke-linecap="round"/>
+  <path d="M14 52 C10 43 14 32 26 30 C34 29 41 33 44 39 L50 44 C51.3 45 50.4 46.4 49 46.4 L43 46.5 C40 51 33 54 25 54 C18 54 15.5 53.5 14 52 Z" fill="#8a4b2f" stroke="#201209" stroke-width="1.5" stroke-linejoin="round"/>
+  <path d="M32 26 Q30 20 35 19 Q37 24 34 28 Z" fill="#8a4b2f" stroke="#201209" stroke-width="1.2" stroke-linejoin="round"/>
+  <circle cx="39" cy="34" r="4.4" fill="#8a4b2f" stroke="#201209" stroke-width="1.5"/>
+  <circle cx="39" cy="34" r="2" fill="#b4715a"/>
+  <circle cx="47" cy="40" r="1.7" fill="#201209"/>
+  <!-- woven ward charm raised forward like a small shield -->
+  <circle cx="55" cy="30" r="8" fill="none" stroke="#c79a53" stroke-width="2.2"/>
+  <path d="M48 30 L62 30 M55 23 L55 37 M50 25 L60 35 M60 25 L50 35" stroke="#c79a53" stroke-width="1.1"/>
+  <circle cx="55" cy="30" r="1.6" fill="#e8e2cf"/>
+  <rect x="20" y="53" width="4.5" height="7" rx="1.8" fill="#5e3120"/>
+  <rect x="33" y="52" width="4.5" height="7" rx="1.8" fill="#5e3120"/>
+</svg>
