@@ -73,10 +73,20 @@ describe('gauntlet stability', () => {
     expect(nextSeasonTheme).not.toEqual(themes[0]);
   });
 
-  it('wave composition can still vary day-to-day under a stable theme', () => {
+  it('the whole gauntlet (theme AND wave composition) is identical every day of one season', () => {
+    // Full sameness (2026-07-09 follow-up): not just the theme, the exact
+    // enemy picks are now season-seeded too, so every ride within one
+    // 7-day expedition is byte-identical — only the roster changes day to
+    // day, not the challenge.
     const a = generateGauntlet('2026-07-01');
     const b = generateGauntlet('2026-07-02');
     expect(a.theme).toEqual(b.theme);
+    expect(JSON.stringify(a.waves)).toBe(JSON.stringify(b.waves));
+  });
+
+  it('wave composition still differs between different seasons', () => {
+    const a = generateGauntlet('2026-06-29'); // one Monday
+    const b = generateGauntlet('2026-07-06'); // the next Monday
     expect(JSON.stringify(a.waves)).not.toBe(JSON.stringify(b.waves));
   });
 });
