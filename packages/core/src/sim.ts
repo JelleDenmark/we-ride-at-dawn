@@ -35,9 +35,9 @@ export const MAX_TICKS_PER_WAVE = 1000;
 // linear HP curve eventually falls behind and attack stops mattering again
 // at high depth/tier — the same "overkill wasted" bug this whole change
 // exists to fix, just recurring at a higher power level.
-export const ENEMY_HEALTH_SCALE_PER_WAVE = 0.35;
-export const ENEMY_HEALTH_SCALE_QUADRATIC = 0.012;
-export const ENEMY_ATTACK_SCALE_PER_WAVE = 0.08;
+export const ENEMY_HEALTH_SCALE_PER_WAVE = 0.20;
+export const ENEMY_HEALTH_SCALE_QUADRATIC = 0.004;
+export const ENEMY_ATTACK_SCALE_PER_WAVE = 0.05;
 
 export function enemyHealthScale(waveIndex: number): number {
   return 1 + waveIndex * ENEMY_HEALTH_SCALE_PER_WAVE + waveIndex * waveIndex * ENEMY_HEALTH_SCALE_QUADRATIC;
