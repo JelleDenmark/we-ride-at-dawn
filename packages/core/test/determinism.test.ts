@@ -55,7 +55,39 @@ describe('gauntlet stability', () => {
   it('gauntlets are unchanged by day (golden compatibility)', () => {
     const g = generateGauntlet('2026-07-03');
     expect(g.hour).toBeUndefined();
-    expect(g.theme).toEqual({ primary: 'swarm', secondary: 'armored', pivotWave: 5 });
+    // #41: theme is now seeded from the season (the expedition's Monday),
+    // not the calendar date, so it stays stable across a 7-day expedition.
+    // 2026-07-03 (Fri) falls in the season starting Monday 2026-06-29.
+    expect(g.theme).toEqual({ primary: 'plague', secondary: 'brute', pivotWave: 4 });
+  });
+
+  it('theme is stable across every day of the same season, but differs across seasons', () => {
+    // 2026-06-29 (Mon) .. 2026-07-05 (Sun) is one season/expedition week.
+    const seasonDates = [
+      '2026-06-29', '2026-06-30', '2026-07-01', '2026-07-02', '2026-07-03', '2026-07-04', '2026-07-05',
+    ];
+    const themes = seasonDates.map((d) => generateGauntlet(d).theme);
+    for (const t of themes) expect(t).toEqual(themes[0]);
+
+    const nextSeasonTheme = generateGauntlet('2026-07-06').theme; // next Monday
+    expect(nextSeasonTheme).not.toEqual(themes[0]);
+  });
+
+  it('the whole gauntlet (theme AND wave composition) is identical every day of one season', () => {
+    // Full sameness (2026-07-09 follow-up): not just the theme, the exact
+    // enemy picks are now season-seeded too, so every ride within one
+    // 7-day expedition is byte-identical — only the roster changes day to
+    // day, not the challenge.
+    const a = generateGauntlet('2026-07-01');
+    const b = generateGauntlet('2026-07-02');
+    expect(a.theme).toEqual(b.theme);
+    expect(JSON.stringify(a.waves)).toBe(JSON.stringify(b.waves));
+  });
+
+  it('wave composition still differs between different seasons', () => {
+    const a = generateGauntlet('2026-06-29'); // one Monday
+    const b = generateGauntlet('2026-07-06'); // the next Monday
+    expect(JSON.stringify(a.waves)).not.toBe(JSON.stringify(b.waves));
   });
 });
 

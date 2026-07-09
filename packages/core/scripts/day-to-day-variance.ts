@@ -2,7 +2,18 @@
 // depth swing from one calendar day to the next, purely from the daily
 // gauntlet's random theme/composition draw? Isolates day-to-day variance
 // from the roster-growth signal (which is expected and fine).
-import { simulate, generateGauntlet, boardCapForDay } from '../src/index';
+//
+// #41 fix: the gauntlet's *theme* (primary/secondary archetype, pivot wave)
+// is now seeded per-season (the expedition's Monday) instead of per-date, so
+// it no longer re-rolls day-to-day within a 7-day expedition. This script
+// reports both the raw day-to-day swing (as before, spanning many weeks —
+// still expected to show swings *between* seasons) and a within-season
+// breakdown, which should collapse dramatically for days sharing a season
+// (down from up to 11 pre-fix) — a small residual swing can remain, since
+// only the *theme* is stabilized; the exact enemy picks within that theme
+// are still date-seeded and intentionally still vary day to day (same
+// design #34 already used for hour-to-hour composition variety).
+import { simulate, generateGauntlet, boardCapForDay, seasonIdFor } from '../src/index';
 import type { Lineup } from '../src/index';
 
 // Same "strong, actively-improving player" roster as depth-scaling.ts, incl.
@@ -34,8 +45,10 @@ for (const [label, day, tier] of [
 ] as const) {
   const lineup = fixedRoster(day, tier);
   const depths: number[] = [];
+  const dates: string[] = [];
   for (let i = 0; i < N_DAYS; i++) {
     const date = new Date(Date.parse(`${START}T12:00:00Z`) + i * 86_400_000).toISOString().slice(0, 10);
+    dates.push(date);
     depths.push(simulate(lineup, generateGauntlet(date, day)).result.wavesCleared);
   }
   const min = Math.min(...depths);
@@ -45,4 +58,27 @@ for (const [label, day, tier] of [
   const maxSwing = Math.max(...swings.map(Math.abs));
   console.log(`${label}: min ${min} avg ${avg.toFixed(2)} max ${max} (spread ${max - min}) | max single-day-to-next swing: ${maxSwing}`);
   console.log(`  sequence: ${depths.join(', ')}`);
+
+  // Within-season breakdown: group consecutive days by seasonId (the
+  // expedition's Monday) and report the max swing *within* each season
+  // (should be ~0 post-#41) vs. the spread of season averages *between*
+  // seasons (still expected to vary week-to-week).
+  const bySeason = new Map<string, number[]>();
+  for (let i = 0; i < depths.length; i++) {
+    const sid = seasonIdFor(dates[i]);
+    if (!bySeason.has(sid)) bySeason.set(sid, []);
+    bySeason.get(sid)!.push(depths[i]);
+  }
+  let maxWithinSeasonSwing = 0;
+  const seasonAverages: number[] = [];
+  for (const [, ds] of bySeason) {
+    const seasonSwing = Math.max(...ds.slice(1).map((d, i) => Math.abs(d - ds[i])), 0);
+    maxWithinSeasonSwing = Math.max(maxWithinSeasonSwing, seasonSwing);
+    seasonAverages.push(ds.reduce((a, b) => a + b, 0) / ds.length);
+  }
+  const seasonAvgSpread = Math.max(...seasonAverages) - Math.min(...seasonAverages);
+  console.log(
+    `  within-season: max swing among days sharing a season: ${maxWithinSeasonSwing} | ` +
+      `between-season: spread of season averages: ${seasonAvgSpread.toFixed(2)} (${bySeason.size} seasons)`
+  );
 }
