@@ -28,10 +28,28 @@ export function tierHealthMultiplier(tier: number): number {
 export type Effect =
   | { kind: 'summon'; unitId: string; count: number }
   | { kind: 'buffBehind'; attack: number; health: number; all?: boolean }
+  /**
+   * Buffs BOTH board neighbors (index-1 and index+1), whichever exist. At
+   * the front only the "behind" neighbor exists; at the back only the
+   * "front" neighbor exists; a middle placement hits both — the first
+   * effect in the game where being in the middle is strictly better than
+   * an edge. See `buffAdjacent`'s application in sim.ts for the
+   * compounding-law note (it's `startOfBattle`-gated, same shape as
+   * `buffBehind` on Warren-Warden).
+   */
+  | { kind: 'buffAdjacent'; attack: number; health: number }
   | { kind: 'poisonFrontEnemy'; stacks: number }
   | { kind: 'poisonTarget'; stacks: number }
   | { kind: 'gainStats'; attack: number; health: number }
-  | { kind: 'revive'; health: number };
+  | { kind: 'revive'; health: number }
+  /**
+   * Watches this unit's OWN side's current front-line unit (not itself) and,
+   * every `every`th attack that front unit lands, grants it a one-hit
+   * shield. See the `watchFrontAttack` trigger doc comment and the
+   * compounding-law note in sim.ts's tick loop for why the shield can never
+   * exceed "absorbs one hit" no matter how long the battle runs.
+   */
+  | { kind: 'shieldFront'; every: number };
 
 /**
  * `startOfBattle` fires **once per unit instance, ever** — on the first wave
@@ -47,9 +65,16 @@ export type Effect =
  *
  * Enemies are re-instantiated every wave, so their `startOfBattle` abilities
  * still fire each wave for free — the per-instance flag makes this automatic.
+ *
+ * `watchFrontAttack` is different in kind from the others: it does not fire
+ * on anything that happens to *this* unit. It fires once per combat tick in
+ * which this unit's own side's current front-line unit lands an attack —
+ * i.e. it observes a teammate's combat event, not its own. See sim.ts's
+ * `tickWatchers` for the implementation and why "whoever is currently
+ * front" (not a fixed unit) is the thing being watched.
  */
 export interface Ability {
-  trigger: 'startOfBattle' | 'startOfWave' | 'faint' | 'afterAttack' | 'allyFaint';
+  trigger: 'startOfBattle' | 'startOfWave' | 'faint' | 'afterAttack' | 'allyFaint' | 'watchFrontAttack';
   effect: Effect;
 }
 
@@ -146,6 +171,16 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     id: 'md-rattyfock', name: 'MD Rattyfock', attack: 2, health: 6, cost: 6,
     desc: 'battle: Season 1 survivor, patched and returned; +1/+1 to all behind',
     ability: { trigger: 'startOfBattle', effect: { kind: 'buffBehind', attack: 1, health: 1, all: true } },
+  },
+  'press-kin': {
+    id: 'press-kin', name: 'Press-Kin', attack: 2, health: 4, cost: 5,
+    desc: 'battle: +2/+2 to the rats beside it (both sides — best in the middle)',
+    ability: { trigger: 'startOfBattle', effect: { kind: 'buffAdjacent', attack: 2, health: 2 } },
+  },
+  'ward-weaver': {
+    id: 'ward-weaver', name: 'Ward-Weaver', attack: 1, health: 3, cost: 6,
+    desc: 'watches the front rat: every 3rd attack it lands, shields it from the next hit',
+    ability: { trigger: 'watchFrontAttack', effect: { kind: 'shieldFront', every: 3 } },
   },
 };
 

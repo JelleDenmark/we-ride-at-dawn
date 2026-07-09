@@ -70,6 +70,8 @@ export type BattleEvent =
   | { type: 'revive'; side: Side; index: number; unit: UnitView }
   | { type: 'buff'; targetId: number; attack: number; health: number; newAttack: number; newHealth: number }
   | { type: 'relicProc'; targetId: number; relicId: string; name: string }
+  | { type: 'shieldGranted'; targetId: number; sourceId: number }
+  | { type: 'shieldAbsorbed'; targetId: number }
   | { type: 'waveClear'; wave: number }
   | { type: 'battleEnd'; wavesCleared: number; score: number };
 
@@ -103,6 +105,24 @@ interface BattleUnit {
   startOfBattleFired: boolean;
   /** A corpse may be raised once per battle. Guards the two-reviver loop. */
   raised: boolean;
+  /**
+   * Ward-Weaver's shield. Bounded to a single boolean, never a counter: a
+   * grant while already `true` is a no-op (see `tickWatchers`), so however
+   * many times the watcher's every-3rd-attack threshold is crossed before
+   * the shield is actually consumed, it still only ever absorbs exactly one
+   * hit. That's what keeps this compounding-law-safe across a 45-wave
+   * battle — it cannot stack into "absorbs N hits."
+   */
+  shielded: boolean;
+  /**
+   * Per-battle (not per-wave) count of attacks landed by this unit's own
+   * side's current front-line unit, owned by whichever unit bears a
+   * `watchFrontAttack` ability. Never reset mid-battle, only re-initialized
+   * per unit instance at `instantiate` — matches `startOfBattleFired`'s
+   * once-per-instance lifetime, so a Ward-Weaver's proc cadence carries
+   * across wave boundaries within one battle, as designed.
+   */
+  watchCounter: number;
 }
 
 /** A hit reduced by armor still lands for at least this much. */
@@ -178,6 +198,8 @@ export function simulate(
       damageReduction: (def.damageReduction ?? 0) * tier,
       startOfBattleFired: false,
       raised: false,
+      shielded: false,
+      watchCounter: 0,
     };
   };
 
@@ -280,6 +302,21 @@ export function simulate(
       case 'buffBehind': {
         const start = removed ? index : index + 1;
         const targets = effect.all ? board.slice(start) : board.slice(start, start + 1);
+        for (const target of targets) buff(target, effect.attack * tier, effect.health * tier);
+        break;
+      }
+      case 'buffAdjacent': {
+        // `startOfBattle`-gated (see fireEntryTriggers: fires once per unit
+        // instance, ever), so this is the same compounding-law shape as
+        // Warren-Warden's `buffBehind` — it cannot re-fire on a later wave
+        // and re-stack. `removed` is never true here (buffAdjacent is only
+        // ever wired to `startOfBattle`, not `faint`), so `index` is always
+        // the source's live board position; front has no index-1 neighbor,
+        // back has no index+1 neighbor, middle placements get both — the
+        // intended "middle is strictly better" shape.
+        const targets: BattleUnit[] = [];
+        if (index > 0) targets.push(board[index - 1]);
+        if (index < board.length - 1) targets.push(board[index + 1]);
         for (const target of targets) buff(target, effect.attack * tier, effect.health * tier);
         break;
       }
@@ -417,9 +454,59 @@ export function simulate(
       front.firstAttackDone = true;
       foe.firstAttackDone = true;
 
-      applyDamage(foe, damageOut, 'attack');
-      applyDamage(front, damageIn, 'attack');
+      // Ward-Weaver's shield absorbs a whole attack hit outright, so it must
+      // resolve before applyDamage even runs — that also means it resolves
+      // before Tail-Charm's lethal-hit check inside applyDamage, which is
+      // the intended order: a fully-absorbed hit was never lethal to begin
+      // with, so it should never consume Tail-Charm.
+      if (foe.shielded) {
+        foe.shielded = false;
+        events.push({ type: 'shieldAbsorbed', targetId: foe.instanceId });
+      } else {
+        applyDamage(foe, damageOut, 'attack');
+      }
+      if (front.shielded) {
+        front.shielded = false;
+        events.push({ type: 'shieldAbsorbed', targetId: front.instanceId });
+      } else {
+        applyDamage(front, damageIn, 'attack');
+      }
       damageThisWave += damageOut;
+
+      // Ward-Weaver: watches its own side's *current* front-line unit (not
+      // itself) and counts its landed attacks. `front`/`foe` above just
+      // landed an attack this tick (every tick both sides' front units
+      // attack, by construction of the front-clash sim), so tick every
+      // watcher on each side once and grant a shield to that side's current
+      // front on every `every`th tick. Compounding-law check: the counter
+      // grows unboundedly across the 45-wave battle (that's fine, it's a
+      // modulo cadence, not a magnitude), but the *effect* it produces
+      // (`front.shielded = true`) is a boolean, not incremented — repeated
+      // grants before the shield is consumed are idempotent no-ops, so the
+      // shield can never absorb more than one hit no matter how long the
+      // battle runs. This must run after the shielded front/foe from *this*
+      // tick have already resolved their (non-)damage above, so a proc this
+      // tick protects the *next* hit, not the simultaneous one just traded.
+      const tickWatchers = (board: BattleUnit[], currentFront: BattleUnit): void => {
+        for (const watcher of board) {
+          if (watcher.ability?.trigger !== 'watchFrontAttack' || watcher.health <= 0) continue;
+          const effect = watcher.ability.effect;
+          if (effect.kind !== 'shieldFront') continue;
+          watcher.watchCounter++;
+          if (watcher.watchCounter >= effect.every) {
+            watcher.watchCounter = 0;
+            currentFront.shielded = true;
+            events.push({ type: 'shieldGranted', targetId: currentFront.instanceId, sourceId: watcher.instanceId });
+          }
+        }
+      };
+      // Note: if `front`/`foe` took lethal damage above (or has lethal
+      // poison still pending later this tick), this can grant a shield to a
+      // unit that `resolveDeaths` removes moments later. That's a wasted
+      // proc, not a bug — the shield is still bounded to "one hit,"
+      // consumed or not, so it never leaks value across the battle.
+      tickWatchers(horde, front);
+      tickWatchers(enemies, foe);
 
       // Marrow-Snap: a foe left at or below executeThreshold of its OWN max
       // health (not the bearer's) dies outright instead of surviving on a
