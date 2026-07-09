@@ -148,7 +148,15 @@ export interface BuildState {
 
 export type ActionResult = { ok: true; state: BuildState } | { ok: false; reason: string };
 
-const SHOP_UNIT_POOL = Object.values(UNIT_DEFS).filter((u) => u.id !== 'pup');
+// 'warren-warden' is excluded seasonally, not permanently: MD Rattyfock
+// (issue #23) is a same-stats reskin of it, added as a tribute to last
+// season's winner, and having both in rotation at once is redundant. Its
+// UNIT_DEFS entry stays intact (existing tests/golden logs/replays still
+// reference it directly) — only its presence in the purchasable pool is
+// gone. A future season could drop this filter to bring it back.
+const SHOP_UNIT_POOL = Object.values(UNIT_DEFS).filter(
+  (u) => u.id !== 'pup' && u.id !== 'warren-warden'
+);
 const SHOP_RELIC_POOL = Object.values(RELIC_DEFS);
 
 /**

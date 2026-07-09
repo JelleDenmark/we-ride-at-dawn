@@ -227,7 +227,7 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   },
   'ward-weaver': {
     id: 'ward-weaver', name: 'Ward-Weaver', attack: 1, health: 3, cost: 6,
-    desc: 'watches the front rat: every 3rd attack it lands, shields it from the next hit',
+    desc: 'every 3rd attack the front rat lands, shields that rat from its next hit',
     ability: { trigger: 'watchFrontAttack', effect: { kind: 'shieldFront', every: 3 } },
   },
   // Issue #12: a parallel "Runt" pair (Gutter-Runt precedent) tied to the
@@ -254,7 +254,7 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
       effect: { kind: 'teamBuff', attack: 0, health: 2 },
       condition: { timeOfDay: 'afterNoon' },
     },
-    unlockDay: 4,
+    unlockDay: 3,
   },
 };
 

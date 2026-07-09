@@ -1345,14 +1345,13 @@ describe('day-gated shop unlocks (issue #12: Dawn-Runt/Dusk-Runt)', () => {
     for (const day of [3, 4, 5, 6, 7]) expect(everAppears(day, 'dawn-runt')).toBe(true);
   });
 
-  it('Dusk-Runt never appears before day 4', () => {
+  it('Dusk-Runt never appears before day 3', () => {
     expect(everAppears(1, 'dusk-runt')).toBe(false);
     expect(everAppears(2, 'dusk-runt')).toBe(false);
-    expect(everAppears(3, 'dusk-runt')).toBe(false);
   });
 
-  it('Dusk-Runt can appear from day 4 onward, every later day too (not day-exclusive)', () => {
-    for (const day of [4, 5, 6, 7]) expect(everAppears(day, 'dusk-runt')).toBe(true);
+  it('Dusk-Runt can appear from day 3 onward, every later day too (not day-exclusive), same as Dawn-Runt', () => {
+    for (const day of [3, 4, 5, 6, 7]) expect(everAppears(day, 'dusk-runt')).toBe(true);
   });
 
   it('newBuild wires the shop day through to rollOfferings (day 1 build never offers either Runt)', () => {

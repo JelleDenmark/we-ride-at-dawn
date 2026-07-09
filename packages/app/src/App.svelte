@@ -264,7 +264,6 @@
     faint: 'When it faints,',
     afterAttack: 'After it attacks,',
     allyFaint: 'Whenever a friendly rat faints,',
-    watchFrontAttack: 'Watching the front rat,',
   };
 
   const TIME_OF_DAY_LABEL: Record<string, string> = {
@@ -282,6 +281,9 @@
     const def = UNIT_DEFS[defId];
     if (!def?.ability) return 'No special trick — just a body to swell the ranks.';
     const e = def.ability.effect;
+    if (e.kind === 'shieldFront') {
+      return `Every ${ordinal(e.every)} attack the front rat lands, shields that rat from its next hit. Effects scale with tier.`;
+    }
     let what = '';
     switch (e.kind) {
       case 'summon': {
@@ -306,9 +308,6 @@
         break;
       case 'buffAdjacent':
         what = `grants +${e.attack}/+${e.health} to the rat(s) beside it`;
-        break;
-      case 'shieldFront':
-        what = `shields the front rat from its next hit, every ${ordinal(e.every)} attack it lands`;
         break;
       case 'teamBuff':
         what = `grants +${e.attack}/+${e.health} to the whole horde`;
