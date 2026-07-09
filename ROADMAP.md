@@ -181,6 +181,7 @@ _(Verbatim design output from each panel agent, lightly formatted. Names/stats a
 - **Cosmetic prestige** (banners/frames/skins by all-time milestones; `app`-only, zero sim).
 - **Unlock options not stats** — cleanest fair version: unlocks add to the *shared* pool for everyone that season (community unlocks).
 - **Season lore chapters** on the Codex.
+- **Finite per-rat copy pool / dilution (long-term, blocked on shared-seed design — issue #39).** Cap each unit at N copies per season so 3★ merges get harder as the shared pool depletes, instead of being a pure shop-luck check. Explicitly harder than the unlocks above: it needs *shared mutable state across all players in a season* (every purchase affects everyone else's future odds), which `rollOfferings` has never needed before (it's been a pure function of date/roll throughout) — a real infrastructure step, not a design tweak. Needs its own #6-style fairness pass before it's actionable.
 - Load-bearing rule: `core`'s scored path reads nothing from a per-account store.
 
 **Balance risks:** ⚠️ **poison is the next Rusted Nail** (flat, depth-independent — ship poison-persist relics weak or never). Execute inverts the HP-wall design (cap low / make flat finisher). Cleave → bound to one target. Blood-Debt/Carrion snowball on an immortal front rat (watch Fat Tick + Tail-Charm combo). Meta-progression scope-creep into stats = existential; hard-wall in `core`.
