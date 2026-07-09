@@ -42,6 +42,21 @@ export function reviveHpForTier(tier: number): number {
   return table[tier - 1] ?? table[table.length - 1];
 }
 
+/**
+ * Number of the front rat's incoming hits Ward-Weaver's `blockFrontHits`
+ * blocks per wave, by tier (issue #56). Same shape as `reviveHpForTier` — a
+ * small explicit table, not a multiplier of a base value — because this
+ * magnitude resets every wave (see the compounding-law note on
+ * `blockCharges` in sim.ts) rather than compounding like `tierAttackMultiplier`.
+ * Deliberately linear (1/2/3), not `tierAttackMultiplier`'s 3^(tier-1) curve:
+ * a wave only has so many meaningful hits to block, so a steep curve here
+ * would just let a t3 Ward-Weaver no-sell an entire early wave.
+ */
+export function blockHitsForTier(tier: number): number {
+  const table = [1, 2, 3];
+  return table[tier - 1] ?? table[table.length - 1];
+}
+
 export type Effect =
   | { kind: 'summon'; unitId: string; count: number }
   | { kind: 'buffBehind'; attack: number; health: number; all?: boolean }
@@ -66,13 +81,14 @@ export type Effect =
    */
   | { kind: 'revive' }
   /**
-   * Watches this unit's OWN side's current front-line unit (not itself) and,
-   * every `every`th attack that front unit lands, grants it a one-hit
-   * shield. See the `watchFrontAttack` trigger doc comment and the
-   * compounding-law note in sim.ts's tick loop for why the shield can never
-   * exceed "absorbs one hit" no matter how long the battle runs.
+   * Ward-Weaver (issue #56). Grants this side a per-wave pool of "block the
+   * next incoming hit to whichever unit is currently front" charges, sized
+   * by `blockHitsForTier(tier)` (1/2/3). Always wired to `startOfWave`, and
+   * the pool is reset to 0 at the top of every wave before this fires — see
+   * `blockCharges` in sim.ts for the full compounding-law note and the
+   * `Math.max` (never summed) anti-stacking rule for multiple Ward-Weavers.
    */
-  | { kind: 'shieldFront'; every: number }
+  | { kind: 'blockFrontHits' }
   /**
    * Flat, whole-team stat grant (issue #12: Dawn-Runt/Dusk-Runt) — every
    * horde unit currently on the board gets `+attack`/`+health`, including the
@@ -110,15 +126,14 @@ export type TimeOfDay = 'beforeNoon' | 'afterNoon';
  * Enemies are re-instantiated every wave, so their `startOfBattle` abilities
  * still fire each wave for free — the per-instance flag makes this automatic.
  *
- * `watchFrontAttack` is different in kind from the others: it does not fire
- * on anything that happens to *this* unit. It fires once per combat tick in
- * which this unit's own side's current front-line unit lands an attack —
- * i.e. it observes a teammate's combat event, not its own. See sim.ts's
- * `tickWatchers` for the implementation and why "whoever is currently
- * front" (not a fixed unit) is the thing being watched.
+ * Ward-Weaver's `blockFrontHits` (issue #56) used to be a bespoke
+ * per-attack-tick trigger (`watchFrontAttack`), removed once its mechanic
+ * changed from "every Nth attack landed" to "block the first N hits each
+ * wave" — that reset-every-wave shape is exactly what `startOfWave` is for,
+ * so it no longer needs its own trigger kind. See `blockCharges` in sim.ts.
  */
 export interface Ability {
-  trigger: 'startOfBattle' | 'startOfWave' | 'faint' | 'afterAttack' | 'allyFaint' | 'watchFrontAttack';
+  trigger: 'startOfBattle' | 'startOfWave' | 'faint' | 'afterAttack' | 'allyFaint';
   effect: Effect;
   /**
    * Gate the ability's firing on the real-world half of the day the ride
@@ -250,8 +265,8 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   },
   'ward-weaver': {
     id: 'ward-weaver', name: 'Ward-Weaver', attack: 1, health: 3, cost: 6,
-    desc: 'every 3rd attack the front rat lands, shields that rat from its next hit',
-    ability: { trigger: 'watchFrontAttack', effect: { kind: 'shieldFront', every: 3 } },
+    desc: 'each wave, blocks the front rat’s first incoming hit outright — ★2 blocks its first 2 hits, ★3 its first 3; charges reset every wave and never carry over',
+    ability: { trigger: 'startOfWave', effect: { kind: 'blockFrontHits' } },
   },
   // Issue #12: a parallel "Runt" pair (Gutter-Runt precedent) tied to the
   // game's dawn/dusk duality rather than literal noon-splitting — the actual
