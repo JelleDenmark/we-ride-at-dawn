@@ -39,6 +39,7 @@
     type ActionResult,
     type BattleResult,
     type BuildState,
+    type TimeOfDay,
   } from '@wrad/core';
   import { ReplayPlayer } from './replay/ReplayPlayer';
   import { CHANNEL } from './env';
@@ -98,6 +99,15 @@
       .split(':')
       .map(Number);
     return p[0] * 3600 + p[1] * 60 + p[2];
+  }
+
+  // Dawn-Runt/Dusk-Runt (issue #12): which half of the day a given instant
+  // falls in, Copenhagen local time — noon is the cutoff, reusing
+  // copenhagenSeconds the same way the existing dawn (06:00 CET) boundary
+  // does. simulate() never reads the clock itself; this is the one place
+  // real wall-clock time gets resolved and threaded in via Lineup.timeOfDay.
+  function timeOfDayAt(now: Date): TimeOfDay {
+    return copenhagenSeconds(now) < 12 * 3600 ? 'beforeNoon' : 'afterNoon';
   }
 
   function fmtRideHour(hourBucket: number): string {
@@ -163,9 +173,15 @@
   const currentGauntlet = $derived(generateGauntlet(build.date, build.day));
   const theme = $derived(currentGauntlet.theme);
   // Live outcome of the current horde on the next ride — updates as you
-  // build (and as the hour flips), so you see your depth change in real time.
+  // build (and as the hour flips, and as the noon boundary flips — Dawn-Runt/
+  // Dusk-Runt care about it), so you see your depth change in real time.
   const currentOutcome = $derived(
-    build.board.length > 0 ? simulate(lineupFromBuild(build), currentGauntlet) : null
+    build.board.length > 0
+      ? simulate(
+          { ...lineupFromBuild(build), timeOfDay: timeOfDayAt(new Date(nowTick)) },
+          currentGauntlet
+        )
+      : null
   );
   const currentDepth = $derived(currentOutcome ? currentOutcome.result.wavesCleared : 0);
   const scrapPerHour = $derived(currentDepth * SCRAP_PER_DEPTH);
@@ -415,7 +431,8 @@
       while (currentRideDate(now) > build.date && guard++ < 40) {
         const lineup = lineupFromBuild(build);
         if (lineup.units.length > 0) {
-          const outcome = simulate(lineup, generateGauntlet(build.date, build.day));
+          const timedLineup = { ...lineup, timeOfDay: timeOfDayAt(now) };
+          const outcome = simulate(timedLineup, generateGauntlet(build.date, build.day));
           const ride: LastRide = { date: build.date, day: build.day, lineup, result: outcome.result };
           saveLastRide(ride);
           lastRide = ride;
@@ -443,7 +460,8 @@
           // Day-1 recruitment freeze: this hour bucket earned nothing for
           // anyone (see isFrozenHour) — skip it rather than credit a ride.
           if (isFrozenHour(h, build.seasonId)) continue;
-          const { result } = simulate(lineup, generateGauntlet(build.date, build.day));
+          const timedLineup = { ...lineup, timeOfDay: timeOfDayAt(new Date(h * HOUR_MS)) };
+          const { result } = simulate(timedLineup, generateGauntlet(build.date, build.day));
           const scrap = result.wavesCleared * SCRAP_PER_DEPTH;
           earned += scrap;
           rides.push({
@@ -521,7 +539,8 @@
   function simulateDawn() {
     const lineup = lineupFromBuild(build);
     if (lineup.units.length > 0) {
-      const outcome = simulate(lineup, generateGauntlet(build.date, build.day));
+      const timedLineup = { ...lineup, timeOfDay: timeOfDayAt(new Date()) };
+      const outcome = simulate(timedLineup, generateGauntlet(build.date, build.day));
       const ride: LastRide = { date: build.date, day: build.day, lineup, result: outcome.result };
       saveLastRide(ride);
       lastRide = ride;
@@ -557,7 +576,8 @@
     for (let i = 1; i <= h; i++) {
       const hourBucket = nowHour + i;
       if (isFrozenHour(hourBucket, build.seasonId)) continue;
-      const { result } = simulate(lineup, generateGauntlet(build.date, build.day));
+      const timedLineup = { ...lineup, timeOfDay: timeOfDayAt(new Date(hourBucket * HOUR_MS)) };
+      const { result } = simulate(timedLineup, generateGauntlet(build.date, build.day));
       const scrap = result.wavesCleared * SCRAP_PER_DEPTH;
       earned += scrap;
       rides.push({

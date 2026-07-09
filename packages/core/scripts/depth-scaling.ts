@@ -312,3 +312,66 @@ for (const day of [6, 7]) {
 console.log(
   '\n(report only — poison is flat/depth-independent by design; whether it dominates is a separate future tuning decision)'
 );
+
+// ---------------------------------------------------------------------------
+// 5) Dawn-Runt / Dusk-Runt (issue #12) — day-gated (day 3 / day 4), +2
+// attack-before-noon / +2 health-after-noon team buff. Sanity check: does
+// swapping one board slot for the Runt measurably help on the half-day its
+// buff is active, without being so strong it's an obvious auto-include over
+// every other unit for that slot? Compares the same strong roster with vs.
+// without a Runt occupying its last slot, in both timeOfDay halves, so the
+// "active" and "dormant" cases are both visible.
+// ---------------------------------------------------------------------------
+// The marginal slot is filled with Gutter-Runt (the cheapest generic body) in
+// the baseline, not a second Dire-Rat — swapping out a strong late-tier
+// fighter for a Runt would conflate "this slot is a weak filler" with "the
+// Runt itself is weak," which isn't the choice a player actually faces. The
+// fair comparison is: given a spare slot you'd otherwise fill with a cheap
+// body, is fielding the Runt there (for the half of the day it's live) worth
+// more than that cheap body?
+function rosterWithRunt(day: number, runtId: 'dawn-runt' | 'dusk-runt' | null): Lineup {
+  const cap = boardCapForDay(day);
+  const tier = day <= 3 ? 1 : day <= 5 ? 2 : 3;
+  const relicSlots = Math.min(cap, 1 + day);
+  const baseOrder = ['dire-rat', 'warren-warden', 'corpse-glutton', 'gnawer', 'bone-priest', 'plague-bearer', 'blight-witch'];
+  // Fill up to cap-1 with the strong roster, then guarantee the marginal
+  // slot (Runt vs. Gutter-Runt filler) lands ON the board at every day —
+  // a plain `[...baseOrder, filler].slice(0, cap)` silently drops the
+  // marginal slot whenever cap < baseOrder.length + 1 (true for days 3-6),
+  // making the comparison a no-op before day 7.
+  const order = [...baseOrder.slice(0, cap - 1), runtId ?? 'gutter-runt'];
+  const units: Lineup['units'] = order.map((defId, i) => {
+    const relicIds: string[] = [];
+    if (i !== 0 && i < relicSlots && defId !== runtId) relicIds.push(FILLER_RELIC);
+    return { defId, tier, relicIds };
+  });
+  return { units, teamRelicIds: ['filth-totem'] };
+}
+
+function avgDepthWithRunt(day: number, runtId: 'dawn-runt' | 'dusk-runt' | null, timeOfDay: 'beforeNoon' | 'afterNoon'): number {
+  const lineup = rosterWithRunt(day, runtId);
+  let total = 0;
+  for (let s = 0; s < SAMPLES; s++) {
+    const date = new Date(Date.parse(`${START}T12:00:00Z`) + s * 86_400_000).toISOString().slice(0, 10);
+    total += simulate({ ...lineup, timeOfDay }, generateGauntlet(date, day)).result.wavesCleared;
+  }
+  return total / SAMPLES;
+}
+
+console.log('\n5) Dawn-Runt / Dusk-Runt (issue #12): depth delta from swapping one slot for the Runt, day 3-7:');
+console.log('day  baseline  dawn(beforeNoon)  dawn(afterNoon,dormant)  dusk(afterNoon)  dusk(beforeNoon,dormant)');
+for (let day = 3; day <= 7; day++) {
+  const baseline = avgDepthWithRunt(day, null, 'beforeNoon');
+  const dawnActive = avgDepthWithRunt(day, 'dawn-runt', 'beforeNoon');
+  const dawnDormant = avgDepthWithRunt(day, 'dawn-runt', 'afterNoon');
+  const duskActive = day >= 4 ? avgDepthWithRunt(day, 'dusk-runt', 'afterNoon') : NaN;
+  const duskDormant = day >= 4 ? avgDepthWithRunt(day, 'dusk-runt', 'beforeNoon') : NaN;
+  const fmt = (n: number) => (Number.isNaN(n) ? '  n/a' : n.toFixed(2).padStart(5));
+  console.log(
+    `${day.toString().padStart(2)}   ${baseline.toFixed(2).padStart(6)}    ${dawnActive.toFixed(2).padStart(6)} (${(dawnActive - baseline >= 0 ? '+' : '')}${(dawnActive - baseline).toFixed(2)})    ${dawnDormant.toFixed(2).padStart(6)} (${(dawnDormant - baseline >= 0 ? '+' : '')}${(dawnDormant - baseline).toFixed(2)})          ${fmt(duskActive)} (${day >= 4 ? (duskActive - baseline >= 0 ? '+' : '') + (duskActive - baseline).toFixed(2) : 'n/a'})    ${fmt(duskDormant)} (${day >= 4 ? (duskDormant - baseline >= 0 ? '+' : '') + (duskDormant - baseline).toFixed(2) : 'n/a'})`
+  );
+}
+console.log(
+  '\n(the "active" delta should be a real but modest bump — not negligible (~0) and not dominant (swamping every other slot choice); ' +
+    'the "dormant" delta should sit close to baseline, since a Runt fielded on the wrong half of the day is dead weight for that ride)'
+);

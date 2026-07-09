@@ -301,6 +301,61 @@ describe('relics', () => {
 
 });
 
+describe('time-of-day abilities (issue #12: Dawn-Runt/Dusk-Runt)', () => {
+  it('Dawn-Runt grants +2 attack to the whole horde before noon', () => {
+    const { events } = simulate(
+      { units: [{ defId: 'dawn-runt' }, { defId: 'gutter-runt' }], timeOfDay: 'beforeNoon' },
+      gauntletOf([dummy(0, 100)])
+    );
+    const buffs = ofType(events, 'buff');
+    // Whole team, including the caster itself — unlike buffBehind.
+    expect(buffs.length).toBe(2);
+    expect(buffs.every((b) => b.attack === 2 && b.health === 0)).toBe(true);
+  });
+
+  it('Dawn-Runt does not fire after noon', () => {
+    const { events } = simulate(
+      { units: [{ defId: 'dawn-runt' }, { defId: 'gutter-runt' }], timeOfDay: 'afterNoon' },
+      gauntletOf([dummy(0, 100)])
+    );
+    expect(ofType(events, 'buff')).toHaveLength(0);
+  });
+
+  it('Dusk-Runt grants +2 health to the whole horde after noon', () => {
+    const { events } = simulate(
+      { units: [{ defId: 'dusk-runt' }, { defId: 'gutter-runt' }], timeOfDay: 'afterNoon' },
+      gauntletOf([dummy(0, 100)])
+    );
+    const buffs = ofType(events, 'buff');
+    expect(buffs.length).toBe(2);
+    expect(buffs.every((b) => b.attack === 0 && b.health === 2)).toBe(true);
+  });
+
+  it('Dusk-Runt does not fire before noon', () => {
+    const { events } = simulate(
+      { units: [{ defId: 'dusk-runt' }, { defId: 'gutter-runt' }], timeOfDay: 'beforeNoon' },
+      gauntletOf([dummy(0, 100)])
+    );
+    expect(ofType(events, 'buff')).toHaveLength(0);
+  });
+
+  it('a lineup with no timeOfDay set fires neither Dawn-Runt nor Dusk-Runt (pre-#12 lineups are unaffected)', () => {
+    const { events } = simulate(
+      { units: [{ defId: 'dawn-runt' }, { defId: 'dusk-runt' }] },
+      gauntletOf([dummy(0, 100)])
+    );
+    expect(ofType(events, 'buff')).toHaveLength(0);
+  });
+
+  it('fires once per battle, not once per wave (compounding-law check)', () => {
+    const { events } = simulate(
+      { units: [{ defId: 'dawn-runt' }, { defId: 'gutter-runt' }], timeOfDay: 'beforeNoon' },
+      gauntletOf([dummy(0, 1)], [dummy(0, 1)], [dummy(0, 1)])
+    );
+    expect(ofType(events, 'buff')).toHaveLength(2); // once per horde unit, not once per wave
+  });
+});
+
 describe('wave carry-over', () => {
   it('survivors keep their damage between waves', () => {
     const { result } = simulate(

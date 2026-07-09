@@ -159,6 +159,11 @@ export function simulate(
   // Both sides share one in-combat ceiling. Absent (golden logs, tests,
   // gauntlet-only callers) it's BOARD_CAP, exactly as before.
   const combatCap = lineup.combatCap ?? BOARD_CAP;
+  // Real-world half-day this ride belongs to (issue #12: Dawn-Runt/Dusk-Runt).
+  // Never read from the clock here — the app layer resolves it and passes it
+  // in via Lineup.timeOfDay. Omitted = matches neither ability condition, so
+  // any lineup that doesn't know about time-of-day is unaffected.
+  const timeOfDay = lineup.timeOfDay;
 
   const instantiate = (
     def: UnitDef,
@@ -334,6 +339,16 @@ export function simulate(
         buff(source, effect.attack * tier, effect.health * tier);
         break;
       }
+      case 'teamBuff': {
+        // Compounding-law check: this effect is only ever wired to a
+        // startOfBattle ability (see the Effect doc comment in
+        // data/units.ts), which fires once per unit instance, ever — nothing
+        // re-applies it on a later wave, so it cannot accumulate across the
+        // 45-wave battle. Flat, non-scaling, same shape as Filth-Totem's
+        // team-relic bonus, just sourced from a unit instead of a relic.
+        for (const target of board) buff(target, effect.attack * tier, effect.health * tier);
+        break;
+      }
       case 'revive': {
         // Raise the oldest fallen ally — never the caster, and never a corpse
         // that has already been raised once.
@@ -403,6 +418,14 @@ export function simulate(
         if (unit.startOfBattleFired) continue;
         unit.startOfBattleFired = true;
       }
+      // Time-of-day-conditional abilities (Dawn-Runt/Dusk-Runt, issue #12):
+      // only fire when the ride's resolved time-of-day matches. A
+      // startOfBattle ability still only ever gets its one shot per unit
+      // instance (the flag above is already set) — a mismatched condition
+      // just means that one shot is a no-op, it does not retry on a later
+      // wave once the real-world half-day flips mid-battle.
+      const condition = unit.ability?.condition;
+      if (condition && condition.timeOfDay !== timeOfDay) continue;
       const index = board.findIndex((u) => u.instanceId === unit.instanceId);
       if (index === -1) continue;
       applyEffect(unit, index, false);
