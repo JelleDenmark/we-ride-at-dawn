@@ -123,19 +123,26 @@ describe('shop basics', () => {
     }
   });
 
-  it('selling refunds half cost (min 1), scaled by tier', () => {
+  it('selling refunds half cost (min 1), scaled by tier² (issue #21)', () => {
     const s = {
       ...newBuild('2026-07-03'),
       board: [
         { defId: 'dire-rat', tier: 1, relicIds: [] },
         { defId: 'gutter-runt', tier: 2, relicIds: [] },
+        { defId: 'gutter-runt', tier: 3, relicIds: [] },
       ],
     };
+    // dire-rat cost 8 -> floor(8/2)=4, tier 1 -> 4 * 1*1 = 4
     const afterDire = must(sellUnit(s, 0)).state;
     expect(afterDire.scrap).toBe(DAILY_SCRAP + 4);
-    expect(afterDire.board).toHaveLength(1);
-    const afterRunt = must(sellUnit(s, 1)).state;
-    expect(afterRunt.scrap).toBe(DAILY_SCRAP + 2);
+    expect(afterDire.board).toHaveLength(2);
+    // gutter-runt cost 2 -> floor(2/2)=1, tier 2 -> 1 * 2*2 = 4 (was 2 linearly)
+    const afterRunt2 = must(sellUnit(s, 1)).state;
+    expect(afterRunt2.scrap).toBe(DAILY_SCRAP + 4);
+    // gutter-runt tier 3 -> 1 * 3*3 = 9 (matches the reporter's math: reaching
+    // tier 3 costs 9 base copies via merges, so the refund should reflect that).
+    const afterRunt3 = must(sellUnit(s, 2)).state;
+    expect(afterRunt3.scrap).toBe(DAILY_SCRAP + 9);
   });
 
   it('selling a unit with no relics only refunds the unit (unchanged behavior)', () => {
@@ -966,23 +973,27 @@ describe('bench', () => {
     }
   });
 
-  it('sellBenchUnit refunds half cost (scaled by tier) and removes the unit', () => {
+  it('sellBenchUnit refunds half cost (scaled by tier², issue #21) and removes the unit', () => {
     const s = {
       ...newBuild('2026-07-03'),
       bench: [
         { defId: 'dire-rat', tier: 1, relicIds: [] },
         { defId: 'gutter-runt', tier: 2, relicIds: [] },
+        { defId: 'gutter-runt', tier: 3, relicIds: [] },
       ],
     };
     const afterDire = sellBenchUnit(s, 0);
     expect(afterDire.ok).toBe(true);
     if (afterDire.ok) {
       expect(afterDire.state.scrap).toBe(DAILY_SCRAP + 4);
-      expect(afterDire.state.bench).toHaveLength(1);
+      expect(afterDire.state.bench).toHaveLength(2);
     }
-    const afterRunt = sellBenchUnit(s, 1);
-    expect(afterRunt.ok).toBe(true);
-    if (afterRunt.ok) expect(afterRunt.state.scrap).toBe(DAILY_SCRAP + 2);
+    const afterRunt2 = sellBenchUnit(s, 1);
+    expect(afterRunt2.ok).toBe(true);
+    if (afterRunt2.ok) expect(afterRunt2.state.scrap).toBe(DAILY_SCRAP + 4);
+    const afterRunt3 = sellBenchUnit(s, 2);
+    expect(afterRunt3.ok).toBe(true);
+    if (afterRunt3.ok) expect(afterRunt3.state.scrap).toBe(DAILY_SCRAP + 9);
     expect(sellBenchUnit(s, 99).ok).toBe(false);
   });
 

@@ -388,9 +388,16 @@ export function sellBenchUnit(state: BuildState, benchIndex: number): ActionResu
   return { ok: true, state: s };
 }
 
+/**
+ * Half the unit's base cost, scaled by `tier²` (issue #21). Reaching tier N
+ * via merges costs `N²` base copies (3 tier-k copies merge into 1 tier-(k+1),
+ * so a tier-3 unit represents 9 base copies), so a linear-in-tier refund
+ * significantly undervalued merged units relative to the scrap actually
+ * spent building them. Quadratic scaling matches that merge-cost economics.
+ */
 export function sellRefund(unit: BoardUnit): number {
   const cost = UNIT_DEFS[unit.defId].cost;
-  return Math.max(1, Math.floor(cost / 2)) * unit.tier;
+  return Math.max(1, Math.floor(cost / 2)) * unit.tier * unit.tier;
 }
 
 export function rerollShop(state: BuildState): ActionResult {
