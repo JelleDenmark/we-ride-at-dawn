@@ -800,7 +800,7 @@
       {/each}
     </div>
     <div class="market-actions">
-      <button onclick={() => apply(rerollShop(build))}>↻ reroll · {REROLL_COST} scrap</button>
+      <button onclick={() => apply(rerollShop(build))} disabled={pendingRelic !== null || pendingSwap !== null}>↻ reroll · {REROLL_COST} scrap</button>
     </div>
     </div>
 
