@@ -1,5 +1,6 @@
 import { xorshift128, type Rng } from './prng';
 import { dailySeed, fnv1a } from './seed';
+import { seasonIdFor } from './shop';
 import { ENEMY_POOL } from './data/enemies';
 import type { Archetype, UnitDef } from './data/units';
 
@@ -67,18 +68,27 @@ export function difficultyForDay(_day: number): number {
 
 /**
  * `day` scales every wave's budget so later expedition days field tougher
- * gauntlets. The theme (archetype composition) is derived before the waves,
- * so it stays a pure function of the date regardless of difficulty.
+ * gauntlets. The theme (archetype composition) is derived from the
+ * *season* (the Monday that starts the current 7-day expedition, via
+ * `seasonIdFor`), not the calendar date — this is the fix for #41: a fixed
+ * roster was seeing up to an 11-wave depth swing day-to-day purely from the
+ * theme re-rolling every date, even though nothing about the roster
+ * changed. Keying the theme off the season instead makes it stable for all
+ * 7 days of one expedition while still varying week-to-week, matching how
+ * #34 stabilized hour-to-hour variance within a day.
  *
  * `hour` (absolute hour bucket) reshuffles the wave composition under the
- * fixed daily theme: same budget, same archetype quotas, different enemy
- * picks and ordering — so hourly rides vary but the scout report stays
- * truthful all day. Hourless calls keep the day's base stream byte-identical
- * (golden logs, telemetry dawn rides).
+ * fixed theme: same budget, same archetype quotas, different enemy picks
+ * and ordering — so hourly rides vary but the scout report stays truthful
+ * all day. Hourless calls roll waves from the date-seeded stream (kept
+ * separate from the season-seeded theme stream), so day-to-day enemy
+ * *composition* still varies under a stable theme — only the theme itself
+ * stopped re-rolling per date. Hourless calls also keep the day's base
+ * stream byte-identical (golden logs, telemetry dawn rides).
  */
 export function generateGauntlet(date: string, day = 1, hour?: number): Gauntlet {
   const seed = dailySeed(date);
-  const themeRng = xorshift128(seed);
+  const themeRng = xorshift128(dailySeed(seasonIdFor(date)));
 
   const primary = ARCHETYPES[themeRng.int(ARCHETYPES.length)];
   const rest = ARCHETYPES.filter((a) => a !== primary);
@@ -86,9 +96,10 @@ export function generateGauntlet(date: string, day = 1, hour?: number): Gauntlet
   const pivotWave = 4 + themeRng.int(4);
   const theme: GauntletTheme = { primary, secondary, pivotWave };
 
-  // Hourly rides roll waves from their own stream; the base gauntlet
-  // continues the theme stream exactly as before.
-  const rng = hour === undefined ? themeRng : xorshift128(fnv1a(`${date}#ride#${hour}`));
+  // The base (hourless) gauntlet rolls its waves from the date-seeded
+  // stream — independent of the season-seeded theme stream above — so
+  // day-to-day enemy composition still varies under the now-stable theme.
+  const rng = hour === undefined ? xorshift128(seed) : xorshift128(fnv1a(`${date}#ride#${hour}`));
 
   // Structural theming: each wave force-spends a budget quota on the
   // primary archetype (and on the secondary once its pivot wave is

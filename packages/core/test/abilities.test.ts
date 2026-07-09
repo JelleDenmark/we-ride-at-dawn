@@ -450,6 +450,6 @@ describe('combat cap headroom for summons', () => {
 describe('golden log regression', () => {
   it('the full showcase battle produces the pinned event-log hash', () => {
     const { events } = simulate(TEST_HORDE, generateGauntlet('2026-01-01'));
-    expect(fnv1a(JSON.stringify(events))).toMatchInlineSnapshot(`3409498765`);
+    expect(fnv1a(JSON.stringify(events))).toMatchInlineSnapshot(`2290789936`);
   });
 });
