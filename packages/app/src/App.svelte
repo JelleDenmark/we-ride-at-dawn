@@ -264,7 +264,19 @@
     faint: 'When it faints,',
     afterAttack: 'After it attacks,',
     allyFaint: 'Whenever a friendly rat faints,',
+    watchFrontAttack: 'Watching the front rat,',
   };
+
+  const TIME_OF_DAY_LABEL: Record<string, string> = {
+    beforeNoon: ' (before noon)',
+    afterNoon: ' (after noon)',
+  };
+
+  function ordinal(n: number): string {
+    const s = ['th', 'st', 'nd', 'rd'];
+    const v = n % 100;
+    return `${n}${s[(v - 20) % 10] ?? s[v] ?? s[0]}`;
+  }
 
   function abilitySentence(defId: string): string {
     const def = UNIT_DEFS[defId];
@@ -292,8 +304,20 @@
       case 'revive':
         what = `revives your first fallen rat at ${e.health} health`;
         break;
+      case 'buffAdjacent':
+        what = `grants +${e.attack}/+${e.health} to the rat(s) beside it`;
+        break;
+      case 'shieldFront':
+        what = `shields the front rat from its next hit, every ${ordinal(e.every)} attack it lands`;
+        break;
+      case 'teamBuff':
+        what = `grants +${e.attack}/+${e.health} to the whole horde`;
+        break;
     }
-    return `${TRIGGER_WHEN[def.ability.trigger]} it ${what}. Effects scale with tier.`;
+    const when = def.ability.condition
+      ? `${TIME_OF_DAY_LABEL[def.ability.condition.timeOfDay] ?? ''}`
+      : '';
+    return `${TRIGGER_WHEN[def.ability.trigger]} it ${what}${when}. Effects scale with tier.`;
   }
 
   function isSummoner(defId: string): boolean {
