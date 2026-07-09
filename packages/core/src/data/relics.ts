@@ -63,4 +63,15 @@ export const RELIC_DEFS: Record<string, RelicDef> = {
     id: 'marrow-snap', name: 'Marrow-Snap', scope: 'unit', cost: 5,
     desc: 'execute foes left at or below 30% health', executeThreshold: 0.3,
   },
+  // Easter egg (issue #24): the name is the whole point — someone else's
+  // gear, left behind on an earlier ride, still has a little use left in it.
+  // Team-scope so it doesn't retread Fat Tick's single-unit sustain or
+  // Filth-Totem's flat stat buff: it's whole-horde upkeep instead of either.
+  // Bounded per the compounding law — see the `teamHealPerTick` comment in
+  // sim.ts: it's clamped to each unit's own maxHealth every tick, so it
+  // cannot accumulate across the 45-wave battle.
+  'forgotten-backpack': {
+    id: 'forgotten-backpack', name: 'The Forgotten Backpack', scope: 'team', cost: 12,
+    desc: 'whole horde heals 1 every clash', healPerTick: 1,
+  },
 };
