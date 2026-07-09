@@ -139,8 +139,6 @@
   let speed = $state(1);
 
   // The ride shows the daily gauntlet: the same waves all day, every day.
-  // The preview always shows the NEXT ride — the one the countdown points at.
-  const nextRideHour = $derived(Math.floor(nowTick / HOUR_MS) + 1);
   const currentGauntlet = $derived(generateGauntlet(build.date, build.day));
   const report = $derived(scoutReport(currentGauntlet));
   const theme = $derived(currentGauntlet.theme);
