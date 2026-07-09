@@ -4,29 +4,25 @@ export type Archetype = 'swarm' | 'brute' | 'armored' | 'plague';
 
 /**
  * Tier (star-level) power multiplier applied to a unit's own base ATTACK
- * (issue #22). Merging costs scrap super-linearly — 3 copies -> one t2, 3
- * t2s -> one t3, i.e. 9x the scrap of a single t1 — so a flat `x tier`
- * curve (1x/2x/3x) made merging mostly a board-space play, not a power one.
- * Each tier step is now >=3x the previous step's power: 1x / 3x / 9x
- * (`3^(tier-1)`), matching the requested factor and the actual scrap spent.
- *
- * Deliberately attack-only, NOT applied to health — see `tierHealthMultiplier`
- * and `unitStats` in `shop.ts` for the reasoning (a 9x-health tank changes
- * time-to-kill math multiplicatively with 9x attack in a way a 9x-attack
- * glass cannon alone does not; attack-only keeps one lever, not two, driving
- * the depth curve).
+ * and HEALTH (issue #22). Merging costs scrap super-linearly — 3 copies ->
+ * one t2, 3 t2s -> one t3, i.e. 9x the scrap of a single t1 — so a flat
+ * `x tier` curve (1x/2x/3x) made merging mostly a board-space play, not a
+ * power one. Each tier step is now >=3x the previous step's power: 1x / 3x
+ * / 9x (`3^(tier-1)`), matching the requested factor and the actual scrap
+ * spent. Applied uniformly to attack and health (Jesper, 2026-07-09): the
+ * owner wants a much deeper, more rewarding late-game curve, up to and
+ * including players regularly pushing `WAVE_COUNT = 45` — a full-power
+ * curve on both stats is the intended lever for that, not a limitation to
+ * design around. See `HANDOFF.md`'s compounding-law section before adding
+ * any *new* trigger effect that scales off these bigger numbers.
  */
 export function tierAttackMultiplier(tier: number): number {
   return Math.pow(3, tier - 1);
 }
 
-/**
- * Health keeps the original linear tier curve (`x tier`, i.e. 1x/2x/3x).
- * See `tierAttackMultiplier` above for why attack and health deliberately
- * diverge at tier > 1.
- */
+/** Same curve as `tierAttackMultiplier` — see its doc comment. */
 export function tierHealthMultiplier(tier: number): number {
-  return tier;
+  return Math.pow(3, tier - 1);
 }
 
 export type Effect =
