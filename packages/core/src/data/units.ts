@@ -119,6 +119,11 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     desc: 'hide like a door: shrugs off 2 from every blow',
     damageReduction: 2,
   },
+  'md-rattyfock': {
+    id: 'md-rattyfock', name: 'MD Rattyfock', attack: 2, health: 6, cost: 6,
+    desc: 'battle: Season 1 survivor, patched and returned; +1/+1 to all behind',
+    ability: { trigger: 'startOfBattle', effect: { kind: 'buffBehind', attack: 1, health: 1, all: true } },
+  },
 };
 
 /** Hardcoded showcase lineup until the shop lands (milestone 4). Index 0 = front. */
