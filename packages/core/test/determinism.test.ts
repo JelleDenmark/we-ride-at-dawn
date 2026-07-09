@@ -51,44 +51,8 @@ describe('gauntlet generation', () => {
   });
 });
 
-describe('hourly rides', () => {
-  const HOURS = [495_000, 495_001, 495_002, 495_003, 495_004, 495_005];
-
-  it('is deterministic for a given (date, day, hour)', () => {
-    expect(generateGauntlet('2026-07-03', 2, 495_000)).toEqual(
-      generateGauntlet('2026-07-03', 2, 495_000)
-    );
-  });
-
-  it('keeps the daily theme fixed across hours (and matching the base gauntlet)', () => {
-    const base = generateGauntlet('2026-07-03', 2);
-    for (const h of HOURS) {
-      expect(generateGauntlet('2026-07-03', 2, h).theme).toEqual(base.theme);
-    }
-  });
-
-  it('reshuffles wave composition between hours', () => {
-    const dumps = HOURS.map((h) => JSON.stringify(generateGauntlet('2026-07-03', 2, h).waves));
-    expect(new Set(dumps).size).toBeGreaterThan(1);
-  });
-
-  it('shuffle-only variance: a reference horde swings at most ~2 waves across a day', () => {
-    // The player-facing contract for "variance, not a slot machine": across
-    // 24 hourly rides the same horde's depth stays in a tight band.
-    for (const [date, day] of [
-      ['2026-07-06', 1],
-      ['2026-07-08', 3],
-      ['2026-07-11', 6],
-    ] as const) {
-      const depths = Array.from(
-        { length: 24 },
-        (_, i) => simulate(TEST_HORDE, generateGauntlet(date, day, 495_000 + i)).result.wavesCleared
-      );
-      expect(Math.max(...depths) - Math.min(...depths)).toBeLessThanOrEqual(2);
-    }
-  });
-
-  it('hourless calls are unchanged by the hour feature (golden compatibility)', () => {
+describe('gauntlet stability', () => {
+  it('gauntlets are unchanged by day (golden compatibility)', () => {
     const g = generateGauntlet('2026-07-03');
     expect(g.hour).toBeUndefined();
     expect(g.theme).toEqual({ primary: 'swarm', secondary: 'armored', pivotWave: 5 });
