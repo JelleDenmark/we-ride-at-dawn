@@ -117,6 +117,29 @@
   const HOUR_MS = 3_600_000;
   const OFFLINE_RIDE_CAP = 24; // credit at most a day of missed skirmishes at once
 
+  // Day-1 recruitment freeze: every board resets empty at the Monday 06:00
+  // CET season boundary, so a player who logs in at 06:00 can start earning
+  // immediately while one who logs in at 09:00 has already missed hours with
+  // nothing to show for them (an empty board earns nothing, and — unlike a
+  // gap later in the week — there's no built board to retroactively credit)
+  // — a standing bias against anyone not awake for a European Monday
+  // morning. No hour before 10:00 CET on day 1 credits income (a 06:05
+  // login and a 09:55 login are treated identically, so there's no new
+  // incentive to rush-build for backdated credit). The first hour that
+  // counts is the 10:00–11:00 bucket. Every other day already has a real
+  // roster earning through any gap, so this only applies to day 1.
+  const DAY1_CUTOFF_SEC = 10 * 3600;
+
+  /** Whether hour bucket `h` (epoch hours) falls inside the day-1 freeze:
+   * its ride-date is the season's Monday and its Copenhagen local time is
+   * before 10:00. Checked per hour (not just "now") so offline catch-up on
+   * day 1 skips only the frozen hours, not the ones after 10:00 — and stays
+   * correct even if catch-up crosses into day 2 before it's credited. */
+  function isFrozenHour(h: number, seasonId: string): boolean {
+    const instant = new Date(h * HOUR_MS);
+    return currentRideDate(instant) === seasonId && copenhagenSeconds(instant) < DAY1_CUTOFF_SEC;
+  }
+
   // build.date is the current expedition day's date; the horde rides its
   // gauntlet every hour for scrap. Day is the ISO weekday (synchronized:
   // everyone shares a Monday→Sunday week).
@@ -147,6 +170,12 @@
   const currentDepth = $derived(currentOutcome ? currentOutcome.result.wavesCleared : 0);
   const scrapPerHour = $derived(currentDepth * SCRAP_PER_DEPTH);
   const secondsToNextHour = $derived(3600 - (Math.floor(nowTick / 1000) % 3600));
+  // True only during the day-1 recruitment freeze (see isFrozenHour above) —
+  // drives the idle-panel status line. The live ride preview below is
+  // unaffected: it always simulates the current board, freeze or not.
+  const inRecruitmentWindow = $derived(
+    isFrozenHour(Math.floor(nowTick / HOUR_MS), build.seasonId)
+  );
   let telemetry = $state(telemetryEnabled());
 
   // Leaderboard identity: a themed default until the player names their
@@ -411,6 +440,9 @@
       const rides: RideLogEntry[] = [];
       if (lineup.units.length > 0) {
         for (let h = nowHour - elapsed + 1; h <= nowHour; h++) {
+          // Day-1 recruitment freeze: this hour bucket earned nothing for
+          // anyone (see isFrozenHour) — skip it rather than credit a ride.
+          if (isFrozenHour(h, build.seasonId)) continue;
           const { result } = simulate(lineup, generateGauntlet(build.date, build.day));
           const scrap = result.wavesCleared * SCRAP_PER_DEPTH;
           earned += scrap;
@@ -442,7 +474,9 @@
       }
       if (earned > 0) {
         build = { ...build, scrap: build.scrap + earned };
-        awaySummary = { rides: elapsed, scrap: earned };
+        // rides.length, not elapsed — elapsed can include day-1 frozen
+        // hours that were skipped above and never became a ride.
+        awaySummary = { rides: rides.length, scrap: earned };
       }
       saveBuild(build);
     } else if (advanced) {
@@ -506,6 +540,11 @@
   // Dev: credit some hours of idle income without waiting — simulates the
   // next h hourly gauntlets using the day's fixed gauntlet. (A scrap cheat:
   // the wall clock will ride those hours again for real.)
+  // Respects the day-1 recruitment freeze by default (see isFrozenHour),
+  // same as the real hourly loop, so dev-testing sees what real players see.
+  // To test the game *past* the freeze, either skip past 10:00 CET first
+  // with a couple of small skips, or skip enough hours in one call that the
+  // later ones land after 10:00 — those still credit normally.
   function devSkipHours(h: number) {
     const lineup = lineupFromBuild(build);
     if (lineup.units.length === 0) {
@@ -516,16 +555,22 @@
     let earned = 0;
     const rides: RideLogEntry[] = [];
     for (let i = 1; i <= h; i++) {
+      const hourBucket = nowHour + i;
+      if (isFrozenHour(hourBucket, build.seasonId)) continue;
       const { result } = simulate(lineup, generateGauntlet(build.date, build.day));
       const scrap = result.wavesCleared * SCRAP_PER_DEPTH;
       earned += scrap;
       rides.push({
-        hour: nowHour + i,
+        hour: hourBucket,
         depth: result.wavesCleared,
         scrap,
         survivors: result.survivors.length,
         enemiesDefeated: result.enemiesDefeated,
       });
+    }
+    if (rides.length === 0) {
+      notice = 'those hours are inside the day-1 recruitment freeze (rides start 10:00 CET)';
+      return;
     }
     rideLog = [...rides.reverse(), ...rideLog].slice(0, RIDE_LOG_MAX);
     saveRideLog(rideLog);
@@ -538,7 +583,7 @@
     seasonKills += rides.reduce((sum, r) => sum + r.enemiesDefeated, 0);
     saveSeasonKills(build.seasonId, seasonKills);
     build = { ...build, scrap: build.scrap + earned };
-    awaySummary = { rides: h, scrap: earned };
+    awaySummary = { rides: rides.length, scrap: earned };
     saveBuild(build);
   }
 
@@ -975,13 +1020,20 @@
     {:else}
       <div class="idle">
         <p class="muster-line">Your horde rides the drains <strong>every hour</strong>, hauling back scrap by how deep it pushes. The drains hold steady through the day, changing anew each dawn.</p>
+        {#if inRecruitmentWindow}
+          <p class="onboarding-hint">recruitment window — the horde doesn't ride until <strong>10:00 CET</strong>. Build your board now; the first haul lands at 10:00.</p>
+        {/if}
         <div class="idle-stats">
           <div class="stat"><span class="stat-big">{currentDepth}</span><span class="stat-lbl">next depth</span></div>
           <div class="stat"><span class="stat-big">+{scrapPerHour}</span><span class="stat-lbl">next haul</span></div>
           <div class="stat"><span class="stat-big">{formatCountdown(secondsToNextHour)}</span><span class="stat-lbl">rides in</span></div>
         </div>
         <p class="idle-note">
-          +{SCRAP_PER_DEPTH} scrap per depth cleared, every hour · +{interestFor(build.scrap)} interest banked each dawn · gets tougher deeper
+          {#if inRecruitmentWindow}
+            "next haul" is a preview of your build, not banked yet — it won't be credited until 10:00 CET · +{SCRAP_PER_DEPTH} scrap per depth cleared once rides start · gets tougher deeper
+          {:else}
+            +{SCRAP_PER_DEPTH} scrap per depth cleared, every hour · +{interestFor(build.scrap)} interest banked each dawn · gets tougher deeper
+          {/if}
         </p>
         <button class="watch" onclick={watchRide}>▶ watch the next ride</button>
         <p class="season-best">Deepest ride this week: <strong>wave {seasonBest}</strong> · resets Monday</p>
