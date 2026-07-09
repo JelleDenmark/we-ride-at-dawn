@@ -1,5 +1,5 @@
 import type { Side, UnitDef, Ability, Lineup } from './data/units';
-import { UNIT_DEFS, tierAttackMultiplier, tierHealthMultiplier, reviveHpForTier } from './data/units';
+import { UNIT_DEFS, tierAttackMultiplier, tierHealthMultiplier, reviveHpForTier, blockHitsForTier } from './data/units';
 import { ENEMY_POOL } from './data/enemies';
 import { RELIC_DEFS, type RelicDef } from './data/relics';
 import type { Gauntlet } from './gauntlet';
@@ -105,24 +105,6 @@ interface BattleUnit {
   startOfBattleFired: boolean;
   /** A corpse may be raised once per battle. Guards the two-reviver loop. */
   raised: boolean;
-  /**
-   * Ward-Weaver's shield. Bounded to a single boolean, never a counter: a
-   * grant while already `true` is a no-op (see `tickWatchers`), so however
-   * many times the watcher's every-3rd-attack threshold is crossed before
-   * the shield is actually consumed, it still only ever absorbs exactly one
-   * hit. That's what keeps this compounding-law-safe across a 45-wave
-   * battle — it cannot stack into "absorbs N hits."
-   */
-  shielded: boolean;
-  /**
-   * Per-battle (not per-wave) count of attacks landed by this unit's own
-   * side's current front-line unit, owned by whichever unit bears a
-   * `watchFrontAttack` ability. Never reset mid-battle, only re-initialized
-   * per unit instance at `instantiate` — matches `startOfBattleFired`'s
-   * once-per-instance lifetime, so a Ward-Weaver's proc cadence carries
-   * across wave boundaries within one battle, as designed.
-   */
-  watchCounter: number;
 }
 
 /** A hit reduced by armor still lands for at least this much. */
@@ -203,8 +185,6 @@ export function simulate(
       damageReduction: (def.damageReduction ?? 0) * tier,
       startOfBattleFired: false,
       raised: false,
-      shielded: false,
-      watchCounter: 0,
     };
   };
 
@@ -381,6 +361,21 @@ export function simulate(
         events.push({ type: 'revive', side: source.side, index, unit: view(corpse) });
         break;
       }
+      case 'blockFrontHits': {
+        // Ward-Weaver (issue #56). `startOfWave`-fired, so this runs for
+        // every live Ward-Weaver on the board at the top of the wave, in
+        // board order. The pool is sized by Math.max across all of them —
+        // NEVER summed — so two t3 Ward-Weavers still only grant 3 charges
+        // that wave, not 6. See `blockCharges`'s declaration for the full
+        // compounding-law note.
+        const charges = blockHitsForTier(tier);
+        blockCharges[source.side] = Math.max(blockCharges[source.side], charges);
+        const currentFront = board[0];
+        if (currentFront) {
+          events.push({ type: 'shieldGranted', targetId: currentFront.instanceId, sourceId: source.instanceId });
+        }
+        break;
+      }
     }
   };
 
@@ -444,6 +439,25 @@ export function simulate(
   let wavesCleared = 0;
   let totalDamage = 0;
   let damageThisWave = 0;
+  /**
+   * Ward-Weaver's per-wave "block the current front unit's next incoming
+   * hit" pool, keyed by side (issue #56). Reset to 0 at the top of every
+   * wave (below), then sized by `Math.max` — never summed — across every
+   * live `blockFrontHits` watcher's `blockHitsForTier` on that side (see the
+   * `blockFrontHits` case in `applyEffect`), and drained by 1 each time that
+   * side's current front-line unit would otherwise take a hit (below, in the
+   * tick loop). It follows "whoever is currently front," not a fixed unit
+   * instance, matching the pre-#56 `watchFrontAttack` mechanic's targeting.
+   *
+   * Compounding-law check: this is a per-wave-reset magnitude, not a
+   * cumulative one — it cannot carry charges from wave N into wave N+1, the
+   * same shape as Plague-Bearer's `startOfWave` poison re-application. That
+   * bound holds regardless of how many Ward-Weavers (or what tiers) are on
+   * the board, because the grant is `Math.max`, not a sum: two tier-3
+   * Ward-Weavers together still only produce a 3-charge pool for that wave,
+   * not 6, so this can never snowball across the 45-wave battle.
+   */
+  let blockCharges: Record<Side, number> = { horde: 0, gauntlet: 0 };
 
   for (let w = 0; w < gauntlet.waves.length && horde.length > 0; w++) {
     enemies = gauntlet.waves[w].units.map((d) =>
@@ -455,6 +469,10 @@ export function simulate(
     // "already swung" flag at every wave start. Enemies are re-instantiated
     // per wave, so they begin fresh already.
     for (const u of horde) u.firstAttackDone = false;
+    // Ward-Weaver's block-charge pool resets every wave — see the
+    // compounding-law note on `blockCharges` above. `fireEntryTriggers`
+    // below re-populates it via any `blockFrontHits` watchers present.
+    blockCharges = { horde: 0, gauntlet: 0 };
 
     fireEntryTriggers(horde);
     fireEntryTriggers(enemies);
@@ -486,59 +504,29 @@ export function simulate(
       front.firstAttackDone = true;
       foe.firstAttackDone = true;
 
-      // Ward-Weaver's shield absorbs a whole attack hit outright, so it must
-      // resolve before applyDamage even runs — that also means it resolves
-      // before Tail-Charm's lethal-hit check inside applyDamage, which is
-      // the intended order: a fully-absorbed hit was never lethal to begin
-      // with, so it should never consume Tail-Charm.
-      if (foe.shielded) {
-        foe.shielded = false;
+      // Ward-Weaver's block charges (issue #56) absorb a whole attack hit
+      // outright, so this must resolve before applyDamage even runs — that
+      // also means it resolves before Tail-Charm's lethal-hit check inside
+      // applyDamage, which is the intended order: a fully-blocked hit was
+      // never lethal to begin with, so it should never consume Tail-Charm.
+      // `blockCharges` is a per-wave pool keyed by side (see its declaration
+      // above), not a per-unit flag — it follows whichever unit is
+      // currently front on that side, draining by 1 per hit that would
+      // otherwise land, until the wave's pool (set at `startOfWave`, sized
+      // by `Math.max` across that side's Ward-Weavers) is exhausted.
+      if (blockCharges[foe.side] > 0) {
+        blockCharges[foe.side]--;
         events.push({ type: 'shieldAbsorbed', targetId: foe.instanceId });
       } else {
         applyDamage(foe, damageOut, 'attack');
       }
-      if (front.shielded) {
-        front.shielded = false;
+      if (blockCharges[front.side] > 0) {
+        blockCharges[front.side]--;
         events.push({ type: 'shieldAbsorbed', targetId: front.instanceId });
       } else {
         applyDamage(front, damageIn, 'attack');
       }
       damageThisWave += damageOut;
-
-      // Ward-Weaver: watches its own side's *current* front-line unit (not
-      // itself) and counts its landed attacks. `front`/`foe` above just
-      // landed an attack this tick (every tick both sides' front units
-      // attack, by construction of the front-clash sim), so tick every
-      // watcher on each side once and grant a shield to that side's current
-      // front on every `every`th tick. Compounding-law check: the counter
-      // grows unboundedly across the 45-wave battle (that's fine, it's a
-      // modulo cadence, not a magnitude), but the *effect* it produces
-      // (`front.shielded = true`) is a boolean, not incremented — repeated
-      // grants before the shield is consumed are idempotent no-ops, so the
-      // shield can never absorb more than one hit no matter how long the
-      // battle runs. This must run after the shielded front/foe from *this*
-      // tick have already resolved their (non-)damage above, so a proc this
-      // tick protects the *next* hit, not the simultaneous one just traded.
-      const tickWatchers = (board: BattleUnit[], currentFront: BattleUnit): void => {
-        for (const watcher of board) {
-          if (watcher.ability?.trigger !== 'watchFrontAttack' || watcher.health <= 0) continue;
-          const effect = watcher.ability.effect;
-          if (effect.kind !== 'shieldFront') continue;
-          watcher.watchCounter++;
-          if (watcher.watchCounter >= effect.every) {
-            watcher.watchCounter = 0;
-            currentFront.shielded = true;
-            events.push({ type: 'shieldGranted', targetId: currentFront.instanceId, sourceId: watcher.instanceId });
-          }
-        }
-      };
-      // Note: if `front`/`foe` took lethal damage above (or has lethal
-      // poison still pending later this tick), this can grant a shield to a
-      // unit that `resolveDeaths` removes moments later. That's a wasted
-      // proc, not a bug — the shield is still bounded to "one hit,"
-      // consumed or not, so it never leaks value across the battle.
-      tickWatchers(horde, front);
-      tickWatchers(enemies, foe);
 
       // Marrow-Snap: a foe left at or below executeThreshold of its OWN max
       // health (not the bearer's) dies outright instead of surviving on a

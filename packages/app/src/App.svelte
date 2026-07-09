@@ -271,18 +271,12 @@
     afterNoon: ' (after noon)',
   };
 
-  function ordinal(n: number): string {
-    const s = ['th', 'st', 'nd', 'rd'];
-    const v = n % 100;
-    return `${n}${s[(v - 20) % 10] ?? s[v] ?? s[0]}`;
-  }
-
   function abilitySentence(defId: string): string {
     const def = UNIT_DEFS[defId];
     if (!def?.ability) return 'No special trick — just a body to swell the ranks.';
     const e = def.ability.effect;
-    if (e.kind === 'shieldFront') {
-      return `Every ${ordinal(e.every)} attack the front rat lands, shields that rat from its next hit. Effects scale with tier.`;
+    if (e.kind === 'blockFrontHits') {
+      return 'Each wave, blocks the front rat’s first incoming hit outright. Charges reset every wave and scale with tier: ★2 blocks the first 2 hits, ★3 the first 3.';
     }
     let what = '';
     switch (e.kind) {
