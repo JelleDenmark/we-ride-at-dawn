@@ -1,0 +1,16 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <!-- Press-Kin: braces with a paw out to each side (battle: +2/+2 to the rats beside it) -->
+  <path d="M15 52 Q4 51 6 39 Q6 33 11 32" fill="none" stroke="#5e3120" stroke-width="2.4" stroke-linecap="round"/>
+  <path d="M15 52 C11 43 15 32 26 30 C34 29 40 33 43 39 L50 43 C51.3 44 50.4 45.4 49 45.4 L42 45.5 C39 50 32 53 24 53 C18 53 16.5 52.5 15 52 Z" fill="#8a4b2f" stroke="#201209" stroke-width="1.5" stroke-linejoin="round"/>
+  <circle cx="38" cy="35" r="4.2" fill="#8a4b2f" stroke="#201209" stroke-width="1.5"/>
+  <circle cx="38" cy="35" r="1.9" fill="#b4715a"/>
+  <circle cx="46" cy="41" r="1.7" fill="#201209"/>
+  <!-- braced paw reaching left, to the kin beside it -->
+  <path d="M15 40 C8 38 3 40 1 44" fill="none" stroke="#8a4b2f" stroke-width="4.5" stroke-linecap="round"/>
+  <circle cx="1" cy="44" r="2.4" fill="#8a4b2f" stroke="#201209" stroke-width="1.2"/>
+  <!-- braced paw reaching right, to the kin beside it -->
+  <path d="M43 39 C50 35 57 36 61 41" fill="none" stroke="#8a4b2f" stroke-width="4.5" stroke-linecap="round"/>
+  <circle cx="61" cy="41" r="2.4" fill="#8a4b2f" stroke="#201209" stroke-width="1.2"/>
+  <rect x="20" y="52" width="4.5" height="7" rx="1.8" fill="#5e3120"/>
+  <rect x="33" y="51" width="4.5" height="8" rx="1.8" fill="#5e3120"/>
+</svg>
