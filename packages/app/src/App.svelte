@@ -4,8 +4,6 @@
     currentRideDate,
     dailySeed,
     generateGauntlet,
-    scoutReport,
-    ARCHETYPE_LABEL,
     simulate,
     UNIT_DEFS,
     RELIC_DEFS,
@@ -140,7 +138,6 @@
 
   // The ride shows the daily gauntlet: the same waves all day, every day.
   const currentGauntlet = $derived(generateGauntlet(build.date, build.day));
-  const report = $derived(scoutReport(currentGauntlet));
   const theme = $derived(currentGauntlet.theme);
   // Live outcome of the current horde on the next ride — updates as you
   // build (and as the hour flips), so you see your depth change in real time.
@@ -788,18 +785,6 @@
   </div>
   {/if}
 
-  <div class="scout">
-    <div class="panel-label">the drains right now — what your horde fights</div>
-    <p class="scout-flavor">&ldquo;{report.flavor}&rdquo;</p>
-    <div class="chips">
-      {#each report.hints as hint}
-        <span class="chip">
-          {ARCHETYPE_LABEL[hint.archetype]}{hint.fromWave ? ` · wave ${hint.fromWave}+` : ''}
-        </span>
-      {/each}
-    </div>
-  </div>
-
   <div class="build">
     <div class="status-row">
       <span class="scrap">⚙ {build.scrap} scrap</span>
@@ -897,7 +882,7 @@
 
     <div class="shop-panel">
     <div class="panel-label row-label">
-      <span>the scrap-market</span>
+      <span>the scrap-market · ⚙ {build.scrap}</span>
       <span>❄ keeps a stall when you reroll</span>
     </div>
     <div class="board">
@@ -1373,35 +1358,6 @@
 
   .dev-sep {
     color: #4a3520;
-  }
-
-  .scout {
-    max-width: 620px;
-    margin: 0 auto 14px;
-    padding: 10px 16px;
-    background: var(--panel);
-    border: 1px solid #4a3520;
-    border-radius: 8px;
-    text-align: left;
-  }
-
-  .scout-flavor {
-    margin: 5px 0 8px;
-    font-size: 14px;
-    font-style: italic;
-  }
-
-  .chips {
-    display: flex;
-    gap: 6px;
-  }
-
-  .chip {
-    font-size: 12px;
-    padding: 3px 10px;
-    border-radius: 10px;
-    background: #2a2118;
-    color: #c9b891;
   }
 
   .build {
