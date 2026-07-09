@@ -9,6 +9,7 @@ export {
   type Side,
   type Lineup,
   type LineupUnit,
+  type TimeOfDay,
 } from './data/units';
 export { RELIC_DEFS, type RelicDef } from './data/relics';
 export { ENEMY_POOL } from './data/enemies';

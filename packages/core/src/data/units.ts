@@ -49,7 +49,28 @@ export type Effect =
    * compounding-law note in sim.ts's tick loop for why the shield can never
    * exceed "absorbs one hit" no matter how long the battle runs.
    */
-  | { kind: 'shieldFront'; every: number };
+  | { kind: 'shieldFront'; every: number }
+  /**
+   * Flat, whole-team stat grant (issue #12: Dawn-Runt/Dusk-Runt) — every
+   * horde unit currently on the board gets `+attack`/`+health`, including the
+   * caster itself (unlike `buffBehind`, which deliberately excludes the
+   * caster — see Warren-Warden). Only ever wired to a `startOfBattle`
+   * trigger, so it fires once per unit instance, ever, exactly like
+   * Warren-Warden's `buffBehind`, and cannot compound across the 45-wave
+   * battle. See the `condition` field on `Ability` for how this pairs with a
+   * time-of-day gate.
+   */
+  | { kind: 'teamBuff'; attack: number; health: number };
+
+/**
+ * Real-world half-day bucket, Copenhagen local time (issue #12) — matches the
+ * existing Monday 06:00 CET season-reset convention. Resolved by the app
+ * layer from the wall clock and threaded in via `Lineup.timeOfDay`;
+ * `simulate` itself never reads `Date.now()`/`new Date()`, so this stays
+ * fully deterministic for tests and golden logs (they pass, or omit,
+ * `timeOfDay` explicitly).
+ */
+export type TimeOfDay = 'beforeNoon' | 'afterNoon';
 
 /**
  * `startOfBattle` fires **once per unit instance, ever** — on the first wave
@@ -76,6 +97,15 @@ export type Effect =
 export interface Ability {
   trigger: 'startOfBattle' | 'startOfWave' | 'faint' | 'afterAttack' | 'allyFaint' | 'watchFrontAttack';
   effect: Effect;
+  /**
+   * Gate the ability's firing on the real-world half of the day the ride
+   * belongs to (issue #12). Evaluated against `Lineup.timeOfDay` at the same
+   * point the trigger itself would otherwise fire (see `fireEntryTriggers` in
+   * sim.ts) — a `startOfBattle` ability still only ever gets its one shot per
+   * unit instance, it just no-ops that shot when the condition doesn't match,
+   * rather than retrying on a later wave.
+   */
+  condition?: { timeOfDay: TimeOfDay };
 }
 
 export interface UnitDef {
@@ -95,6 +125,14 @@ export interface UnitDef {
    * small hits, near-useless against brutes.
    */
   damageReduction?: number;
+  /**
+   * Day-gated shop availability (issue #12), same mechanism as
+   * `boardCapForDay` — a pure function of the expedition day, no new
+   * per-account state. Absent = available from day 1 (every pre-existing
+   * unit). Once a unit's `unlockDay` is reached it stays in the pool for
+   * every later day too — this is not a day-exclusive appearance.
+   */
+  unlockDay?: number;
 }
 
 export interface LineupUnit {
@@ -113,6 +151,16 @@ export interface Lineup {
    * every pre-existing golden log byte-identical.
    */
   combatCap?: number;
+  /**
+   * Real-world half-day this ride's rats fight in (issue #12) — drives
+   * Dawn-Runt/Dusk-Runt's `condition.timeOfDay` gate. Omitted = neither
+   * condition matches, so any lineup that predates or doesn't care about
+   * time-of-day (every golden log, every existing test) behaves exactly as
+   * it did before this field existed. The app layer resolves this from the
+   * wall clock (see `copenhagenSeconds`/`timeOfDayAt` in App.svelte);
+   * `simulate` never reads the clock itself.
+   */
+  timeOfDay?: TimeOfDay;
 }
 
 /** Full spec §5.4 roster. Archetypes: Breed/Swarm, Plague, Sacrifice, Bruiser/Anchor. */
@@ -181,6 +229,32 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     id: 'ward-weaver', name: 'Ward-Weaver', attack: 1, health: 3, cost: 6,
     desc: 'watches the front rat: every 3rd attack it lands, shields it from the next hit',
     ability: { trigger: 'watchFrontAttack', effect: { kind: 'shieldFront', every: 3 } },
+  },
+  // Issue #12: a parallel "Runt" pair (Gutter-Runt precedent) tied to the
+  // game's dawn/dusk duality rather than literal noon-splitting — the actual
+  // trigger condition is the broader before/after-noon Copenhagen split, but
+  // the flavor leans poetic. Day-gated (unlockDay) rather than depth-gated,
+  // per #6's fairness resolution, so the shop stays a pure function of
+  // (date, day) with no new per-account state.
+  'dawn-runt': {
+    id: 'dawn-runt', name: 'Dawn-Runt', attack: 1, health: 2, cost: 4,
+    desc: 'thrives in the grey light before the city wakes; battle (before noon): +2 attack to the horde',
+    ability: {
+      trigger: 'startOfBattle',
+      effect: { kind: 'teamBuff', attack: 2, health: 0 },
+      condition: { timeOfDay: 'beforeNoon' },
+    },
+    unlockDay: 3,
+  },
+  'dusk-runt': {
+    id: 'dusk-runt', name: 'Dusk-Runt', attack: 1, health: 2, cost: 4,
+    desc: 'comes alive as the drains go black again, ahead of the next dawn’s ride; battle (after noon): +2 health to the horde',
+    ability: {
+      trigger: 'startOfBattle',
+      effect: { kind: 'teamBuff', attack: 0, health: 2 },
+      condition: { timeOfDay: 'afterNoon' },
+    },
+    unlockDay: 4,
   },
 };
 

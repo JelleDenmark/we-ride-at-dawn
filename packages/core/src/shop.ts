@@ -1,6 +1,6 @@
 import { fnv1a } from './seed';
 import { xorshift128 } from './prng';
-import { UNIT_DEFS, type Lineup, tierAttackMultiplier, tierHealthMultiplier } from './data/units';
+import { UNIT_DEFS, type Lineup, type UnitDef, tierAttackMultiplier, tierHealthMultiplier } from './data/units';
 import { RELIC_DEFS } from './data/relics';
 import { BOARD_CAP, COMBAT_CAP_BONUS } from './sim';
 
@@ -152,24 +152,40 @@ const SHOP_UNIT_POOL = Object.values(UNIT_DEFS).filter((u) => u.id !== 'pup');
 const SHOP_RELIC_POOL = Object.values(RELIC_DEFS);
 
 /**
- * Offerings are deterministic for a given (date, roll #, owned team relics).
- * A team relic the horde already carries can never be bought again, so it's
- * filtered out of the pool rather than rolled as a dead, unbuyable stall.
- * With no owned team relics the pool is the full set, so callers that omit the
- * argument (and the golden path) are byte-identical to before.
+ * Day-gated shop pool (issue #12: Dawn-Runt/Dusk-Runt), same mechanism as
+ * `boardCapForDay` — a pure function of the day number, no new per-account
+ * state. Units with no `unlockDay` are available from day 1, exactly as
+ * before this feature existed. Preserves `SHOP_UNIT_POOL`'s insertion order,
+ * so for any day before the earliest `unlockDay` in play, this filters down
+ * to byte-identical output to the old unconditional pool — existing golden
+ * shop rolls for those days are unaffected.
+ */
+function shopUnitPoolForDay(day: number): UnitDef[] {
+  return SHOP_UNIT_POOL.filter((u) => u.unlockDay === undefined || day >= u.unlockDay);
+}
+
+/**
+ * Offerings are deterministic for a given (date, roll #, owned team relics,
+ * day). A team relic the horde already carries can never be bought again, so
+ * it's filtered out of the pool rather than rolled as a dead, unbuyable
+ * stall. `day` defaults to 1 (the pre-#12 pool, minus Dawn-Runt/Dusk-Runt),
+ * so callers that omit every optional argument (and the golden path) are
+ * byte-identical to before.
  */
 export function rollOfferings(
   date: string,
   roll: number,
-  ownedTeamRelics: readonly string[] = []
+  ownedTeamRelics: readonly string[] = [],
+  day = 1
 ): ShopSlot[] {
   const rng = xorshift128(fnv1a(`${date}#shop#${roll}`));
+  const unitPool = shopUnitPoolForDay(day);
   const relicPool = SHOP_RELIC_POOL.filter(
     (r) => !(r.scope === 'team' && ownedTeamRelics.includes(r.id))
   );
   const slots: ShopSlot[] = [];
   for (let i = 0; i < SHOP_UNIT_SLOTS; i++) {
-    slots.push({ kind: 'unit', defId: SHOP_UNIT_POOL[rng.int(SHOP_UNIT_POOL.length)].id });
+    slots.push({ kind: 'unit', defId: unitPool[rng.int(unitPool.length)].id });
   }
   for (let i = 0; i < SHOP_RELIC_SLOTS; i++) {
     slots.push({ kind: 'relic', relicId: relicPool[rng.int(relicPool.length)].id });
@@ -178,7 +194,7 @@ export function rollOfferings(
 }
 
 export function newBuild(date: string, day = 1, ownedTeamRelics: readonly string[] = []): BuildState {
-  const slots = rollOfferings(date, 0, ownedTeamRelics);
+  const slots = rollOfferings(date, 0, ownedTeamRelics, day);
   return {
     date,
     seasonId: seasonIdFor(date),
@@ -405,7 +421,7 @@ export function rerollShop(state: BuildState): ActionResult {
   const s = clone(state);
   s.scrap -= REROLL_COST;
   s.shop.rolls += 1;
-  const fresh = rollOfferings(s.date, s.shop.rolls, s.teamRelicIds);
+  const fresh = rollOfferings(s.date, s.shop.rolls, s.teamRelicIds, s.day);
   s.shop.slots = s.shop.slots.map((old, i) =>
     s.shop.frozen[i] && old.kind !== 'empty' ? old : fresh[i]
   );
@@ -427,7 +443,7 @@ export function autoRerollShop(state: BuildState): ActionResult {
   if (!isShopDead(state)) return { ok: false, reason: 'shop is not dead' };
   const s = clone(state);
   s.shop.rolls += 1;
-  const fresh = rollOfferings(s.date, s.shop.rolls, s.teamRelicIds);
+  const fresh = rollOfferings(s.date, s.shop.rolls, s.teamRelicIds, s.day);
   s.shop.slots = s.shop.slots.map((old, i) =>
     s.shop.frozen[i] && old.kind !== 'empty' ? old : fresh[i]
   );

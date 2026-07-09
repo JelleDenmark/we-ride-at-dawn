@@ -32,6 +32,7 @@ import {
   REROLL_COST,
   BENCH_SIZE,
   unitStats,
+  rollOfferings,
   type BuildState,
 } from '../src/shop';
 import { UNIT_DEFS } from '../src/data/units';
@@ -1316,5 +1317,79 @@ describe('buyable horde slots (issue #9)', () => {
     for (let day = 1; day <= 7; day++) {
       expect(combatCapForBuild({ day, purchasedSlots: 0 })).toBe(combatCapForDay(day));
     }
+  });
+});
+
+describe('day-gated shop unlocks (issue #12: Dawn-Runt/Dusk-Runt)', () => {
+  // Roll many offerings across many dates/roll numbers for a given day and
+  // report whether either new unit ever appears — a much larger sample than
+  // SHOP_UNIT_SLOTS so a true negative (never offered) is a real signal, not
+  // just an unlucky small sample.
+  const everAppears = (day: number, defId: string): boolean => {
+    for (let d = 0; d < 40; d++) {
+      const date = `2026-08-${String(d + 1).padStart(2, '0')}`;
+      for (let roll = 0; roll < 10; roll++) {
+        const slots = rollOfferings(date, roll, [], day);
+        if (slots.some((s) => s.kind === 'unit' && s.defId === defId)) return true;
+      }
+    }
+    return false;
+  };
+
+  it('Dawn-Runt never appears before day 3', () => {
+    expect(everAppears(1, 'dawn-runt')).toBe(false);
+    expect(everAppears(2, 'dawn-runt')).toBe(false);
+  });
+
+  it('Dawn-Runt can appear from day 3 onward, every later day too (not day-exclusive)', () => {
+    for (const day of [3, 4, 5, 6, 7]) expect(everAppears(day, 'dawn-runt')).toBe(true);
+  });
+
+  it('Dusk-Runt never appears before day 4', () => {
+    expect(everAppears(1, 'dusk-runt')).toBe(false);
+    expect(everAppears(2, 'dusk-runt')).toBe(false);
+    expect(everAppears(3, 'dusk-runt')).toBe(false);
+  });
+
+  it('Dusk-Runt can appear from day 4 onward, every later day too (not day-exclusive)', () => {
+    for (const day of [4, 5, 6, 7]) expect(everAppears(day, 'dusk-runt')).toBe(true);
+  });
+
+  it('newBuild wires the shop day through to rollOfferings (day 1 build never offers either Runt)', () => {
+    for (let d = 0; d < 20; d++) {
+      const date = `2026-09-${String(d + 1).padStart(2, '0')}`;
+      const s = newBuild(date, 1);
+      expect(s.shop.slots.some((sl) => sl.kind === 'unit' && (sl.defId === 'dawn-runt' || sl.defId === 'dusk-runt'))).toBe(false);
+    }
+  });
+
+  it('days before any unlockDay in play roll byte-identical offerings to the pre-#12 pool (no regression)', () => {
+    // day-agnostic pool (no unlockDay units eligible yet) must match calling
+    // rollOfferings with its old implicit default in spirit: day 1 and day 2
+    // exclude both new units, so their rolls are unaffected by this feature.
+    for (const day of [1, 2]) {
+      const a = rollOfferings('2026-07-03', 0, [], day);
+      const b = rollOfferings('2026-07-03', 0, [], day);
+      expect(a).toEqual(b);
+      expect(a.some((s) => s.kind === 'unit' && (s.defId === 'dawn-runt' || s.defId === 'dusk-runt'))).toBe(false);
+    }
+  });
+
+  it('rerollShop and autoRerollShop respect the build day, not just newBuild', () => {
+    // A day-4 build should be able to roll either Runt on reroll too, not
+    // just on the initial shop — this exercises the s.day plumbing through
+    // rerollShop/autoRerollShop, not just newBuild's initial rollOfferings.
+    let found = false;
+    let s = newBuild('2026-07-04', 4);
+    for (let i = 0; i < 40 && !found; i++) {
+      s = { ...s, scrap: 50 };
+      const rolled = rerollShop(s);
+      if (!rolled.ok) break;
+      s = rolled.state;
+      if (s.shop.slots.some((sl) => sl.kind === 'unit' && (sl.defId === 'dawn-runt' || sl.defId === 'dusk-runt'))) {
+        found = true;
+      }
+    }
+    expect(found).toBe(true);
   });
 });
