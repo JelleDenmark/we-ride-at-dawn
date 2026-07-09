@@ -138,11 +138,10 @@
   let nowTick = $state(Date.now());
   let speed = $state(1);
 
-  // The ride at the top of hour H uses gauntlet(date, day, H): waves
-  // reshuffle hourly under a fixed daily theme. The preview always shows the
-  // NEXT ride — the one the countdown points at.
+  // The ride shows the daily gauntlet: the same waves all day, every day.
+  // The preview always shows the NEXT ride — the one the countdown points at.
   const nextRideHour = $derived(Math.floor(nowTick / HOUR_MS) + 1);
-  const currentGauntlet = $derived(generateGauntlet(build.date, build.day, nextRideHour));
+  const currentGauntlet = $derived(generateGauntlet(build.date, build.day));
   const report = $derived(scoutReport(currentGauntlet));
   const theme = $derived(currentGauntlet.theme);
   // Live outcome of the current horde on the next ride — updates as you
@@ -405,8 +404,8 @@
       }
     }
 
-    // Credit each elapsed hour as its own ride: the horde fights that hour's
-    // reshuffled gauntlet, earns that ride's depth, and the ride is logged.
+    // Credit each elapsed hour as its own ride: the horde fights the day's
+    // gauntlet, earns that ride's depth, and the ride is logged.
     // (Offline hours use the current board and day — the honest limit of
     // lazy crediting; the 24h cap keeps the drift small.)
     const nowHour = Math.floor(nowTick / HOUR_MS);
@@ -417,7 +416,7 @@
       const rides: RideLogEntry[] = [];
       if (lineup.units.length > 0) {
         for (let h = nowHour - elapsed + 1; h <= nowHour; h++) {
-          const { result } = simulate(lineup, generateGauntlet(build.date, build.day, h));
+          const { result } = simulate(lineup, generateGauntlet(build.date, build.day));
           const scrap = result.wavesCleared * SCRAP_PER_DEPTH;
           earned += scrap;
           rides.push({
@@ -510,7 +509,7 @@
   }
 
   // Dev: credit some hours of idle income without waiting — simulates the
-  // next h hourly gauntlets so the log shows real variance. (A scrap cheat:
+  // next h hourly gauntlets using the day's fixed gauntlet. (A scrap cheat:
   // the wall clock will ride those hours again for real.)
   function devSkipHours(h: number) {
     const lineup = lineupFromBuild(build);
@@ -522,7 +521,7 @@
     let earned = 0;
     const rides: RideLogEntry[] = [];
     for (let i = 1; i <= h; i++) {
-      const { result } = simulate(lineup, generateGauntlet(build.date, build.day, nowHour + i));
+      const { result } = simulate(lineup, generateGauntlet(build.date, build.day));
       const scrap = result.wavesCleared * SCRAP_PER_DEPTH;
       earned += scrap;
       rides.push({
@@ -985,14 +984,14 @@
             ? `⚑ the drains cleared — ${result.survivors.length} rats ride home`
             : 'until the last rat falls'}
         </p>
-        <p class="result-note">each hourly ride reshuffles the drains — same threats, new arrangement</p>
+        <p class="result-note">the drains hold steady through the day, changing anew each dawn</p>
       {/if}
       <button class="ride" onclick={backToWarren} disabled={phase === 'riding'}>
         {phase === 'riding' ? 'Riding…' : '← back to the warren'}
       </button>
     {:else}
       <div class="idle">
-        <p class="muster-line">Your horde rides the drains <strong>every hour</strong>, hauling back scrap by how deep it pushes. Each ride the drains reshuffle — same threats, new arrangement.</p>
+        <p class="muster-line">Your horde rides the drains <strong>every hour</strong>, hauling back scrap by how deep it pushes. The drains hold steady through the day, changing anew each dawn.</p>
         <div class="idle-stats">
           <div class="stat"><span class="stat-big">{currentDepth}</span><span class="stat-lbl">next depth</span></div>
           <div class="stat"><span class="stat-big">+{scrapPerHour}</span><span class="stat-lbl">next haul</span></div>
