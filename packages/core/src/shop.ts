@@ -5,7 +5,7 @@ import { RELIC_DEFS } from './data/relics';
 import { BOARD_CAP, COMBAT_CAP_BONUS } from './sim';
 
 export const DAILY_SCRAP = 24;
-export const REROLL_COST = 1;
+export const REROLL_COST = 2;
 export const SHOP_UNIT_SLOTS = 4;
 export const SHOP_RELIC_SLOTS = 2;
 export const MAX_TIER = 3;
