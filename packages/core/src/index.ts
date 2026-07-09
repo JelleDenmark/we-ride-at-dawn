@@ -42,6 +42,7 @@ export {
   buyUnit,
   canRecruit,
   buyRelic,
+  hasValidRelicTarget,
   sellUnit,
   sellBenchUnit,
   sellRefund,

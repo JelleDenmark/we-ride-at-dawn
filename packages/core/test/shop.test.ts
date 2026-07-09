@@ -3,6 +3,7 @@ import {
   newBuild,
   buyUnit,
   buyRelic,
+  hasValidRelicTarget,
   sellUnit,
   sellBenchUnit,
   rerollShop,
@@ -260,6 +261,33 @@ describe('relics in the shop', () => {
     expect(buyRelic(s, 0, 1).ok).toBe(true);
     // Duplicate team relic: rejected.
     expect(buyRelic(s, 1).ok).toBe(false);
+  });
+
+  it('hasValidRelicTarget (issue #25): false once every board rat already carries it, or the board is empty', () => {
+    const base = newBuild('2026-07-03');
+    // Empty board — nothing to pin to at all.
+    expect(hasValidRelicTarget(base, 'rusted-nail')).toBe(false);
+    // One rat, not carrying it yet — valid target.
+    const oneBare = { ...base, board: [{ defId: 'dire-rat', tier: 1, relicIds: [] }] };
+    expect(hasValidRelicTarget(oneBare, 'rusted-nail')).toBe(true);
+    // Every rat already carries it — no valid target left.
+    const allCarry = {
+      ...base,
+      board: [
+        { defId: 'dire-rat', tier: 1, relicIds: ['rusted-nail'] },
+        { defId: 'gnawer', tier: 1, relicIds: ['rusted-nail'] },
+      ],
+    };
+    expect(hasValidRelicTarget(allCarry, 'rusted-nail')).toBe(false);
+    // Mixed: one rat still lacks it — valid target remains.
+    const mixed = {
+      ...base,
+      board: [
+        { defId: 'dire-rat', tier: 1, relicIds: ['rusted-nail'] },
+        { defId: 'gnawer', tier: 1, relicIds: [] },
+      ],
+    };
+    expect(hasValidRelicTarget(mixed, 'rusted-nail')).toBe(true);
   });
 
   it('an owned team relic leaves the shop and never re-rolls', () => {

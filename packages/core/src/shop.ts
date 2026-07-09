@@ -305,6 +305,19 @@ export function canRecruit(state: BuildState, slotIndex: number): boolean {
   return buyUnit(state, slotIndex).ok;
 }
 
+/**
+ * Whether at least one board rat could still receive this unit-scoped relic
+ * (i.e. lacks it already). Team-scoped relics aren't pinned to a rat, so this
+ * only makes sense for `scope: 'unit'` relics — used to gate the buy button
+ * (and avoid arming "pick a rat to carry it") before every possible target
+ * would be rejected by `buyRelic`'s per-rat 'that rat already carries one'
+ * check. Also covers the degenerate case of an empty board (nothing to pin
+ * to at all), which would otherwise soft-lock the same way.
+ */
+export function hasValidRelicTarget(state: BuildState, relicId: string): boolean {
+  return state.board.some((u) => !u.relicIds.includes(relicId));
+}
+
 export function buyRelic(state: BuildState, slotIndex: number, targetIndex?: number): ActionResult {
   const slot = state.shop.slots[slotIndex];
   if (!slot || slot.kind !== 'relic') return fail('no relic there');

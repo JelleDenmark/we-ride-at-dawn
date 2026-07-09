@@ -19,6 +19,7 @@
     buyUnit,
     canRecruit,
     buyRelic,
+    hasValidRelicTarget,
     sellUnit,
     sellBenchUnit,
     sellRefund,
@@ -604,6 +605,17 @@
     inspect = { area: 'board', index: boardIndex };
   }
 
+  // General escape hatch for armed relic/swap selection ("pick a rat to
+  // carry it" / "pick a rat to swap out"). Covers any dead-end this class of
+  // two-step interaction could hit — not just the all-rats-already-carry-it
+  // case guarded upfront in pinRelicFromCard — e.g. arming a unit relic with
+  // zero rats on the board, or simply changing your mind mid-pick.
+  function cancelPending() {
+    pendingRelic = null;
+    pendingSwap = null;
+    notice = '';
+  }
+
   function clickBenchUnit(benchIndex: number) {
     // Relics are pinned to fighters, not bench rats — a bench tap while
     // arming a relic just does nothing (the board stays the valid target).
@@ -635,6 +647,13 @@
     if (slot.kind !== 'relic') return;
     if (RELIC_DEFS[slot.relicId].scope === 'team') {
       if (applyAndAutoReroll(buyRelic(build, i))) inspect = null;
+    } else if (!hasValidRelicTarget(build, slot.relicId)) {
+      // Every board rat already carries it (or the board is empty) — arming
+      // "pick a rat to carry it" here would soft-lock, since every possible
+      // tap would fail buyRelic's per-rat check with nothing to clear
+      // pendingRelic. The card's disabled state should already prevent this
+      // click, but guard here too in case it's ever called another way.
+      notice = 'every rat already carries this';
     } else {
       // Unit relics need a target: close the card, arm the pick-a-rat mode.
       // Only one armed-selection mode at a time — arming this one clears
@@ -787,7 +806,12 @@
   <div class="build">
     <div class="status-row">
       <span class="scrap">⚙ {build.scrap} scrap</span>
-      {#if notice}<span class="notice">{notice}</span>{/if}
+      <span class="status-notice">
+        {#if notice}<span class="notice">{notice}</span>{/if}
+        {#if pendingRelic !== null || pendingSwap !== null}
+          <button class="cancel-pending" onclick={cancelPending}>cancel</button>
+        {/if}
+      </span>
     </div>
 
     <div class="horde-panel">
@@ -1088,6 +1112,7 @@
             {@const relic = RELIC_DEFS[slot.relicId]}
             {@const afford = build.scrap >= relic.cost}
             {@const owned = relic.scope === 'team' && build.teamRelicIds.includes(relic.id)}
+            {@const noTarget = relic.scope === 'unit' && !hasValidRelicTarget(build, relic.id)}
             <div class="card-head">
               <div class="card-relic-icon">✦</div>
               <div>
@@ -1098,12 +1123,13 @@
             <p class="card-ability">{relic.desc}.</p>
             <p class="card-hint">one of each per {relic.scope === 'team' ? 'horde' : 'rat'} — no stacking duplicates</p>
             <div class="card-actions">
-              <button class="primary" disabled={!afford || owned} onclick={() => pinRelicFromCard(ins.index)}>
+              <button class="primary" disabled={!afford || owned || noTarget} onclick={() => pinRelicFromCard(ins.index)}>
                 {relic.scope === 'team' ? 'Add' : 'Pin'} · ⚙ {relic.cost}
               </button>
               <button onclick={() => (inspect = null)}>close</button>
             </div>
             {#if owned}<div class="card-warn">the horde already carries one</div>
+            {:else if noTarget}<div class="card-warn">every rat already carries this</div>
             {:else if !afford}<div class="card-warn">not enough scrap</div>{/if}
           {/if}
         {:else if ins.area === 'board'}
@@ -1445,9 +1471,24 @@
     color: #d4af37;
   }
 
+  .status-notice {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+
   .notice {
     font-size: 13px;
     color: #d8452e;
+  }
+
+  .cancel-pending {
+    font-size: 12px;
+    padding: 2px 8px;
+    border: 1px solid #6b4a2a;
+    border-radius: 6px;
+    background: transparent;
+    color: #d4af37;
   }
 
   .row-label {
