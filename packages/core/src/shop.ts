@@ -225,6 +225,17 @@ const fail = (reason: string): ActionResult => ({ ok: false, reason });
  * on the bench. When the bench is empty this is byte-identical to the old
  * board-only combine.
  */
+/**
+ * Refund for a single relic lost outside of a direct sale (a merge-dedup
+ * discard, or a relic pinned to a unit that's sold): half its cost, rounded
+ * down, floored at 1 — matching the unit sell rate so neither path lets a
+ * player launder power for free.
+ */
+function relicRefund(relicId: string): number {
+  const cost = RELIC_DEFS[relicId]?.cost;
+  return cost === undefined ? 0 : Math.max(1, Math.floor(cost / 2));
+}
+
 function combineAll(state: BuildState): void {
   for (;;) {
     // Tag each unit with its pool so the earliest match (board scanned
@@ -254,8 +265,7 @@ function combineAll(state: BuildState): void {
       for (const id of allRelics) counts.set(id, (counts.get(id) ?? 0) + 1);
       let refund = 0;
       for (const [id, count] of counts) {
-        const cost = RELIC_DEFS[id]?.cost;
-        if (count > 1 && cost !== undefined) refund += (count - 1) * Math.max(1, Math.floor(cost / 2));
+        if (count > 1) refund += (count - 1) * relicRefund(id);
       }
       state.scrap += refund;
       first.u.relicIds = [...new Set(allRelics)];
@@ -362,6 +372,9 @@ export function sellUnit(state: BuildState, boardIndex: number): ActionResult {
   const s = clone(state);
   s.board.splice(boardIndex, 1);
   s.scrap += sellRefund(unit);
+  // Any relics pinned to the sold unit would otherwise vanish for free —
+  // refund each at the same half-cost rate as the merge-dedup discard path.
+  for (const relicId of unit.relicIds) s.scrap += relicRefund(relicId);
   return { ok: true, state: s };
 }
 
@@ -371,6 +384,7 @@ export function sellBenchUnit(state: BuildState, benchIndex: number): ActionResu
   const s = clone(state);
   s.bench.splice(benchIndex, 1);
   s.scrap += sellRefund(unit);
+  for (const relicId of unit.relicIds) s.scrap += relicRefund(relicId);
   return { ok: true, state: s };
 }
 

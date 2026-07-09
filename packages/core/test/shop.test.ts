@@ -138,6 +138,60 @@ describe('shop basics', () => {
     expect(afterRunt.scrap).toBe(DAILY_SCRAP + 2);
   });
 
+  it('selling a unit with no relics only refunds the unit (unchanged behavior)', () => {
+    const s = {
+      ...newBuild('2026-07-03'),
+      scrap: 20,
+      board: [{ defId: 'dire-rat', tier: 1, relicIds: [] }],
+    };
+    const after = must(sellUnit(s, 0)).state;
+    const direRatRefund = Math.max(1, Math.floor(UNIT_DEFS['dire-rat'].cost / 2));
+    expect(after.scrap).toBe(20 + direRatRefund);
+  });
+
+  it('selling a unit refunds a single pinned relic at half cost, on top of sellRefund', () => {
+    const nailCost = RELIC_DEFS['rusted-nail'].cost;
+    const s = {
+      ...newBuild('2026-07-03'),
+      scrap: 20,
+      board: [{ defId: 'dire-rat', tier: 1, relicIds: ['rusted-nail'] }],
+    };
+    const after = must(sellUnit(s, 0)).state;
+    const direRatRefund = Math.max(1, Math.floor(UNIT_DEFS['dire-rat'].cost / 2));
+    const nailRefund = Math.max(1, Math.floor(nailCost / 2));
+    expect(after.board).toHaveLength(0);
+    expect(after.scrap).toBe(20 + direRatRefund + nailRefund);
+  });
+
+  it('selling a unit carrying multiple relics refunds each of them at half cost', () => {
+    const nailCost = RELIC_DEFS['rusted-nail'].cost;
+    const charmCost = RELIC_DEFS['tail-charm'].cost;
+    const s = {
+      ...newBuild('2026-07-03'),
+      scrap: 20,
+      board: [{ defId: 'dire-rat', tier: 1, relicIds: ['rusted-nail', 'tail-charm'] }],
+    };
+    const after = must(sellUnit(s, 0)).state;
+    const direRatRefund = Math.max(1, Math.floor(UNIT_DEFS['dire-rat'].cost / 2));
+    const nailRefund = Math.max(1, Math.floor(nailCost / 2));
+    const charmRefund = Math.max(1, Math.floor(charmCost / 2));
+    expect(after.scrap).toBe(20 + direRatRefund + nailRefund + charmRefund);
+  });
+
+  it('selling a bench unit also refunds its pinned relics', () => {
+    const nailCost = RELIC_DEFS['rusted-nail'].cost;
+    const s = {
+      ...newBuild('2026-07-03'),
+      scrap: 20,
+      bench: [{ defId: 'dire-rat', tier: 1, relicIds: ['rusted-nail'] }],
+    };
+    const after = must(sellBenchUnit(s, 0)).state;
+    const direRatRefund = Math.max(1, Math.floor(UNIT_DEFS['dire-rat'].cost / 2));
+    const nailRefund = Math.max(1, Math.floor(nailCost / 2));
+    expect(after.bench).toHaveLength(0);
+    expect(after.scrap).toBe(20 + direRatRefund + nailRefund);
+  });
+
   it('reroll costs scrap and keeps frozen slots', () => {
     const s = newBuild('2026-07-03');
     const i = unitSlot(s);
