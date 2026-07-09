@@ -1,5 +1,5 @@
 import type { Side, UnitDef, Ability, Lineup } from './data/units';
-import { UNIT_DEFS } from './data/units';
+import { UNIT_DEFS, tierAttackMultiplier, tierHealthMultiplier } from './data/units';
 import { ENEMY_POOL } from './data/enemies';
 import { RELIC_DEFS, type RelicDef } from './data/relics';
 import type { Gauntlet } from './gauntlet';
@@ -152,9 +152,11 @@ export function simulate(
       .map((id) => RELIC_DEFS[id])
       .filter((r): r is RelicDef => r !== undefined && r.scope === 'unit');
     let attack =
-      Math.round(def.attack * tier * attackScale) + relics.reduce((s, r) => s + (r.attack ?? 0), 0);
+      Math.round(def.attack * tierAttackMultiplier(tier) * attackScale) +
+      relics.reduce((s, r) => s + (r.attack ?? 0), 0);
     let health =
-      Math.round(def.health * tier * healthScale) + relics.reduce((s, r) => s + (r.health ?? 0), 0);
+      Math.round(def.health * tierHealthMultiplier(tier) * healthScale) +
+      relics.reduce((s, r) => s + (r.health ?? 0), 0);
     if (side === 'horde') {
       attack += teamAttack;
       health += teamHealth;

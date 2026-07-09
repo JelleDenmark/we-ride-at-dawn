@@ -1087,13 +1087,15 @@
             {@const afford = build.scrap >= def.cost}
             {@const recruitable = canRecruit(build, ins.index)}
             {@const copies = build.board.filter((u) => u.defId === def.id && u.tier === 1).length}
+            {@const t2 = unitStats({ defId: def.id, tier: 2, relicIds: [] })}
+            {@const t3 = unitStats({ defId: def.id, tier: 3, relicIds: [] })}
             <div class="card-head">
               {#if ART_URL[def.id]}<img class="card-portrait" src={ART_URL[def.id]} alt="" />{/if}
               <div>
                 <div class="card-name">{def.name}</div>
                 <div class="card-stats">
                   {def.attack}/{def.health}
-                  <span class="card-tier">★2 {def.attack * 2}/{def.health * 2} · ★3 {def.attack * 3}/{def.health * 3}</span>
+                  <span class="card-tier">★2 {t2.attack}/{t2.health} · ★3 {t3.attack}/{t3.health}</span>
                 </div>
               </div>
             </div>
