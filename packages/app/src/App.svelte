@@ -40,6 +40,7 @@
     type BattleResult,
     type BuildState,
     type TimeOfDay,
+    type UnitDef,
   } from '@wrad/core';
   import { ReplayPlayer } from './replay/ReplayPlayer';
   import { CHANNEL } from './env';
@@ -298,13 +299,19 @@
         what = `gains +${e.attack}/+${e.health}`;
         break;
       case 'revive':
-        what = `revives your first fallen rat at ${e.health} health`;
+        // HP comes from a per-tier table (reviveHpForTier), not a field on
+        // the effect itself — no single number to show here, "scales with
+        // tier" (appended below) is the accurate disclaimer.
+        what = `revives your first fallen rat`;
         break;
       case 'buffAdjacent':
         what = `grants +${e.attack}/+${e.health} to the rat(s) beside it`;
         break;
       case 'teamBuff':
         what = `grants +${e.attack}/+${e.health} to the whole horde`;
+        break;
+      case 'poisonAllEnemies':
+        what = `poisons every enemy in the wave`;
         break;
     }
     const when = def.ability.condition
@@ -315,6 +322,42 @@
 
   function isSummoner(defId: string): boolean {
     return UNIT_DEFS[defId]?.ability?.effect.kind === 'summon';
+  }
+
+  // Compact tile tag (issue: mobile shop overflow) — the tile shows only a
+  // symbol + 1-2 word keyword; the full sentence lives in the inspect sheet
+  // (abilitySentence, above) which already exists as the tap-to-detail
+  // destination, so the tile no longer needs to repeat it. Symbol register
+  // matches the game's existing restrained-glyph vocabulary (⚙ ❄ ✦ ★), not
+  // illustrated icons or emoji.
+  const TIME_OF_DAY_ICON: Record<string, string> = { beforeNoon: '☀', afterNoon: '☾' };
+
+  function keywordTag(def: UnitDef): string | null {
+    const ability = def.ability;
+    if (ability) {
+      switch (ability.effect.kind) {
+        case 'summon':
+          return '❋ summon';
+        case 'buffBehind':
+        case 'buffAdjacent':
+        case 'gainStats':
+          return '▲ buff';
+        case 'teamBuff': {
+          const icon = ability.condition ? (TIME_OF_DAY_ICON[ability.condition.timeOfDay] ?? '▲') : '▲';
+          return `${icon} buff`;
+        }
+        case 'poisonFrontEnemy':
+        case 'poisonTarget':
+        case 'poisonAllEnemies':
+          return '☠ poison';
+        case 'revive':
+          return '✚ revive';
+        case 'blockFrontHits':
+          return '⛨ block';
+      }
+    }
+    if ((def.damageReduction ?? 0) > 0) return '⛨ armor';
+    return null;
   }
 
   let stageEl: HTMLDivElement;
@@ -901,7 +944,7 @@
             {#if unit.relicIds.length > 0}
               ✦ {unit.relicIds.map((r) => RELIC_DEFS[r].name).join(', ')}
             {:else}
-              {UNIT_DEFS[unit.defId].desc ?? ''}
+              {keywordTag(UNIT_DEFS[unit.defId]) ?? ''}
             {/if}
           </span>
         </button>
@@ -951,7 +994,7 @@
             {#if unit.relicIds.length > 0}
               ✦ {unit.relicIds.map((r) => RELIC_DEFS[r].name).join(', ')}
             {:else}
-              {UNIT_DEFS[unit.defId].desc ?? ''}
+              {keywordTag(UNIT_DEFS[unit.defId]) ?? ''}
             {/if}
           </span>
         </button>
@@ -981,7 +1024,7 @@
             {/if}
             <span class="tile-name">{def.name}</span>
             <span class="tile-stats">{def.attack}/{def.health}</span>
-            <span class="tile-sub">{def.desc ?? ''}</span>
+            <span class="tile-sub">{keywordTag(def) ?? ''}</span>
             <span class="tile-cost">⚙ {def.cost}</span>
             <span
               class="freeze"
@@ -1572,6 +1615,13 @@
 
   .tile {
     position: relative;
+    /* Grid items default to min-width: auto, which refuses to shrink below
+       the widest unbreakable content (a long name, a cost string) — with a
+       fixed-column grid parent that forces the whole row wider than the
+       viewport instead of wrapping. min-width: 0 lets the track actually
+       shrink to the column's share of available space; overflow-wrap below
+       then wraps any long word within it instead of overflowing sideways. */
+    min-width: 0;
     min-height: 86px;
     padding: 7px 4px;
     display: flex;
@@ -1606,6 +1656,7 @@
   .tile-name {
     font-size: 11.5px;
     line-height: 1.15;
+    overflow-wrap: break-word;
   }
 
   .tile-stats {
