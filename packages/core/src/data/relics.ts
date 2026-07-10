@@ -18,14 +18,18 @@ export interface RelicDef {
    * line, once, no chaining (Gore-Cleaver). */
   cleaveOverkill?: boolean;
   /**
-   * Pure execute (Marrow-Snap): if a clash leaves the foe at or below this
-   * fraction of the FOE's own max health, it dies outright instead of
-   * surviving on a sliver. Compounding-law note: this is stateless and
-   * foe-relative — no stat, health, or attack is ever added to the bearer,
-   * so there is nothing here that can accumulate across the 45-wave battle.
-   * Each wave's enemies are freshly instantiated (see `simulate`'s per-wave
-   * loop), so the "free" HP this saves resets every wave along with them;
-   * it only ever changes the outcome of the single clash it fires on.
+   * Pure execute (Marrow-Snap): if the bearer's clash hit drives the foe
+   * from ABOVE this fraction of the FOE's own max health to at or below it,
+   * the foe dies outright instead of surviving on a sliver. CROSSING
+   * semantics (season-launch change, Jesper 2026-07-11): the executing blow
+   * itself must do the threshold-crossing work — a foe already under the
+   * line (poison chip, earlier clashes) cannot be tap-executed, so
+   * Blight-Witch's wave-start AoE poison no longer sets up free executes
+   * (it steals the crossing instead of enabling it). Compounding-law note:
+   * stateless and foe-relative — no stat, health, or attack is ever added
+   * to the bearer, so nothing here can accumulate across the 45-wave
+   * battle. Each wave's enemies are freshly instantiated, so the "free" HP
+   * this saves resets every wave along with them.
    */
   executeThreshold?: number;
 }
@@ -61,7 +65,7 @@ export const RELIC_DEFS: Record<string, RelicDef> = {
   },
   'marrow-snap': {
     id: 'marrow-snap', name: 'Marrow-Snap', scope: 'unit', cost: 5,
-    desc: 'executes foes at ≤65% hp', executeThreshold: 0.65,
+    desc: 'snaps foes its blow drops to half', executeThreshold: 0.5,
   },
   // Easter egg (issue #24): the name is the whole point — someone else's
   // gear, left behind on an earlier ride, still has a little use left in it.

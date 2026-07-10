@@ -552,6 +552,9 @@ export function simulate(
       // currently front on that side, draining by 1 per hit that would
       // otherwise land, until the wave's pool (set at `startOfWave`, sized
       // by `Math.max` across that side's Ward-Weavers) is exhausted.
+      // Captured for Marrow-Snap's crossing check below: the execute must
+      // compare against the foe's health as it stood BEFORE this clash hit.
+      const foeHealthBeforeClash = foe.health;
       if (blockCharges[foe.side] > 0) {
         blockCharges[foe.side]--;
         events.push({ type: 'shieldAbsorbed', targetId: foe.instanceId });
@@ -566,17 +569,26 @@ export function simulate(
       }
       damageThisWave += damageOut;
 
-      // Marrow-Snap: a foe left at or below executeThreshold of its OWN max
-      // health (not the bearer's) dies outright instead of surviving on a
-      // sliver. Pure execute, no stat gain anywhere — see the compounding-
-      // law doc comment on `executeThreshold` in data/relics.ts for why this
-      // is safe to fire every tick, every wave, for 45 waves straight: it's
-      // foe-relative and stateless, so nothing here can accumulate on the
-      // horde. Only fires if the foe actually survived this clash (a kill
-      // is a kill, not an execute) and skips a foe a surviveLethal relic
-      // just rescued to 1 health.
+      // Marrow-Snap: if THIS clash hit drove the foe from above the execute
+      // line to at or below it (executeThreshold of the foe's OWN max
+      // health), the foe dies outright instead of surviving on a sliver.
+      // CROSSING semantics, not a stateless health check (changed for the
+      // season launch, Jesper 2026-07-11): the old "any foe currently at or
+      // below the line dies to the next clash" let Blight-Witch's wave-start
+      // AoE poison pre-soften the whole wave under the line, turning every
+      // front tap into a kill — with a Marrow-Snap rotating on the front
+      // rat, enemies effectively fought with a third of their health bar.
+      // Now the executing blow itself must do the threshold-crossing work;
+      // a foe already under the line (poison chip, earlier clashes) can NOT
+      // be tap-executed — poison steals the crossing rather than enabling
+      // it. Still pure execute, no stat gain anywhere, foe-relative, so the
+      // compounding law holds exactly as before (see `executeThreshold` in
+      // data/relics.ts). Only fires if the foe actually survived this clash
+      // (a kill is a kill, not an execute) and skips a foe a surviveLethal
+      // relic just rescued to 1 health.
       const executeRelic = front.relics.find((r) => r.executeThreshold !== undefined);
-      if (executeRelic && foe.health > 0 && foe.health <= foe.maxHealth * executeRelic.executeThreshold!) {
+      const executeCutoff = executeRelic ? foe.maxHealth * executeRelic.executeThreshold! : 0;
+      if (executeRelic && foe.health > 0 && foeHealthBeforeClash > executeCutoff && foe.health <= executeCutoff) {
         events.push({ type: 'relicProc', targetId: front.instanceId, relicId: executeRelic.id, name: executeRelic.name });
         // Finish the foe directly rather than routing through applyDamage:
         // this is a kill-condition check, not a fresh attack, so it must not

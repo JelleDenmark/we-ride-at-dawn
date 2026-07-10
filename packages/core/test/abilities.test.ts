@@ -232,8 +232,9 @@ describe('relics', () => {
   });
 
   it('Marrow-Snap executes a foe left at or below the threshold instead of a sliver', () => {
-    // Dire-Rat deals 4; foe has 5 max health, so the hit leaves it at 1
-    // (1/5 = 20%, at/below the 30% threshold) — Marrow-Snap finishes it off.
+    // Dire-Rat deals 4; foe has 5 max health, so the hit drives it from 5
+    // (above the 50%-of-max line, 2.5) down to 1 (below it) — a clean
+    // threshold crossing, so Marrow-Snap finishes it off.
     const { events } = simulate(
       lineup({ defId: 'dire-rat', relicIds: ['marrow-snap'] }),
       gauntletOf([dummy(0, 5)])
@@ -267,6 +268,35 @@ describe('relics', () => {
     );
     expect(ofType(events, 'relicProc').some((p) => p.relicId === 'marrow-snap')).toBe(false);
     expect(ofType(events, 'death').length).toBe(1);
+  });
+
+  it('Marrow-Snap requires the crossing blow: poison-softened foes cannot be tap-executed', () => {
+    // Crossing semantics (season-launch change): the executing hit itself
+    // must drive the foe from above the 50% line to at/below it. Here a
+    // 1-attack Gutter-Runt taps a 20-max-health foe while Plague-Bearer's
+    // poison chips 1/tick behind the clash. Tick order is clash -> poison,
+    // so the tick-by-tick health walk is 20|19|18, 18|17|16, ... and it is
+    // the POISON tick that carries the foe across the 10.0 line (11 -> 10),
+    // never the clash — so Marrow-Snap must never proc, and the foe dies
+    // the slow way. This is the Blight-Witch-AoE-sets-up-free-executes
+    // exploit shape, minimized.
+    const { events } = simulate(
+      lineup({ defId: 'gutter-runt', relicIds: ['marrow-snap'] }, { defId: 'plague-bearer' }),
+      gauntletOf([dummy(0, 20)])
+    );
+    expect(ofType(events, 'relicProc').some((p) => p.relicId === 'marrow-snap')).toBe(false);
+    expect(ofType(events, 'death').length).toBe(1);
+  });
+
+  it('Marrow-Snap still fires when the clash itself does the crossing (no poison interference)', () => {
+    // Same tap-fighter, no poison: the runt chips 20 -> 19 -> ... -> 11,
+    // and the clash that takes 11 -> 10 crosses the 50% line itself, so the
+    // execute fires and spares the last 10 ticks of chipping.
+    const { events } = simulate(
+      lineup({ defId: 'gutter-runt', relicIds: ['marrow-snap'] }),
+      gauntletOf([dummy(0, 20)])
+    );
+    expect(ofType(events, 'relicProc').filter((p) => p.relicId === 'marrow-snap').length).toBe(1);
   });
 
   it('Marrow-Snap zeroes overkill so it does not also feed a stacked Gore-Cleaver', () => {
