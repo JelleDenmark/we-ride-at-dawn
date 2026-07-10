@@ -106,3 +106,42 @@ describe('compounding-law: revive is bounded, never an infinite ring', () => {
     }
   );
 });
+
+describe('compounding-law: allyFaint stat-farming stays capped by the combat headroom (canary)', () => {
+  // The 2026-07-11 pre-launch exploit hunt found the one combo in the
+  // current roster with the classic incident shape — a PERMANENT stat gain
+  // (`gainStats`) on a trigger that repeats every wave (`allyFaint`, fed by
+  // Rat-Piper's per-wave pup summons / Brood-Mother's faint-births). Its
+  // growth is unbounded in principle (a probe with an artificial
+  // combatCap=40 full-cleared 45/45 at ~150 attack); in real play it is
+  // held back ONLY by the summon headroom (`COMBAT_CAP_BONUS = 2`) capping
+  // how much chaff can exist per wave — the best real board reached 39/45.
+  //
+  // This canary pins that ceiling: it plays the strongest real-rules combo
+  // board and asserts it cannot clear the gauntlet. If a future change to
+  // COMBAT_CAP_BONUS, board slots, summon counts, or gainStats magnitude
+  // silently unlocks the combo, this fails loudly instead of shipping the
+  // third compounding incident. (Deliberately a canary, not a "fires once"
+  // check — repeating on allyFaint is Corpse-Glutton's intended identity;
+  // what must stay true is that the loop stays *bounded*.)
+  it('a maxed feeder + Corpse-Glutton board cannot full-clear a 45-wave grind', () => {
+    const feeders = Object.values(UNIT_DEFS).filter((u) => u.ability?.effect.kind === 'summon');
+    const farmers = Object.values(UNIT_DEFS).filter(
+      (u) => u.ability?.trigger === 'allyFaint' && u.ability.effect.kind === 'gainStats'
+    );
+    expect(feeders.length).toBeGreaterThan(0);
+    expect(farmers.length).toBeGreaterThan(0);
+    const units: Lineup['units'] = [
+      { defId: 'dire-rat', tier: 3 },
+      { defId: 'dire-rat', tier: 3 },
+      ...feeders.slice(0, 3).map((u) => ({ defId: u.id, tier: 3 })),
+      ...Array.from({ length: 3 }, () => ({ defId: farmers[0].id, tier: 3 })),
+    ].slice(0, 8);
+    const { result } = simulate(
+      // Full purchasable board (8) with the real summon headroom (+2).
+      { units, combatCap: units.length + 2 },
+      grinder(45)
+    );
+    expect(result.wavesCleared).toBeLessThan(45);
+  });
+});
