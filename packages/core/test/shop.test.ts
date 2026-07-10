@@ -665,7 +665,7 @@ describe('tiers in battle', () => {
     waves: [{ units: [{ id: 'd', name: 'D', attack: 1, health: 50, cost: 0 }] }],
   };
 
-  it('tier multiplies attack and health by 3^(tier-1) (issue #22), and scales ability magnitude by tier', () => {
+  it('tier multiplies attack and health by 3^(tier-1) (issue #22), and scales ability magnitude the same way (issue #58)', () => {
     const { events } = simulate(
       { units: [{ defId: 'gnawer', tier: 2 }, { defId: 'gutter-runt' }] },
       gauntlet
@@ -675,10 +675,12 @@ describe('tiers in battle', () => {
     expect(start.type === 'battleStart' && start.horde[0].attack).toBe(9);
     expect(start.type === 'battleStart' && start.horde[0].health).toBe(3);
     expect(start.type === 'battleStart' && start.horde[0].tier).toBe(2);
-    // Ability magnitude scaling is unchanged (still linear in tier, not the
-    // new attack/health curve) — see the compounding-law note on tierAttackMultiplier.
+    // Ability magnitude now scales via tierAttackMultiplier too (issue #58),
+    // not a flat `* tier` — Gnawer's buffBehind fires once per instance
+    // (`faint`), so the steeper curve can't compound across the 45-wave
+    // battle. base attack 2 * tierAttackMultiplier(2)=3 => 6.
     const buffEvent = events.find((e) => e.type === 'buff')!;
-    expect(buffEvent.type === 'buff' && buffEvent.attack).toBe(4);
+    expect(buffEvent.type === 'buff' && buffEvent.attack).toBe(6);
   });
 
   it('unitStats (shop preview) matches the sim: attack and health both x3^(tier-1)', () => {

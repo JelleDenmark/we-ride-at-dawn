@@ -59,6 +59,18 @@ export function blockHitsForTier(tier: number): number {
 
 export type Effect =
   | { kind: 'summon'; unitId: string; count: number }
+  /**
+   * Buffs the rat(s) behind the source (or `all` of them) by
+   * `attack`/`health`, scaled by `tierAttackMultiplier`/`tierHealthMultiplier`
+   * (issue #58) rather than a flat `* tier` — Gnawer wires this to `faint`,
+   * Warren-Warden and MD Rattyfock wire it to `startOfBattle`; both trigger
+   * kinds fire exactly once per unit instance, ever, so the steeper
+   * `3^(tier-1)` curve can't accumulate across the 45-wave battle the way a
+   * per-wave-recurring effect could (see the compounding-law note above the
+   * `Ability` interface). A flat `* tier` left tiering these units up nearly
+   * pointless since the payout only ever lands once — same rationale as
+   * `reviveHpForTier`.
+   */
   | { kind: 'buffBehind'; attack: number; health: number; all?: boolean }
   /**
    * Buffs BOTH board neighbors (index-1 and index+1), whichever exist. At
@@ -67,7 +79,9 @@ export type Effect =
    * effect in the game where being in the middle is strictly better than
    * an edge. See `buffAdjacent`'s application in sim.ts for the
    * compounding-law note (it's `startOfBattle`-gated, same shape as
-   * `buffBehind` on Warren-Warden).
+   * `buffBehind` on Warren-Warden). Magnitude scales via
+   * `tierAttackMultiplier`/`tierHealthMultiplier` (issue #58), same
+   * fire-once reasoning as `buffBehind`.
    */
   | { kind: 'buffAdjacent'; attack: number; health: number }
   | { kind: 'poisonFrontEnemy'; stacks: number }
@@ -90,14 +104,16 @@ export type Effect =
    */
   | { kind: 'blockFrontHits' }
   /**
-   * Flat, whole-team stat grant (issue #12: Dawn-Runt/Dusk-Runt) — every
-   * horde unit currently on the board gets `+attack`/`+health`, including the
-   * caster itself (unlike `buffBehind`, which deliberately excludes the
-   * caster — see Warren-Warden). Only ever wired to a `startOfBattle`
-   * trigger, so it fires once per unit instance, ever, exactly like
-   * Warren-Warden's `buffBehind`, and cannot compound across the 45-wave
-   * battle. See the `condition` field on `Ability` for how this pairs with a
-   * time-of-day gate.
+   * Whole-team stat grant (issue #12: Dawn-Runt/Dusk-Runt) — every horde unit
+   * currently on the board gets `+attack`/`+health`, including the caster
+   * itself (unlike `buffBehind`, which deliberately excludes the caster —
+   * see Warren-Warden). Only ever wired to a `startOfBattle` trigger, so it
+   * fires once per unit instance, ever, exactly like Warren-Warden's
+   * `buffBehind`, and cannot compound across the 45-wave battle. Magnitude
+   * scales via `tierAttackMultiplier`/`tierHealthMultiplier` (issue #58)
+   * instead of a flat `* tier`, same fire-once reasoning as `buffBehind`/
+   * `buffAdjacent` above. See the `condition` field on `Ability` for how
+   * this pairs with a time-of-day gate.
    */
   | { kind: 'teamBuff'; attack: number; health: number };
 
@@ -230,7 +246,7 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   },
   gnawer: {
     id: 'gnawer', name: 'Gnawer', attack: 3, health: 1, cost: 4,
-    desc: 'faint: +2 atk to rat behind',
+    desc: 'faint: buffs the rat behind — +2 atk at ★1, +6 at ★2, +18 at ★3',
     ability: { trigger: 'faint', effect: { kind: 'buffBehind', attack: 2, health: 0 } },
   },
   'corpse-glutton': {
@@ -245,7 +261,7 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   },
   'warren-warden': {
     id: 'warren-warden', name: 'Warren-Warden', attack: 2, health: 6, cost: 6,
-    desc: 'battle: +1/+1 to all behind',
+    desc: 'battle: buffs all rats behind it — +1/+1 at ★1, +3/+3 at ★2, +9/+9 at ★3',
     ability: { trigger: 'startOfBattle', effect: { kind: 'buffBehind', attack: 1, health: 1, all: true } },
   },
   'dire-rat': {
@@ -255,12 +271,12 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   },
   'md-rattyfock': {
     id: 'md-rattyfock', name: 'MD Rattyfock', attack: 2, health: 6, cost: 6,
-    desc: 'battle: Season 1 survivor, patched and returned; +1/+1 to all behind',
+    desc: 'battle: Season 1 survivor, patched and returned; buffs all rats behind it — +1/+1 at ★1, +3/+3 at ★2, +9/+9 at ★3',
     ability: { trigger: 'startOfBattle', effect: { kind: 'buffBehind', attack: 1, health: 1, all: true } },
   },
   'press-kin': {
     id: 'press-kin', name: 'Press-Kin', attack: 2, health: 4, cost: 5,
-    desc: 'battle: +2/+2 to the rats beside it (both sides — best in the middle)',
+    desc: 'battle: buffs the rats beside it (both sides — best in the middle) — +2/+2 at ★1, +6/+6 at ★2, +18/+18 at ★3',
     ability: { trigger: 'startOfBattle', effect: { kind: 'buffAdjacent', attack: 2, health: 2 } },
   },
   'ward-weaver': {
@@ -276,7 +292,7 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   // (date, day) with no new per-account state.
   'dawn-runt': {
     id: 'dawn-runt', name: 'Dawn-Runt', attack: 1, health: 2, cost: 4,
-    desc: 'thrives in the grey light before the city wakes; battle (before noon): +2 attack to the horde',
+    desc: 'thrives in the grey light before the city wakes; battle (before noon): buffs the horde’s attack — +2 at ★1, +6 at ★2, +18 at ★3',
     ability: {
       trigger: 'startOfBattle',
       effect: { kind: 'teamBuff', attack: 2, health: 0 },
@@ -286,7 +302,7 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   },
   'dusk-runt': {
     id: 'dusk-runt', name: 'Dusk-Runt', attack: 1, health: 2, cost: 4,
-    desc: 'comes alive as the drains go black again, ahead of the next dawn’s ride; battle (after noon): +2 health to the horde',
+    desc: 'comes alive as the drains go black again, ahead of the next dawn’s ride; battle (after noon): buffs the horde’s health — +2 at ★1, +6 at ★2, +18 at ★3',
     ability: {
       trigger: 'startOfBattle',
       effect: { kind: 'teamBuff', attack: 0, health: 2 },
