@@ -57,6 +57,35 @@ export function blockHitsForTier(tier: number): number {
   return table[tier - 1] ?? table[table.length - 1];
 }
 
+/**
+ * Poison stacks applied by Plague-Bearer's `poisonFrontEnemy` (`startOfWave`)
+ * and Blight-Witch's `poisonAllEnemies` (`startOfWave`), by tier (issue #62,
+ * folding in #59's table). Same shape as `reviveHpForTier`/`blockHitsForTier`
+ * — a small explicit table, not a multiplier of a base value.
+ *
+ * Safe under the compounding law for the same reason as `blockHitsForTier`:
+ * poison stacks reset every wave (`waveClear`), so unlike `gainStats` or any
+ * other permanently-accumulating effect on a per-wave trigger, a steep
+ * per-tier jump here cannot snowball across the 45-wave battle — each wave
+ * starts the count fresh.
+ *
+ * Deliberately `[1, 3, 5]`, NOT `tierAttackMultiplier`'s full `3^(tier-1)`
+ * curve (which would give 1/3/9). A full exponential jump would make poison
+ * a dominant, matchup-agnostic answer regardless of enemy archetype —
+ * flat, depth-independent damage that ignores armor and doesn't need to
+ * out-scale enemy health the way attack does. That risk is exactly the
+ * still-open question flagged in `scripts/depth-scaling.ts` report section
+ * "4) Poison-leaning vs attack-leaning roster": poison's flat/depth-independent
+ * nature was left as a report-only, not-yet-resolved finding, not something
+ * to resolve by picking a magnitude here. `[1, 3, 5]` is a moderate,
+ * hand-tuned middle ground between the old flat `stacks * tier` (1/2/3) and
+ * the full exponential curve.
+ */
+export function poisonStacksForTier(tier: number): number {
+  const table = [1, 3, 5];
+  return table[tier - 1] ?? table[table.length - 1];
+}
+
 export type Effect =
   | { kind: 'summon'; unitId: string; count: number }
   /**
@@ -86,6 +115,28 @@ export type Effect =
   | { kind: 'buffAdjacent'; attack: number; health: number }
   | { kind: 'poisonFrontEnemy'; stacks: number }
   | { kind: 'poisonTarget'; stacks: number }
+  /**
+   * Blight-Witch (issue #62). Poisons every living enemy currently on the
+   * board, not just the front one — the first effect in the game to hit the
+   * whole opposing wave at once. Stack count is NOT carried on the effect —
+   * it's looked up per-tier via `poisonStacksForTier` at apply time, same
+   * pattern as `revive`'s `reviveHpForTier` lookup. Always wired to
+   * `startOfWave` (never `afterAttack`): `afterAttack` only fires for
+   * whichever unit is currently front, which both wasted this effect on an
+   * enemy already dying from the clash and left a back-line Blight-Witch
+   * dead weight. `startOfWave` fires for every unit regardless of board
+   * slot and lands on the whole wave before it's been chipped by combat.
+   *
+   * Compounding-law note: enemies are re-instantiated every wave and
+   * poison never carries across waves (see `waveClear`'s antidote, and
+   * enemies simply not existing yet next wave), so this cannot accumulate
+   * across the 45-wave battle. Multiple Blight-Witches stack additively
+   * within a single wave — each one re-applies `poisonStacksForTier(tier)`
+   * to every living enemy — but that's bounded by fresh enemies next wave
+   * and the board cap on how many Blight-Witches can even be fielded, not
+   * a persistent-horde compounding vector like the shipped exploits.
+   */
+  | { kind: 'poisonAllEnemies' }
   | { kind: 'gainStats'; attack: number; health: number }
   /**
    * HP is NOT carried on the effect — it's looked up per-tier via
@@ -241,8 +292,8 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   },
   'blight-witch': {
     id: 'blight-witch', name: 'Blight-Witch', attack: 3, health: 3, cost: 6,
-    desc: 'poisons whatever it hits',
-    ability: { trigger: 'afterAttack', effect: { kind: 'poisonTarget', stacks: 1 } },
+    desc: 'each wave, rots the whole enemy wave with poison — ★2 applies 3 stacks to every foe, ★3 applies 5; from any board slot',
+    ability: { trigger: 'startOfWave', effect: { kind: 'poisonAllEnemies' } },
   },
   gnawer: {
     id: 'gnawer', name: 'Gnawer', attack: 3, health: 1, cost: 4,

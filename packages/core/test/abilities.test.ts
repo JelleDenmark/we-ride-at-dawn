@@ -32,13 +32,6 @@ describe('unit abilities', () => {
     expect(ofType(events, 'poisonTick').length).toBeGreaterThan(0);
   });
 
-  it('Blight-Witch stacks poison on the unit it hits', () => {
-    const { events } = simulate(lineup({ defId: 'blight-witch' }), gauntletOf([dummy(0, 12)]));
-    const applied = ofType(events, 'poisonApplied');
-    expect(applied.length).toBeGreaterThanOrEqual(2);
-    expect(applied[1].totalStacks).toBe(2);
-  });
-
   it('Gnawer gives the rat behind it +2 attack on faint', () => {
     const { events } = simulate(
       lineup({ defId: 'gnawer' }, { defId: 'gutter-runt' }),
@@ -485,10 +478,16 @@ describe('damage reduction (armor)', () => {
   const armored = (damageReduction: number): UnitDef => ({
     id: 'armored', name: 'Armored', attack: 1, health: 100, cost: 0, damageReduction,
   });
-  const poisoner = (stacks: number): UnitDef => ({
+  // `poisonFrontEnemy`'s magnitude now comes from `poisonStacksForTier`
+  // (issue #62), not the effect's own `stacks` field, so this test-only
+  // unit's `stacks` value is a placeholder — enemies are always tier 1
+  // (see `instantiate(d, 'gauntlet', ...)` in sim.ts), so the actual
+  // applied amount is `poisonStacksForTier(1)` = 1 regardless of what's
+  // passed here.
+  const poisoner: UnitDef = {
     id: 'poisoner', name: 'Poisoner', attack: 0, health: 100, cost: 0,
-    ability: { trigger: 'startOfBattle', effect: { kind: 'poisonFrontEnemy', stacks } },
-  });
+    ability: { trigger: 'startOfBattle', effect: { kind: 'poisonFrontEnemy', stacks: 1 } },
+  };
 
   it('subtracts armor from each incoming attack', () => {
     // Dire-Rat blunts 2 of every blow: a 3-attack foe lands 1.
@@ -519,10 +518,10 @@ describe('damage reduction (armor)', () => {
   });
 
   it('poison bypasses armor — the hide does not stop rot', () => {
-    const { events } = simulate(lineup({ defId: 'dire-rat' }), gauntletOf([poisoner(3)]));
+    const { events } = simulate(lineup({ defId: 'dire-rat' }), gauntletOf([poisoner]));
     const ticks = ofType(events, 'poisonTick').filter((e) => e.targetId === 1);
     expect(ticks.length).toBeGreaterThan(0);
-    expect(ticks.every((e) => e.amount === 3)).toBe(true);
+    expect(ticks.every((e) => e.amount === 1)).toBe(true);
   });
 });
 
