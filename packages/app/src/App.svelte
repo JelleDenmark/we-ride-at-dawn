@@ -711,9 +711,9 @@
     if (applyAndAutoReroll(buyUnit(build, i))) inspect = null;
   }
 
-  // Late-game scrap sink (issue #9): buy a board slot beyond the day's
-  // natural cap, up to the hard BOARD_CAP. Not gated behind the inspect
-  // card — it's a standing shop action, like reroll.
+  // The ONLY way to grow the board beyond BOARD_FLOOR, up to the hard
+  // BOARD_CAP (issue #9, steepened + made purchase-only by issue #70). Not
+  // gated behind the inspect card — it's a standing shop action, like reroll.
   function buySlot() {
     apply(buyBoardSlot(build));
   }

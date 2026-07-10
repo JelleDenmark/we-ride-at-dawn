@@ -17,6 +17,7 @@ import {
   lineupFromBuild,
   advanceAfterDawn,
   boardCapForDay,
+  BOARD_FLOOR,
   combatCapForBuild,
   effectiveBoardCap,
   buyBoardSlot,
@@ -569,34 +570,42 @@ describe('expedition', () => {
     expect(next.teamRelicIds).toEqual([]);
   });
 
-  it('board cap grows across the expedition and never exceeds the hard cap', () => {
+  it('board cap is a constant floor across the whole expedition — no more free day-based growth (issue #70)', () => {
     const caps = [1, 2, 3, 4, 5, 6, 7].map(boardCapForDay);
-    expect(caps).toEqual([5, 5, 6, 6, 7, 7, 8]);
-    expect(boardCapForDay(99)).toBe(8);
+    expect(caps).toEqual([5, 5, 5, 5, 5, 5, 5]);
+    expect(boardCapForDay(99)).toBe(5);
   });
 
-  it('lets the board grow past 5 on later days', () => {
+  it('does NOT let the board grow past the floor on later days without buying a slot (issue #70)', () => {
     const base = newBuild('2026-07-04', 6);
     const s = {
       ...base,
       scrap: 99,
-      // Six distinct rats (no three-of-a-kind, so no merge on the next buy).
+      // Five distinct rats already fill the floor (no three-of-a-kind, so no
+      // merge on the next buy) — a 6th rat has nowhere to go without a
+      // purchased slot, regardless of how late into the expedition this is.
       board: [
         { defId: 'dire-rat', tier: 1, relicIds: [] },
         { defId: 'gnawer', tier: 1, relicIds: [] },
         { defId: 'rat-piper', tier: 1, relicIds: [] },
         { defId: 'brood-mother', tier: 1, relicIds: [] },
         { defId: 'bone-priest', tier: 1, relicIds: [] },
-        { defId: 'plague-bearer', tier: 1, relicIds: [] },
       ],
+      bench: [],
       shop: {
         ...base.shop,
         slots: [{ kind: 'unit' as const, defId: 'warren-warden' }, ...base.shop.slots.slice(1)],
       },
     };
     const res = buyUnit(s, 0);
+    // Overflows to the bench instead of the board (bench has room) —
+    // buyUnit itself never rejects for board-only overflow, see the "bench"
+    // describe block below for the dedicated overflow tests.
     expect(res.ok).toBe(true);
-    if (res.ok) expect(res.state.board.length).toBe(7);
+    if (res.ok) {
+      expect(res.state.board.length).toBe(5);
+      expect(res.state.bench.length).toBe(1);
+    }
   });
 });
 
@@ -1172,15 +1181,19 @@ describe('buyable horde slots (issue #9)', () => {
     }
   });
 
-  it('effectiveBoardCap adds purchased slots on top of the day cap, hard-capped at BOARD_CAP', () => {
+  it('effectiveBoardCap adds purchased slots on top of the (now-constant) floor, hard-capped at BOARD_CAP', () => {
     expect(effectiveBoardCap({ day: 1, purchasedSlots: 1 })).toBe(boardCapForDay(1) + 1);
     expect(effectiveBoardCap({ day: 1, purchasedSlots: 3 })).toBe(BOARD_CAP); // 5 + 3 = 8
     expect(effectiveBoardCap({ day: 1, purchasedSlots: 99 })).toBe(BOARD_CAP); // clamped
-    expect(effectiveBoardCap({ day: 7, purchasedSlots: 1 })).toBe(BOARD_CAP); // already 8 naturally
+    // Issue #70: day no longer matters at all — day 7 with 1 purchased slot
+    // is the same 5+1=6 as day 1 with 1 purchased slot, since the floor no
+    // longer grows on its own.
+    expect(effectiveBoardCap({ day: 7, purchasedSlots: 1 })).toBe(6);
   });
 
   it('buyBoardSlot charges the ladder price in order and increments purchasedSlots', () => {
-    let s = { ...newBuild('2026-07-04', 1), scrap: 200 };
+    // Scrap large enough to afford the full steep ladder (60+120+220=400).
+    let s = { ...newBuild('2026-07-04', 1), scrap: 500 };
     for (let i = 0; i < SLOT_PRICES.length; i++) {
       const price = SLOT_PRICES[i];
       const before = s.scrap;
@@ -1192,14 +1205,22 @@ describe('buyable horde slots (issue #9)', () => {
         s = res.state;
       }
     }
-    // BOARD_CAP reached (5 natural + 3 purchased = 8) — no more slots to buy.
+    // BOARD_CAP reached (5 floor + 3 purchased = 8) — no more slots to buy.
     expect(effectiveBoardCap(s)).toBe(BOARD_CAP);
     expect(buyBoardSlot(s).ok).toBe(false);
     expect(nextSlotPrice(s)).toBeUndefined();
   });
 
-  it('the price ladder is strictly increasing', () => {
+  it('the price ladder is strictly increasing and steep (issue #70: no free growth, purchase-only)', () => {
     for (let i = 1; i < SLOT_PRICES.length; i++) expect(SLOT_PRICES[i]).toBeGreaterThan(SLOT_PRICES[i - 1]);
+    // "Steep" isn't just increasing — each step should be a meaningfully
+    // bigger jump than a flat ladder like the old [36, 40, 44] (+4 each).
+    for (let i = 1; i < SLOT_PRICES.length; i++) {
+      expect(SLOT_PRICES[i] - SLOT_PRICES[i - 1]).toBeGreaterThan(4);
+    }
+    // Slot 1 alone costs more than a full day's DAILY_SCRAP stipend — it's
+    // never a trivial day-1 impulse buy.
+    expect(SLOT_PRICES[0]).toBeGreaterThan(DAILY_SCRAP);
   });
 
   it('rejects buying a slot without enough scrap', () => {
@@ -1209,16 +1230,23 @@ describe('buyable horde slots (issue #9)', () => {
     if (!res.ok) expect(res.reason).toMatch(/not enough scrap/);
   });
 
-  it('rejects buying once the day already reached BOARD_CAP naturally (day 7)', () => {
-    const s = { ...newBuild('2026-07-10', SEASON_DAYS), scrap: 999 };
-    expect(boardCapForDay(SEASON_DAYS)).toBe(BOARD_CAP);
+  it('rejects buying once all purchasable slots are bought (hard cap reached via purchase only, issue #70)', () => {
+    // Post-#70 there is no more "day already reached BOARD_CAP naturally" —
+    // boardCapForDay is a constant floor even on day 7. The hard cap can now
+    // ONLY be reached by buying every slot in SLOT_PRICES.
+    expect(boardCapForDay(SEASON_DAYS)).toBe(BOARD_FLOOR);
+    let s = { ...newBuild('2026-07-10', SEASON_DAYS), scrap: 500 };
+    for (let i = 0; i < SLOT_PRICES.length; i++) {
+      s = (buyBoardSlot(s) as { ok: true; state: BuildState }).state;
+    }
+    expect(effectiveBoardCap(s)).toBe(BOARD_CAP);
     const res = buyBoardSlot(s);
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.reason).toMatch(/hard cap/);
   });
 
   it('nextSlotPrice reports the upcoming price, then undefined once maxed', () => {
-    let s = { ...newBuild('2026-07-04', 1), scrap: 200 };
+    let s = { ...newBuild('2026-07-04', 1), scrap: 500 };
     expect(nextSlotPrice(s)).toBe(SLOT_PRICES[0]);
     for (const price of SLOT_PRICES) {
       expect(nextSlotPrice(s)).toBe(price);
