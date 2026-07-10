@@ -3,6 +3,11 @@ export { fnv1a, dailySeed, currentRideDate } from './seed';
 export {
   UNIT_DEFS,
   TEST_HORDE,
+  tierAttackMultiplier,
+  tierHealthMultiplier,
+  reviveHpForTier,
+  blockHitsForTier,
+  poisonStacksForTier,
   type UnitDef,
   type Ability,
   type Effect,

@@ -36,6 +36,10 @@
     effectiveBoardCap,
     nextSlotPrice,
     buyBoardSlot,
+    tierAttackMultiplier,
+    tierHealthMultiplier,
+    reviveHpForTier,
+    poisonStacksForTier,
     type ActionResult,
     type BattleResult,
     type BuildState,
@@ -272,52 +276,75 @@
     afterNoon: ' (after noon)',
   };
 
+  // --- Inspect-sheet ability text (Jesper, pre-launch): the tile shows only
+  // a keyword tag, so THIS is where a player learns what a unit really does —
+  // including exactly how much it scales per star. Numbers come from the same
+  // core tables the sim uses (never hand-copied), so they can't drift.
+
+  /** "+2/+2 (★2 +6/+6 · ★3 +18/+18)" for the 3x-per-star buff curve. */
+  function buffScale(attack: number, health: number): string {
+    const at = (t: number) =>
+      health > 0 && attack > 0
+        ? `+${attack * tierAttackMultiplier(t)}/+${health * tierHealthMultiplier(t)}`
+        : attack > 0
+          ? `+${attack * tierAttackMultiplier(t)} attack`
+          : `+${health * tierHealthMultiplier(t)} health`;
+    return `${at(1)} (★2 ${at(2)} · ★3 ${at(3)})`;
+  }
+
   function abilitySentence(defId: string): string {
     const def = UNIT_DEFS[defId];
-    if (!def?.ability) return 'No special trick — just a body to swell the ranks.';
+    // Passive armor is not an `ability`, but it's absolutely something the
+    // player must be told about — Dire-Rat's whole identity lives here.
+    const armor = def?.damageReduction ?? 0;
+    const armorSentence =
+      armor > 0
+        ? `Shrugs off ${armor} from every blow that lands (★2 ${armor * 2} · ★3 ${armor * 3}) — a hit always lands for at least 1, and rot (poison) seeps straight through.`
+        : '';
+    if (!def?.ability) {
+      return armorSentence || 'No special trick — just a body to swell the ranks.';
+    }
     const e = def.ability.effect;
     if (e.kind === 'blockFrontHits') {
-      return 'Each wave, blocks the front rat’s first incoming hit outright. Charges reset every wave and scale with tier: ★2 blocks the first 2 hits, ★3 the first 3.';
+      return 'Each wave, blocks the front rat’s first incoming hit outright — whoever is front at the time. ★2 blocks the first 2 hits, ★3 the first 3. Charges reset every wave and never carry over.';
     }
     let what = '';
     switch (e.kind) {
       case 'summon': {
         const name = UNIT_DEFS[e.unitId]?.name ?? e.unitId;
-        what = `summons ${e.count} ${name}${e.count > 1 ? 's' : ''} in front`;
+        what = `summons ${e.count} ${name}${e.count > 1 ? 's' : ''} (★2 ${e.count * 2} · ★3 ${e.count * 3}) in front`;
         break;
       }
       case 'buffBehind':
-        what = `grants +${e.attack}/+${e.health} to ${e.all ? 'every rat behind it' : 'the rat behind it'}`;
+        what = `grants ${buffScale(e.attack, e.health)} to ${e.all ? 'every rat behind it' : 'the rat behind it'}`;
         break;
       case 'poisonFrontEnemy':
-        what = `applies ${e.stacks} poison to the frontmost enemy`;
+        what = `applies ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) to the frontmost enemy — poison bites for its full count every clash and clears when the wave falls`;
         break;
       case 'poisonTarget':
-        what = `applies ${e.stacks} poison to whatever it just struck`;
+        what = `applies ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) to whatever it just struck`;
         break;
       case 'gainStats':
-        what = `gains +${e.attack}/+${e.health}`;
+        what = `gains ${buffScale(e.attack, e.health)}`;
         break;
       case 'revive':
-        // HP comes from a per-tier table (reviveHpForTier), not a field on
-        // the effect itself — no single number to show here, "scales with
-        // tier" (appended below) is the accurate disclaimer.
-        what = `revives your first fallen rat`;
+        what = `revives your first fallen rat at ${reviveHpForTier(1)} health (★2 ${reviveHpForTier(2)} · ★3 ${reviveHpForTier(3)}), never above the rat's own max; each fallen rat can only be raised once`;
         break;
       case 'buffAdjacent':
-        what = `grants +${e.attack}/+${e.health} to the rat(s) beside it`;
+        what = `grants ${buffScale(e.attack, e.health)} to the rat(s) beside it — a middle seat buffs both neighbours`;
         break;
       case 'teamBuff':
-        what = `grants +${e.attack}/+${e.health} to the whole horde`;
+        what = `grants ${buffScale(e.attack, e.health)} to the whole horde, itself included`;
         break;
       case 'poisonAllEnemies':
-        what = `poisons every enemy in the wave`;
+        what = `rots every enemy in the wave with ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) — poison bites for its full count every clash, ignores armor, and clears when the wave falls`;
         break;
     }
     const when = def.ability.condition
       ? `${TIME_OF_DAY_LABEL[def.ability.condition.timeOfDay] ?? ''}`
       : '';
-    return `${TRIGGER_WHEN[def.ability.trigger]} it ${what}${when}. Effects scale with tier.`;
+    const abilityPart = `${TRIGGER_WHEN[def.ability.trigger]} it ${what}${when}.`;
+    return armorSentence ? `${abilityPart} ${armorSentence}` : abilityPart;
   }
 
   function isSummoner(defId: string): boolean {
