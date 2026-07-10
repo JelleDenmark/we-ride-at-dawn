@@ -1,5 +1,5 @@
 import type { Side, UnitDef, Ability, Lineup } from './data/units';
-import { UNIT_DEFS, tierAttackMultiplier, tierHealthMultiplier, reviveHpForTier, blockHitsForTier } from './data/units';
+import { UNIT_DEFS, tierAttackMultiplier, tierHealthMultiplier, reviveHpForTier, blockHitsForTier, poisonStacksForTier } from './data/units';
 import { ENEMY_POOL } from './data/enemies';
 import { RELIC_DEFS, type RelicDef } from './data/relics';
 import type { Gauntlet } from './gauntlet';
@@ -306,13 +306,40 @@ export function simulate(
         break;
       }
       case 'poisonFrontEnemy': {
+        // Plague-Bearer (issue #62): stack count now comes from
+        // `poisonStacksForTier` (1/3/5) instead of a flat `effect.stacks *
+        // tier` (1/2/3), same table Blight-Witch's `poisonAllEnemies` uses.
+        // Deliberately stays single-front-target — this is what keeps
+        // Plague-Bearer (cheap, focused front poison) differentiated from
+        // Blight-Witch (pricier whole-wave rot).
         const target = opposing(source.side)[0];
-        if (target) applyPoisonStacks(target, effect.stacks * tier);
+        if (target) applyPoisonStacks(target, poisonStacksForTier(tier));
         break;
       }
       case 'poisonTarget': {
         const target = opposing(source.side)[0];
         if (target && target.health > 0) applyPoisonStacks(target, effect.stacks * tier);
+        break;
+      }
+      case 'poisonAllEnemies': {
+        // Blight-Witch (issue #62). `startOfWave`-fired, so `fireEntryTriggers`
+        // runs this for every live Blight-Witch on the board, in board order,
+        // regardless of slot — fixing the old `afterAttack` positional dead
+        // zone where a back-line Blight-Witch never got to act. Hits every
+        // living enemy present at wave start, not just `opposing(...)[0]`.
+        //
+        // Compounding-law check: enemies are re-instantiated every wave and
+        // poison never persists on the horde (`waveClear`'s antidote), so
+        // this per-wave AoE cannot accumulate across the 45-wave battle.
+        // Multiple Blight-Witches stack additively within a single wave
+        // (each re-applies `poisonStacksForTier(tier)` to every enemy), but
+        // that's bounded by fresh enemies next wave and the board cap on
+        // how many Blight-Witches can be fielded at once — not a
+        // persistent-horde compounding vector like the shipped exploits.
+        const stacks = poisonStacksForTier(tier);
+        for (const target of opposing(source.side)) {
+          if (target.health > 0) applyPoisonStacks(target, stacks);
+        }
         break;
       }
       case 'gainStats': {

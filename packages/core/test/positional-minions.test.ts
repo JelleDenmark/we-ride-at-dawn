@@ -192,3 +192,86 @@ describe('Ward-Weaver (blockFrontHits, issue #56)', () => {
     expect(tailCharmProcs.length).toBe(0);
   });
 });
+
+describe('Blight-Witch (poisonAllEnemies, issue #62)', () => {
+  it('poisons every enemy in the wave at wave start, not just the front one', () => {
+    // A single wave with TWO enemies — the key new property is whole-wave
+    // AoE, not just "the front enemy" like the old poisonTarget behavior.
+    const { events } = simulate(
+      lineup({ defId: 'blight-witch' }),
+      gauntletOf([dummy(0, 12), dummy(0, 12)])
+    );
+    const waveStart = events.find((e): e is Extract<BattleEvent, { type: 'waveStart' }> => e.type === 'waveStart')!;
+    const enemyIds = waveStart.enemies.map((e) => e.instanceId);
+    expect(enemyIds.length).toBe(2);
+    const applied = ofType(events, 'poisonApplied');
+    expect(applied.length).toBe(2);
+    expect(new Set(applied.map((e) => e.targetId))).toEqual(new Set(enemyIds));
+    expect(applied.every((e) => e.totalStacks === 1)).toBe(true);
+  });
+
+  it('fires from any board slot — a back-line Blight-Witch still poisons (fixes the old afterAttack dead zone)', () => {
+    // Old mechanic (afterAttack) only ever fired for whichever unit was
+    // currently front, so a back-line Blight-Witch never got a turn. It's
+    // now startOfWave, which fireEntryTriggers runs for every unit
+    // regardless of board position.
+    const { events } = simulate(
+      lineup({ defId: 'gutter-runt' }, { defId: 'blight-witch' }),
+      gauntletOf([dummy(0, 12)])
+    );
+    const applied = ofType(events, 'poisonApplied');
+    expect(applied.length).toBeGreaterThan(0);
+  });
+
+  it('fires once at wave start, not repeatedly on every attack tick', () => {
+    // High-health, 0-attack enemy means many ticks pass before the wave
+    // clears. If poisonAllEnemies still fired per-tick (the old afterAttack
+    // shape), this would show many poisonApplied events instead of exactly
+    // one — the whole point of moving off afterAttack was to stop landing
+    // poison as overkill on an enemy already dying from the clash.
+    const { events } = simulate(lineup({ defId: 'blight-witch' }), gauntletOf([dummy(0, 100)]));
+    const applied = ofType(events, 'poisonApplied');
+    expect(applied.length).toBe(1);
+  });
+
+  it('stacks scale by tier: 1 / 3 / 5 (poisonStacksForTier)', () => {
+    for (const [tier, expected] of [[1, 1], [2, 3], [3, 5]] as const) {
+      const { events } = simulate(
+        lineup({ defId: 'blight-witch', tier }),
+        gauntletOf([dummy(0, 1000)])
+      );
+      const applied = ofType(events, 'poisonApplied');
+      expect(applied[0].totalStacks).toBe(expected);
+    }
+  });
+
+  it('multiple Blight-Witches stack additively within one wave — bounded, not a compounding vector', () => {
+    // Two t1 Blight-Witches each apply 1 stack to the same lone enemy this
+    // wave (1 + 1 = 2). This is the additive-within-a-wave behavior the
+    // compounding-law comment on `poisonAllEnemies` calls out as bounded:
+    // enemies are re-instantiated next wave, so it can never carry forward.
+    const { events } = simulate(
+      lineup({ defId: 'blight-witch' }, { defId: 'blight-witch' }),
+      gauntletOf([dummy(0, 1000)])
+    );
+    const applied = ofType(events, 'poisonApplied');
+    expect(applied.length).toBe(2);
+    expect(applied[0].totalStacks).toBe(1);
+    expect(applied[1].totalStacks).toBe(2);
+  });
+
+  it('poison does not persist across waves — a fresh wave starts the count over', () => {
+    const { events } = simulate(
+      lineup({ defId: 'blight-witch' }),
+      gauntletOf([dummy(0, 3)], [dummy(0, 1000)])
+    );
+    const waveStarts = ofType(events, 'waveStart');
+    expect(waveStarts.length).toBe(2);
+    const applied = ofType(events, 'poisonApplied');
+    // One application per wave (one enemy each), both at 1 stack — the
+    // second wave's fresh enemy does not inherit or stack onto whatever
+    // the first wave's (now-dead) enemy accumulated.
+    expect(applied.length).toBe(2);
+    expect(applied.every((e) => e.totalStacks === 1)).toBe(true);
+  });
+});
