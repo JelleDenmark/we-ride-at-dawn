@@ -33,22 +33,6 @@ export function boardCapForDay(day: number): number {
 }
 
 /**
- * How many rats the horde may hold *in combat* on a given day: the buildable
- * board plus `COMBAT_CAP_BONUS` of summon headroom (7,7,8,8,9,9,10 on days
- * 1–7). Recruiting still stops at `boardCapForDay`; the extra slots exist only
- * so a summoner's pups aren't silently swallowed by a full warren.
- *
- * This is the pure, day-only calculation (no purchased slots) — kept for
- * callers that only have a day number. Builds that may have bought extra
- * board slots (see `SLOT_PRICES`/`buyBoardSlot`) must use `combatCapForBuild`
- * instead, since a purchased slot raises the recruitable board and combat
- * must always have room for every recruited rat plus the summon headroom.
- */
-export function combatCapForDay(day: number): number {
-  return boardCapForDay(day) + COMBAT_CAP_BONUS;
-}
-
-/**
  * Late-game scrap sink (issue #9): buy extra board slots beyond the day's
  * natural `boardCapForDay`, up to the hard `BOARD_CAP = 8` ceiling. Purchased
  * slots persist for the rest of the expedition (carried by `advanceAfterDawn`,
@@ -82,14 +66,17 @@ export function effectiveBoardCap(state: Pick<BuildState, 'day' | 'purchasedSlot
 }
 
 /**
- * Combat headroom for a specific build: the build's *effective* (possibly
- * purchase-expanded) board cap plus `COMBAT_CAP_BONUS` summon headroom. Always
- * at least as large as the recruited board, so buying slots can never starve
- * a summoner — the purchased headroom and the summon headroom stack rather
- * than compete.
+ * Combat headroom for a specific build (issue #69): however many rats are
+ * actually deployed on the board right now, plus `COMBAT_CAP_BONUS` summon
+ * headroom. Deliberately dynamic rather than board-cap-derived — a summoner
+ * always gets exactly 2 extra slots over whatever's really fielded, so it's
+ * always useful (a thin board still gets headroom) but never a runaway
+ * ceiling (a full board doesn't bank extra slots beyond +2 just because the
+ * day's board cap or purchased slots are large). Recruiting itself is
+ * unaffected — that's still gated by `effectiveBoardCap`.
  */
-export function combatCapForBuild(state: Pick<BuildState, 'day' | 'purchasedSlots'>): number {
-  return effectiveBoardCap(state) + COMBAT_CAP_BONUS;
+export function combatCapForBuild(state: Pick<BuildState, 'board'>): number {
+  return state.board.length + COMBAT_CAP_BONUS;
 }
 
 /** Scrap cost of the next board slot this build could buy, or `undefined` if

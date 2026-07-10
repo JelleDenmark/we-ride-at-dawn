@@ -17,7 +17,6 @@ import {
   lineupFromBuild,
   advanceAfterDawn,
   boardCapForDay,
-  combatCapForDay,
   combatCapForBuild,
   effectiveBoardCap,
   buyBoardSlot,
@@ -699,7 +698,7 @@ describe('tiers in battle', () => {
     expect(lineupFromBuild(s)).toEqual({
       units: [{ defId: 'gnawer', tier: 2, relicIds: ['rusted-nail'] }],
       teamRelicIds: ['filth-totem'],
-      combatCap: combatCapForDay(s.day),
+      combatCap: 3, // 1 deployed rat + COMBAT_CAP_BONUS(2), issue #69
     });
   });
 
@@ -1297,28 +1296,29 @@ describe('buyable horde slots (issue #9)', () => {
     expect(nextSeason.purchasedSlots).toBe(0);
   });
 
-  it('combatCapForBuild always has room for the effective board cap plus summon headroom', () => {
-    for (let day = 1; day <= 7; day++) {
-      for (let purchasedSlots = 0; purchasedSlots <= SLOT_PRICES.length; purchasedSlots++) {
-        const build = { day, purchasedSlots };
-        expect(combatCapForBuild(build)).toBe(effectiveBoardCap(build) + 2);
-        expect(combatCapForBuild(build)).toBeGreaterThanOrEqual(effectiveBoardCap(build));
-      }
+  it('combatCapForBuild is deployed board size plus summon headroom (issue #69), not board-cap-derived', () => {
+    for (let boardSize = 0; boardSize <= 8; boardSize++) {
+      const build = { board: new Array(boardSize).fill({ defId: 'gutter-runt', tier: 1, relicIds: [] }) };
+      expect(combatCapForBuild(build)).toBe(boardSize + 2);
     }
   });
 
-  it('lineupFromBuild uses combatCapForBuild, not the plain day-based combatCapForDay, once slots are purchased', () => {
-    let s = { ...newBuild('2026-07-04', 1), scrap: 200 };
-    s = (buyBoardSlot(s) as { ok: true; state: BuildState }).state; // cap now 6, day cap still 5
+  it('a summoner on a small board gets exactly 2 summon slots of headroom', () => {
+    const build = { board: [{ defId: 'rat-piper', tier: 1, relicIds: [] }] };
+    expect(combatCapForBuild(build)).toBe(3); // 1 deployed + 2
+  });
+
+  it('a summoner on a full board still gets +2, no more and no less', () => {
+    const build = { board: new Array(8).fill({ defId: 'gutter-runt', tier: 1, relicIds: [] }) };
+    expect(combatCapForBuild(build)).toBe(10); // 8 deployed + 2
+  });
+
+  it('lineupFromBuild derives combatCap from the actually-deployed board, not effectiveBoardCap or purchased slots', () => {
+    let s: BuildState = { ...newBuild('2026-07-04', 1), scrap: 200, board: [{ defId: 'gutter-runt', tier: 1, relicIds: [] }] };
+    s = (buyBoardSlot(s) as { ok: true; state: BuildState }).state; // effectiveBoardCap now 6, but only 1 rat deployed
     const lineup = lineupFromBuild(s);
-    expect(lineup.combatCap).toBe(combatCapForBuild(s));
-    expect(lineup.combatCap).toBeGreaterThan(combatCapForDay(s.day));
-  });
-
-  it('at zero purchased slots, combatCapForBuild matches the pre-existing combatCapForDay (no regression)', () => {
-    for (let day = 1; day <= 7; day++) {
-      expect(combatCapForBuild({ day, purchasedSlots: 0 })).toBe(combatCapForDay(day));
-    }
+    expect(lineup.combatCap).toBe(3); // 1 deployed + 2, unaffected by the purchased slot
+    expect(lineup.combatCap).toBeLessThan(effectiveBoardCap(s) + 2);
   });
 });
 

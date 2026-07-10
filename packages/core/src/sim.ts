@@ -13,11 +13,14 @@ const DEF_LOOKUP: Record<string, UnitDef> = {
  * per-day buildable cap (boardCapForDay) grows toward this over an expedition. */
 export const BOARD_CAP = 8;
 /**
- * Combat leaves this much headroom above the recruitable board, so summons
- * (Rat-Piper's pups, Brood-Mother's litter, Bone-Priest's revive) always have
- * somewhere to land. Previously summons silently no-op'd once the warren was
- * full, which quietly bricked every summoner build the moment you filled your
- * board — the single most-reported confusion. See `combatCapForDay`.
+ * Combat leaves this much headroom above however many rats are actually
+ * deployed, so summons (Rat-Piper's pups, Brood-Mother's litter, Bone-Priest's
+ * revive) always have somewhere to land. Previously summons silently no-op'd
+ * once the warren was full, which quietly bricked every summoner build the
+ * moment you filled your board — the single most-reported confusion. Dynamic
+ * per issue #69 (deployed-count + bonus, not board-cap + bonus) so the
+ * headroom is always useful on a thin board but never a runaway ceiling on a
+ * full one. See `combatCapForBuild` in shop.ts.
  */
 export const COMBAT_CAP_BONUS = 2;
 export const SCORE_PER_WAVE = 100;

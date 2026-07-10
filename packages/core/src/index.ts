@@ -27,7 +27,6 @@ export {
   newBuild,
   advanceAfterDawn,
   boardCapForDay,
-  combatCapForDay,
   combatCapForBuild,
   effectiveBoardCap,
   buyBoardSlot,
