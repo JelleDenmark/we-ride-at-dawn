@@ -27,37 +27,55 @@ export function interestFor(scrap: number): number {
   return Math.min(INTEREST_CAP, Math.floor(scrap * INTEREST_RATE));
 }
 
-/** Buildable board size grows over the expedition: 5,5,6,6,7,7,8 (day 1–7). */
-export function boardCapForDay(day: number): number {
-  return Math.min(BOARD_CAP, 4 + Math.ceil(day / 2));
+/** Starting/day-1 board size floor (issue #70). Previously `boardCapForDay`
+ * grew for free across the expedition (5,5,6,6,7,7,8) — every slot beyond
+ * this floor now has to be bought via `buyBoardSlot`/`SLOT_PRICES`. Kept at
+ * the old day-1 value (5) rather than lowered further: day 1 already has a
+ * tight `DAILY_SCRAP` budget relative to unit costs, and shrinking the
+ * starting board on top of removing free growth would compound into a much
+ * harsher early game than the buy-only redesign is trying to create. */
+export const BOARD_FLOOR = 5;
+
+/** Buildable board size floor — constant across the whole expedition (issue
+ * #70: no more free day-based growth; every slot beyond this floor is
+ * purchase-only, see `SLOT_PRICES`/`buyBoardSlot`). Takes `day` for call-site
+ * compatibility (many balance scripts and `effectiveBoardCap` call it per
+ * day) but the day argument is now unused — kept so none of those callers
+ * need to change shape. */
+export function boardCapForDay(_day: number): number {
+  return BOARD_FLOOR;
 }
 
 /**
- * Late-game scrap sink (issue #9): buy extra board slots beyond the day's
- * natural `boardCapForDay`, up to the hard `BOARD_CAP = 8` ceiling. Purchased
- * slots persist for the rest of the expedition (carried by `advanceAfterDawn`,
+ * The ONLY way to grow the board (issue #70): buy extra board slots beyond
+ * `BOARD_FLOOR`, up to the hard `BOARD_CAP = 8` ceiling. Purchased slots
+ * persist for the rest of the expedition (carried by `advanceAfterDawn`,
  * reset to 0 on a fresh season by `newBuild`) and stack additively on top of
- * whatever the day's own cap is: `effectiveBoardCap = min(BOARD_CAP,
- * boardCapForDay(day) + purchasedSlots)`.
+ * the floor: `effectiveBoardCap = min(BOARD_CAP, BOARD_FLOOR +
+ * purchasedSlots)`.
  *
- * Prices are derived from `scripts/slot-value.ts`, which sims a strong,
- * actively-improving roster's average wave-depth at each purchasable-slot
- * count across a full 7-day expedition (bought day 1, held all week) and
- * converts the wave-depth delta into scrap via `SCRAP_PER_DEPTH` (1 scrap per
- * wave, per hourly ride, ×24 rides/day). Derived weekly scrap-equivalent
- * values came out at ~36 / ~20 / ~7 for the 1st/2nd/3rd slot (diminishing —
- * each slot buys less depth as the board nears the hard cap and overkill
- * damage stops being useful). Since even the most valuable (1st) slot's
- * entire week of value barely exceeds one day's scrap stipend
- * (`DAILY_SCRAP = 24`), pricing at raw value wouldn't trivialize the economy —
- * but a flat/declining ladder would make the *later* slots strictly worse
- * buys than the first, which reads as a bug rather than "rare late-game
- * luxury." So the ladder is rounded up and forced strictly increasing:
- * scarcer real estate near the hard cap costs more even though its raw
- * depth-payback is smaller — that premium is what makes it a genuine
- * end-of-run scrap sink rather than a rational early buy.
+ * Before issue #70, `boardCapForDay` handed out 3 of these slots for free by
+ * day 7 (5,5,6,6,7,7,8) and `SLOT_PRICES = [36, 40, 44]` only bought the
+ * board up to the hard cap EARLY. Now there is no free growth at all, so the
+ * same 3 slots that used to be a late-game luxury purchase are the only path
+ * from 5 to 8 — pricing them at the old ladder would trivialize the redesign
+ * (a strong player would buy all 3 inside day 1). `scripts/slot-value.ts`
+ * models the new all-purchase world (constant floor every day) and finds the
+ * weekly scrap-equivalent value of each slot is now far higher than before
+ * (each one is worth for the ENTIRE week what free growth used to hand over
+ * for free) — see that script's derivation and output for the numbers this
+ * ladder is built from. The ladder is priced as a genuine multi-day sink:
+ * slot 1 alone (60) costs more than a full day's `DAILY_SCRAP` stipend, and
+ * the full climb from 5 to 8 (400 total) is a multi-day slice of an idle
+ * player's weekly ride income (~1400 scrap/week baseline, per
+ * `snowball.ts`'s income-coupling section) — reachable by a strong,
+ * deliberately-saving player by the back half of a 7-day expedition, not on
+ * day 1, and not guaranteed for a passive/reactive-spend player at all (a
+ * deliberate "earned" gate, not a dead end — see `snowball.ts`'s
+ * board-slot-buying pass for confirmation a saving-focused player reaches 8
+ * mid-to-late week).
  */
-export const SLOT_PRICES: readonly number[] = [36, 40, 44];
+export const SLOT_PRICES: readonly number[] = [60, 120, 220];
 
 /** How many rats the board may hold given the day's natural cap plus any
  * board slots this build has purchased, hard-capped at `BOARD_CAP`. */
