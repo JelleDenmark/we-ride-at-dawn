@@ -485,9 +485,13 @@ describe('damage reduction (armor)', () => {
   const armored = (damageReduction: number): UnitDef => ({
     id: 'armored', name: 'Armored', attack: 1, health: 100, cost: 0, damageReduction,
   });
-  const poisoner = (stacks: number): UnitDef => ({
+  // `effect.stacks` is no longer read at apply time (issue #59: the applied
+  // amount now comes from `poisonStacksForTier(tier)`, table-driven, not
+  // `effect.stacks * tier`) — the field stays on the type for now but this
+  // gauntlet enemy always fights at tier 1, so 1 poison stack per proc.
+  const poisoner = (): UnitDef => ({
     id: 'poisoner', name: 'Poisoner', attack: 0, health: 100, cost: 0,
-    ability: { trigger: 'startOfBattle', effect: { kind: 'poisonFrontEnemy', stacks } },
+    ability: { trigger: 'startOfBattle', effect: { kind: 'poisonFrontEnemy', stacks: 1 } },
   });
 
   it('subtracts armor from each incoming attack', () => {
@@ -519,10 +523,10 @@ describe('damage reduction (armor)', () => {
   });
 
   it('poison bypasses armor — the hide does not stop rot', () => {
-    const { events } = simulate(lineup({ defId: 'dire-rat' }), gauntletOf([poisoner(3)]));
+    const { events } = simulate(lineup({ defId: 'dire-rat' }), gauntletOf([poisoner()]));
     const ticks = ofType(events, 'poisonTick').filter((e) => e.targetId === 1);
     expect(ticks.length).toBeGreaterThan(0);
-    expect(ticks.every((e) => e.amount === 3)).toBe(true);
+    expect(ticks.every((e) => e.amount === 1)).toBe(true);
   });
 });
 

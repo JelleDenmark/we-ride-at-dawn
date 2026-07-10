@@ -1,5 +1,5 @@
 import type { Side, UnitDef, Ability, Lineup } from './data/units';
-import { UNIT_DEFS, tierAttackMultiplier, tierHealthMultiplier, reviveHpForTier, blockHitsForTier } from './data/units';
+import { UNIT_DEFS, tierAttackMultiplier, tierHealthMultiplier, reviveHpForTier, blockHitsForTier, poisonStacksForTier } from './data/units';
 import { ENEMY_POOL } from './data/enemies';
 import { RELIC_DEFS, type RelicDef } from './data/relics';
 import type { Gauntlet } from './gauntlet';
@@ -307,12 +307,12 @@ export function simulate(
       }
       case 'poisonFrontEnemy': {
         const target = opposing(source.side)[0];
-        if (target) applyPoisonStacks(target, effect.stacks * tier);
+        if (target) applyPoisonStacks(target, poisonStacksForTier(tier));
         break;
       }
       case 'poisonTarget': {
         const target = opposing(source.side)[0];
-        if (target && target.health > 0) applyPoisonStacks(target, effect.stacks * tier);
+        if (target && target.health > 0) applyPoisonStacks(target, poisonStacksForTier(tier));
         break;
       }
       case 'gainStats': {

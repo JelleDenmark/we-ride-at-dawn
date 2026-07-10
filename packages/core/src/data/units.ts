@@ -57,6 +57,35 @@ export function blockHitsForTier(tier: number): number {
   return table[tier - 1] ?? table[table.length - 1];
 }
 
+/**
+ * Poison stacks applied by Plague-Bearer's `poisonFrontEnemy` (`startOfWave`)
+ * and Blight-Witch's `poisonTarget` (`afterAttack`), by tier (issue #59).
+ * Same shape as `reviveHpForTier`/`blockHitsForTier` — a small explicit
+ * table, not a multiplier of a base value.
+ *
+ * Safe under the compounding law for the same reason as `blockHitsForTier`:
+ * poison stacks reset every wave (`waveClear`), so unlike `gainStats` or any
+ * other permanently-accumulating effect on a per-wave trigger, a steep
+ * per-tier jump here cannot snowball across the 45-wave battle — each wave
+ * starts the count fresh.
+ *
+ * Deliberately `[1, 3, 5]`, NOT `tierAttackMultiplier`'s full `3^(tier-1)`
+ * curve (which would give 1/3/9). A full exponential jump would make poison
+ * a dominant, matchup-agnostic answer regardless of enemy archetype —
+ * flat, depth-independent damage that ignores armor and doesn't need to
+ * out-scale enemy health the way attack does. That risk is exactly the
+ * still-open question flagged in `scripts/depth-scaling.ts` report section
+ * "4) Poison-leaning vs attack-leaning roster": poison's flat/depth-independent
+ * nature was left as a report-only, not-yet-resolved finding, not something
+ * to resolve by picking a magnitude here. `[1, 3, 5]` is a moderate,
+ * hand-tuned middle ground between the old flat `stacks * tier` (1/2/3) and
+ * the full exponential curve.
+ */
+export function poisonStacksForTier(tier: number): number {
+  const table = [1, 3, 5];
+  return table[tier - 1] ?? table[table.length - 1];
+}
+
 export type Effect =
   | { kind: 'summon'; unitId: string; count: number }
   | { kind: 'buffBehind'; attack: number; health: number; all?: boolean }
