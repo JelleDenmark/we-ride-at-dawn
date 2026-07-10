@@ -294,9 +294,8 @@ describe('relics', () => {
   });
 
   it('The Forgotten Backpack heals a damaged front-liner that carries no relic of its own', () => {
-    // Corpse-Glutton has no relicIds at all here — unlike Fat Tick, the heal
-    // comes purely from the team relic, so this proves it isn't gated on the
-    // unit holding anything itself.
+    // Corpse-Glutton has no relicIds at all here — the heal comes purely
+    // from the team relic. Team-scope relic with capped total heal per tick.
     const { events, result } = simulate(
       { units: [{ defId: 'corpse-glutton' }], teamRelicIds: ['forgotten-backpack'] },
       gauntletOf([dummy(1, 12)])
@@ -308,7 +307,7 @@ describe('relics', () => {
   it('The Forgotten Backpack heals every horde unit, not just the front-liner', () => {
     // Gutter-Runt sits at the back and never clashes, but Corpse-Glutton in
     // front still takes chip damage each tick — with the team relic active,
-    // both should show up as heal targets since it applies horde-wide.
+    // both should show up as heal targets since it applies horde-wide (capped per #75).
     const { events } = simulate(
       { units: [{ defId: 'corpse-glutton' }, { defId: 'gutter-runt' }], teamRelicIds: ['forgotten-backpack'] },
       gauntletOf([dummy(1, 12)])
