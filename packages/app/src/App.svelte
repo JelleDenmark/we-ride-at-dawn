@@ -507,6 +507,7 @@
       // A new week (or a stale/legacy build): everyone resets Monday, and a
       // mid-week joiner starts cold at the current day's difficulty. (A build
       // that's *ahead* — dev fast-forward — is left alone.)
+      stopReplay();
       build = newBuild(today, weekdayFor(today));
       saveBuild(build);
       lastIncomeHour = Math.floor(nowTick / HOUR_MS);
@@ -608,7 +609,26 @@
     void submitBest();
   });
 
+  /**
+   * Kill any in-flight or finished replay whenever `build` is replaced
+   * wholesale (week reset, fresh build, dev day-advance). Without this the
+   * stage keeps animating the OLD roster's fight next to a board that no
+   * longer contains those rats (playtest finding, 2026-07-11). The
+   * generation counter lets watchRide detect that its ride was obsoleted
+   * mid-play and skip writing `result`/`phase` for a ride nobody's watching.
+   */
+  let replayGeneration = 0;
+  function stopReplay() {
+    replayGeneration++;
+    // Drain an in-flight play() instantly — same trick as the skip button;
+    // the next watchRide resets speed from the user's chosen multiplier.
+    if (phase === 'riding' && player) player.speed = 1e9;
+    phase = 'idle';
+    result = null;
+  }
+
   function freshBuild() {
+    stopReplay();
     build = newBuild(build.date, build.day);
     saveBuild(build);
     inspect = null;
@@ -634,6 +654,7 @@
       submitRun({ rideDate: build.date, lineup, result: outcome.result, dev: true });
     }
     const dawnInterest = build.day >= SEASON_DAYS ? 0 : interestFor(build.scrap);
+    stopReplay();
     build = advanceAfterDawn(build, addDay(build.date));
     if (dawnInterest > 0) build = { ...build, scrap: build.scrap + dawnInterest };
     saveBuild(build);
@@ -868,7 +889,12 @@
     // Capture the outcome: the hour can flip (or the horde change) while the
     // replay runs, and the result must match the ride that was watched.
     const outcome = currentOutcome;
+    const gen = replayGeneration;
     await player.play(outcome.events);
+    // A build replacement (week reset / fresh build / dev day-advance) may
+    // have stopped this replay mid-play — its result belongs to a roster
+    // that no longer exists, so don't write it over the fresh idle state.
+    if (gen !== replayGeneration) return;
     result = outcome.result;
     phase = 'done';
   }
