@@ -37,19 +37,19 @@ export const RELIC_DEFS: Record<string, RelicDef> = {
   },
   'glass-shard': {
     id: 'glass-shard', name: 'Glass Shard', scope: 'unit', cost: 4,
-    desc: '+3 dmg on the first hit of each wave', firstHitBonus: 3,
+    desc: '+3 dmg, first hit each wave', firstHitBonus: 3,
   },
   'weeping-boil': {
     id: 'weeping-boil', name: 'Weeping Boil', scope: 'unit', cost: 4,
-    desc: 'faint: 2 dmg to all foes', onFaintDamageAll: 2,
+    desc: 'faint: 2 dmg, all foes', onFaintDamageAll: 2,
   },
   'fat-tick': {
     id: 'fat-tick', name: 'Fat Tick', scope: 'unit', cost: 6,
-    desc: '+1/+2, heals 1 every clash', attack: 1, health: 2, healPerTick: 1,
+    desc: '+1/+2, heal 1/clash', attack: 1, health: 2, healPerTick: 1,
   },
   'tail-charm': {
     id: 'tail-charm', name: 'Tail-Charm', scope: 'unit', cost: 6,
-    desc: 'survive one lethal hit', surviveLethal: true,
+    desc: 'cheats death once', surviveLethal: true,
   },
   'filth-totem': {
     id: 'filth-totem', name: 'Filth Totem', scope: 'team', cost: 6,
@@ -57,11 +57,11 @@ export const RELIC_DEFS: Record<string, RelicDef> = {
   },
   'gore-cleaver': {
     id: 'gore-cleaver', name: 'Gore-Cleaver', scope: 'unit', cost: 5,
-    desc: 'overkill carries to the next foe', cleaveOverkill: true,
+    desc: 'overkill spills to next foe', cleaveOverkill: true,
   },
   'marrow-snap': {
     id: 'marrow-snap', name: 'Marrow-Snap', scope: 'unit', cost: 5,
-    desc: 'execute foes left at or below 30% health', executeThreshold: 0.3,
+    desc: 'executes foes at ≤30% hp', executeThreshold: 0.3,
   },
   // Easter egg (issue #24): the name is the whole point — someone else's
   // gear, left behind on an earlier ride, still has a little use left in it.
@@ -72,6 +72,6 @@ export const RELIC_DEFS: Record<string, RelicDef> = {
   // cannot accumulate across the 45-wave battle.
   'forgotten-backpack': {
     id: 'forgotten-backpack', name: 'The Forgotten Backpack', scope: 'team', cost: 12,
-    desc: 'whole horde heals 1 every clash', healPerTick: 1,
+    desc: 'whole horde heals 1/clash', healPerTick: 1,
   },
 };
