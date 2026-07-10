@@ -335,18 +335,18 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   },
   'ward-weaver': {
     id: 'ward-weaver', name: 'Ward-Weaver', attack: 1, health: 3, cost: 6,
-    desc: 'each wave, blocks the front rat attack outright - ★2 blocks 2 hits, ★3 blocks 3; resets every wave',
+    desc: 'each wave, blocks the front rat’s hit outright — ★2 blocks 2 hits, ★3 blocks 3; resets every wave',
     ability: { trigger: 'startOfWave', effect: { kind: 'blockFrontHits' } },
   },
-  // Issue #12: a parallel Runt pair (Gutter-Runt precedent) tied to the
-  // game dawn/dusk duality rather than literal noon-splitting - the actual
+  // Issue #12: a parallel "Runt" pair (Gutter-Runt precedent) tied to the
+  // game's dawn/dusk duality rather than literal noon-splitting — the actual
   // trigger condition is the broader before/after-noon Copenhagen split, but
   // the flavor leans poetic. Day-gated (unlockDay) rather than depth-gated,
-  // per issue #6 fairness resolution, so the shop stays a pure function of
+  // per #6's fairness resolution, so the shop stays a pure function of
   // (date, day) with no new per-account state.
   'dawn-runt': {
     id: 'dawn-runt', name: 'Dawn-Runt', attack: 1, health: 2, cost: 4,
-    desc: 'thrives in the grey light before the city wakes; battle (before noon): buffs the horde attack (scales ★)',
+    desc: 'thrives in the grey light before the city wakes; battle (before noon): buffs the horde’s attack (scales ★)',
     ability: {
       trigger: 'startOfBattle',
       effect: { kind: 'teamBuff', attack: 2, health: 0 },
@@ -356,7 +356,7 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   },
   'dusk-runt': {
     id: 'dusk-runt', name: 'Dusk-Runt', attack: 1, health: 2, cost: 4,
-    desc: 'comes alive as the drains go black again, ahead of the next dawn ride; battle (after noon): buffs the horde health (scales ★)',
+    desc: 'comes alive as the drains go black again, ahead of the next dawn’s ride; battle (after noon): buffs the horde’s health (scales ★)',
     ability: {
       trigger: 'startOfBattle',
       effect: { kind: 'teamBuff', attack: 0, health: 2 },
