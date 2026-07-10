@@ -251,9 +251,12 @@ export interface Lineup {
   teamRelicIds?: string[];
   /**
    * How many bodies this side may hold *during combat*, summons included.
-   * Always larger than the recruitable board so a summoner is never starved by
-   * a full warren (see `combatCapForDay`). Omitted = `BOARD_CAP`, which keeps
-   * every pre-existing golden log byte-identical.
+   * Callers building from a `BuildState` (see `lineupFromBuild`/
+   * `combatCapForBuild` in shop.ts) set this to `units.length + 2` — always
+   * larger than however many rats were actually deployed, so a summoner is
+   * never starved by a full warren, but never banks more than 2 spare slots
+   * either (issue #69). Omitted = `BOARD_CAP`, which keeps every pre-existing
+   * golden log byte-identical.
    */
   combatCap?: number;
   /**
