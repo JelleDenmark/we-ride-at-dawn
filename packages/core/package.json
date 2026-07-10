@@ -15,7 +15,8 @@
     "balance:reroll-fishing": "tsx scripts/reroll-fishing-test.ts",
     "balance:stress": "tsx scripts/exploit-stress.ts",
     "balance:all-unit-value": "tsx scripts/all-unit-value.ts",
-    "balance:relic-value": "tsx scripts/relic-value.ts"
+    "balance:relic-value": "tsx scripts/relic-value.ts",
+    "balance:dire-rat-armor": "tsx scripts/dire-rat-armor.ts"
   },
   "devDependencies": {
     "tsx": "^4.19.0",
