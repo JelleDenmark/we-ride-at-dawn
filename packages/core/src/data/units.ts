@@ -295,12 +295,12 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   },
   'blight-witch': {
     id: 'blight-witch', name: 'Blight-Witch', attack: 3, health: 3, cost: 8,
-    desc: 'each wave, rots the whole enemy wave with poison — ★2 applies 3 stacks to every foe, ★3 applies 5; from any board slot',
+    desc: 'each wave: poisons the whole enemy line (scales ★)',
     ability: { trigger: 'startOfWave', effect: { kind: 'poisonAllEnemies' } },
   },
   gnawer: {
     id: 'gnawer', name: 'Gnawer', attack: 3, health: 1, cost: 4,
-    desc: 'faint: buffs the rat behind — +2 atk at ★1, +6 at ★2, +18 at ★3',
+    desc: 'faint: buffs the rat behind (scales ★)',
     ability: { trigger: 'faint', effect: { kind: 'buffBehind', attack: 2, health: 0 } },
   },
   'corpse-glutton': {
@@ -315,7 +315,7 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   },
   'warren-warden': {
     id: 'warren-warden', name: 'Warren-Warden', attack: 2, health: 6, cost: 6,
-    desc: 'battle: buffs all rats behind it — +1/+1 at ★1, +3/+3 at ★2, +9/+9 at ★3',
+    desc: 'battle: buffs all rats behind it (scales ★)',
     ability: { trigger: 'startOfBattle', effect: { kind: 'buffBehind', attack: 1, health: 1, all: true } },
   },
   'dire-rat': {
@@ -325,28 +325,28 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   },
   'md-rattyfock': {
     id: 'md-rattyfock', name: 'MD Rattyfock', attack: 2, health: 6, cost: 6,
-    desc: 'battle: Season 1 survivor, patched and returned; buffs all rats behind it — +1/+1 at ★1, +3/+3 at ★2, +9/+9 at ★3',
+    desc: 'Season 1 survivor, patched and returned; battle: buffs all rats behind it (scales ★)',
     ability: { trigger: 'startOfBattle', effect: { kind: 'buffBehind', attack: 1, health: 1, all: true } },
   },
   'press-kin': {
     id: 'press-kin', name: 'Press-Kin', attack: 2, health: 4, cost: 5,
-    desc: 'battle: buffs the rats beside it (both sides — best in the middle) — +2/+2 at ★1, +6/+6 at ★2, +18/+18 at ★3',
+    desc: 'battle: buffs the rats beside it, best in the middle (scales ★)',
     ability: { trigger: 'startOfBattle', effect: { kind: 'buffAdjacent', attack: 2, health: 2 } },
   },
   'ward-weaver': {
     id: 'ward-weaver', name: 'Ward-Weaver', attack: 1, health: 3, cost: 6,
-    desc: 'each wave, blocks the front rat’s first incoming hit outright — ★2 blocks its first 2 hits, ★3 its first 3; charges reset every wave and never carry over',
+    desc: 'each wave, blocks the front rat attack outright - ★2 blocks 2 hits, ★3 blocks 3; resets every wave',
     ability: { trigger: 'startOfWave', effect: { kind: 'blockFrontHits' } },
   },
-  // Issue #12: a parallel "Runt" pair (Gutter-Runt precedent) tied to the
-  // game's dawn/dusk duality rather than literal noon-splitting — the actual
+  // Issue #12: a parallel Runt pair (Gutter-Runt precedent) tied to the
+  // game dawn/dusk duality rather than literal noon-splitting - the actual
   // trigger condition is the broader before/after-noon Copenhagen split, but
   // the flavor leans poetic. Day-gated (unlockDay) rather than depth-gated,
-  // per #6's fairness resolution, so the shop stays a pure function of
+  // per issue #6 fairness resolution, so the shop stays a pure function of
   // (date, day) with no new per-account state.
   'dawn-runt': {
     id: 'dawn-runt', name: 'Dawn-Runt', attack: 1, health: 2, cost: 4,
-    desc: 'thrives in the grey light before the city wakes; battle (before noon): buffs the horde’s attack — +2 at ★1, +6 at ★2, +18 at ★3',
+    desc: 'thrives in the grey light before the city wakes; battle (before noon): buffs the horde attack (scales ★)',
     ability: {
       trigger: 'startOfBattle',
       effect: { kind: 'teamBuff', attack: 2, health: 0 },
@@ -356,7 +356,7 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   },
   'dusk-runt': {
     id: 'dusk-runt', name: 'Dusk-Runt', attack: 1, health: 2, cost: 4,
-    desc: 'comes alive as the drains go black again, ahead of the next dawn’s ride; battle (after noon): buffs the horde’s health — +2 at ★1, +6 at ★2, +18 at ★3',
+    desc: 'comes alive as the drains go black again, ahead of the next dawn ride; battle (after noon): buffs the horde health (scales ★)',
     ability: {
       trigger: 'startOfBattle',
       effect: { kind: 'teamBuff', attack: 0, health: 2 },
