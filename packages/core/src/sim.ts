@@ -287,7 +287,7 @@ export function simulate(
       case 'buffBehind': {
         const start = removed ? index : index + 1;
         const targets = effect.all ? board.slice(start) : board.slice(start, start + 1);
-        for (const target of targets) buff(target, effect.attack * tier, effect.health * tier);
+        for (const target of targets) buff(target, effect.attack * tierAttackMultiplier(tier), effect.health * tierHealthMultiplier(tier));
         break;
       }
       case 'buffAdjacent': {
@@ -302,7 +302,7 @@ export function simulate(
         const targets: BattleUnit[] = [];
         if (index > 0) targets.push(board[index - 1]);
         if (index < board.length - 1) targets.push(board[index + 1]);
-        for (const target of targets) buff(target, effect.attack * tier, effect.health * tier);
+        for (const target of targets) buff(target, effect.attack * tierAttackMultiplier(tier), effect.health * tierHealthMultiplier(tier));
         break;
       }
       case 'poisonFrontEnemy': {
@@ -324,9 +324,12 @@ export function simulate(
         // startOfBattle ability (see the Effect doc comment in
         // data/units.ts), which fires once per unit instance, ever — nothing
         // re-applies it on a later wave, so it cannot accumulate across the
-        // 45-wave battle. Flat, non-scaling, same shape as Filth-Totem's
-        // team-relic bonus, just sourced from a unit instead of a relic.
-        for (const target of board) buff(target, effect.attack * tier, effect.health * tier);
+        // 45-wave battle. Issue #58: magnitude now comes from
+        // tierAttackMultiplier/tierHealthMultiplier (1x/3x/9x) instead of a
+        // flat `* tier` (1x/2x/3x), matching the same fire-once reasoning as
+        // buffBehind/buffAdjacent below and the unit's own stat curve
+        // (issue #22) — still non-stacking across waves, just steeper per use.
+        for (const target of board) buff(target, effect.attack * tierAttackMultiplier(tier), effect.health * tierHealthMultiplier(tier));
         break;
       }
       case 'revive': {
