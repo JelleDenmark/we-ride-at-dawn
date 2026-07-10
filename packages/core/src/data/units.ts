@@ -291,7 +291,7 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     ability: { trigger: 'startOfWave', effect: { kind: 'poisonFrontEnemy', stacks: 1 } },
   },
   'blight-witch': {
-    id: 'blight-witch', name: 'Blight-Witch', attack: 3, health: 3, cost: 6,
+    id: 'blight-witch', name: 'Blight-Witch', attack: 3, health: 3, cost: 8,
     desc: 'each wave, rots the whole enemy wave with poison — ★2 applies 3 stacks to every foe, ★3 applies 5; from any board slot',
     ability: { trigger: 'startOfWave', effect: { kind: 'poisonAllEnemies' } },
   },
