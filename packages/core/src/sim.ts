@@ -513,12 +513,17 @@ export function simulate(
 
     let ticks = 0;
     while (horde.length > 0 && enemies.length > 0 && ticks++ < MAX_TICKS_PER_WAVE) {
+      // Distribute team heal pool across all horde units to cap unbounded scaling
+      // with board size (issue #75: Forgotten Backpack). Instead of each unit
+      // getting full teamHealPerTick, divide it evenly: total team heal per tick
+      // = teamHealPerTick (e.g., 1), split among all horde units.
+      const teamHealPerUnit = horde.length > 0 ? teamHealPerTick / horde.length : 0;
       for (const board of [horde, enemies]) {
         for (const unit of board) {
-          const regen =
-            unit.relics.reduce((s, r) => s + (r.healPerTick ?? 0), 0) +
-            (unit.side === 'horde' ? teamHealPerTick : 0);
-          const amount = Math.min(regen, unit.maxHealth - unit.health);
+          const unitHeal = unit.relics.reduce((s, r) => s + (r.healPerTick ?? 0), 0);
+          const totalRegen =
+            unitHeal + (unit.side === 'horde' ? teamHealPerUnit : 0);
+          const amount = Math.min(totalRegen, unit.maxHealth - unit.health);
           if (amount > 0) {
             unit.health += amount;
             events.push({ type: 'heal', targetId: unit.instanceId, amount, newHealth: unit.health });

@@ -65,13 +65,12 @@ export const RELIC_DEFS: Record<string, RelicDef> = {
   },
   // Easter egg (issue #24): the name is the whole point — someone else's
   // gear, left behind on an earlier ride, still has a little use left in it.
-  // Team-scope so it doesn't retread Fat Tick's single-unit sustain or
-  // Filth-Totem's flat stat buff: it's whole-horde upkeep instead of either.
-  // Bounded per the compounding law — see the `teamHealPerTick` comment in
-  // sim.ts: it's clamped to each unit's own maxHealth every tick, so it
-  // cannot accumulate across the 45-wave battle.
+  // Team-scope heal distributed per-unit to prevent unbounded scaling with
+  // board size (#75). Total team heal pool per tick is 1, divided among all
+  // horde units (so 1 unit gets 1/tick, 2 units get 0.5/tick each, etc).
+  // Bounded per compounding law: each unit's heal is clamped to maxHealth - health.
   'forgotten-backpack': {
     id: 'forgotten-backpack', name: 'The Forgotten Backpack', scope: 'team', cost: 12,
-    desc: 'whole horde heals 1/clash', healPerTick: 1,
+    desc: 'whole horde heals 1/clash (split)', healPerTick: 1,
   },
 };
