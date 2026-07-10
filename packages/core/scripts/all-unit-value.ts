@@ -1,85 +1,189 @@
 /**
- * Per-unit, per-tier cost-efficiency report: waves cleared per 100 scrap
- * actually spent reaching that tier (issue #58).
+ * All-unit cost-efficiency report (hardened). Measures what one copy of each
+ * buyable unit is worth, per scrap actually spent to reach its tier, so units
+ * can be ranked against each other across star levels.
  *
- * Methodology mirrors the "UNIT VALUE RANKING" section of snowball.ts
- * (`depthWithFiller`): swap a single candidate unit into one slot of an
- * otherwise all-gutter-runt board, at a representative mid-expedition day,
- * and measure the depth delta versus the same board with the slot left as
- * a filler gutter-runt. Tested at BOTH the front and back slot (position is
- * a real lever — faint/allyFaint-triggered units often want the back), and
- * the better of the two is reported.
+ * This version fixes three methodology gaps found in the first pass (see the
+ * 2026-07-10 session): a contaminated control roster, single-position
+ * measurement, and a depth-only metric that hides saturating effects.
  *
- * The scrap cost for a given tier is the REAL cost of getting there via
- * merging, not the sticker price: 3 copies of tier N -> 1 copy of tier N+1,
- * so tier T costs `unit.cost * 3^(tier-1)` (1x / 3x / 9x) — same curve as
- * `tierAttackMultiplier`/`tierHealthMultiplier` (issue #22), which is
- * exactly the mismatch issue #58 fixes for buffBehind/buffAdjacent/teamBuff.
+ * --- 1. CHANGE-INVARIANT CONTROL ROSTER ----------------------------------
+ * The control (every slot except the one under test) is built ONLY from
+ * ability-less bodies: a Dire-Rat front tank + Gutter-Runt fillers, all at
+ * the candidate's tier. Neither has a triggered `Effect` — Dire-Rat's armor
+ * is passive `damageReduction`, Gutter-Runt has nothing — so NO retune of
+ * ability scaling (issues #58/#59 and friends) can move the baseline. That's
+ * the bug the first pass had: its control contained Gnawer/Corpse-Glutton/
+ * Blight-Witch/Plague-Bearer, so changing those units' ability curves shifted
+ * the baseline itself, and a candidate's before/after delta drifted for
+ * reasons that had nothing to do with the candidate (Gnawer read 0.4 -> 0.3
+ * purely because the control's own Gnawer got stronger). A neutral control
+ * makes before/after comparisons trustworthy.
  *
- * waves/100scrap = depthDelta / mergeCost * 100.
+ * The Dire-Rat tank is tiered up with the candidate so the control actually
+ * survives deep enough for a real multi-wave fight — a tier-1 tank on a day-6
+ * board dies instantly and collapses the measurement to noise.
  *
- * Run: npx tsx scripts/all-unit-value.ts   (from packages/core)
+ * --- 2. POSITIONAL COVERAGE ----------------------------------------------
+ * Value is positional. A unit is measured in BOTH slots that matter:
+ *   - "behind": tank front, candidate at slot 1 (auras, buffs-behind, and
+ *     death-gated abilities that fire once the front collapses onto it).
+ *   - "front": candidate at slot 0, tank at slot 1 (the candidate actually
+ *     clashes — so `afterAttack` effects like Blight-Witch's poison fire, and
+ *     the unit takes damage / can faint on its own terms).
+ * The better of the two positions is reported, with an F/B marker, because a
+ * player places a unit where it's best. The first pass tested one fixed slot
+ * and silently under-measured every attack-triggered or front-reliant unit.
+ *
+ * --- 3. DAMAGE METRIC ALONGSIDE DEPTH ------------------------------------
+ * Depth-delta saturates: once a unit's contribution is enough to clear a wave
+ * in time, extra contribution is invisible to `wavesCleared` (this is exactly
+ * why bumping poison stacks in #59 moved depth by ~0. See the poison probe in
+ * that session). So `damageDealt` delta is reported too — a continuous signal
+ * that still separates "does real work but it's currently overkill" from
+ * "genuinely dead weight."
+ *
+ * timeOfDay-gated units (Dawn-Runt/Dusk-Runt) are blended 50/50 across the
+ * before/after-noon halves, as before, since a real expedition sees both.
+ *
+ * Run from packages/core: npx tsx scripts/all-unit-value.ts
  */
 import { generateGauntlet } from '../src/gauntlet';
 import { simulate } from '../src/sim';
+import type { Lineup, TimeOfDay } from '../src/data/units';
 import { UNIT_DEFS } from '../src/data/units';
 import { boardCapForDay } from '../src/shop';
 
-const UNIT_TEST_DAY = 4;
-const SAMPLES = 150;
-const TEST_DATES: string[] = [];
-{
-  const base = Date.parse('2026-07-06T12:00:00Z');
-  for (let i = 0; i < SAMPLES; i++) TEST_DATES.push(new Date(base + i * 86_400_000).toISOString().slice(0, 10));
+const START = '2026-07-06'; // synchronized-week Monday (day 1)
+const SAMPLES = 250;
+
+// Same filter shop.ts's SHOP_UNIT_POOL uses — pup (summon-only) and
+// warren-warden (retired at #52, MD Rattyfock is its stand-in) are excluded.
+// Gutter-Runt is kept: it's the control filler, so it reads ~0 by
+// construction, which is the roster's explicit zero-line.
+const CANDIDATE_IDS = Object.keys(UNIT_DEFS).filter((id) => id !== 'pup' && id !== 'warren-warden');
+
+// Change-invariant control: only ability-less bodies (see header, gap 1).
+const TANK = 'dire-rat';
+const FILLER = 'gutter-runt';
+const TIER_DAY: Record<number, number> = { 1: 2, 2: 4, 3: 6 };
+
+type Position = 'front' | 'behind';
+
+/**
+ * Board with the candidate (or a Gutter-Runt, for the baseline) placed at the
+ * given position, everything else an ability-less body at `tier`.
+ *   front:  [candidate, tank, filler, filler, ...]
+ *   behind: [tank, candidate, filler, filler, ...]
+ */
+function roster(candidateId: string | null, tier: number, day: number, pos: Position, timeOfDay?: TimeOfDay): Lineup {
+  const cap = boardCapForDay(day);
+  const seat = candidateId ?? FILLER;
+  const order: string[] = pos === 'front' ? [seat, TANK] : [TANK, seat];
+  while (order.length < cap) order.push(FILLER);
+  const units: Lineup['units'] = order.slice(0, cap).map((defId) => ({ defId, tier }));
+  return { units, teamRelicIds: ['filth-totem'], timeOfDay };
 }
 
-function avg(xs: number[]): number {
-  return xs.reduce((a, b) => a + b, 0) / xs.length;
+interface Measure {
+  waves: number;
+  damage: number;
 }
 
-// Dawn-Runt/Dusk-Runt only fire on one half of the day — average across both
-// halves so their reported value isn't an artifact of picking a favorable
-// timeOfDay (a real player sees both halves over an expedition).
-function depthWithFiller(swapDefId: string | null, tier: number, pos: 'front' | 'back'): number {
-  const filler = 'gutter-runt';
-  const cap = boardCapForDay(UNIT_TEST_DAY);
-  const slot = pos === 'front' ? 0 : cap - 1;
-  const units = Array.from({ length: cap }, (_, i) => ({
-    defId: i === slot && swapDefId ? swapDefId : filler,
-    tier: i === slot && swapDefId ? tier : 1,
-    relicIds: [] as string[],
-  }));
-  const timeOfDays = ['beforeNoon', 'afterNoon'] as const;
-  const deltas = timeOfDays.map((timeOfDay) => {
-    const lineup = { units, teamRelicIds: [] as string[], timeOfDay };
-    const ds = TEST_DATES.map((d) => simulate(lineup, generateGauntlet(d, UNIT_TEST_DAY)).result.wavesCleared);
-    return avg(ds);
-  });
-  return avg(deltas);
+function measure(lineup: Lineup, day: number): Measure {
+  let waves = 0;
+  let damage = 0;
+  for (let s = 0; s < SAMPLES; s++) {
+    const date = new Date(Date.parse(`${START}T12:00:00Z`) + s * 86_400_000).toISOString().slice(0, 10);
+    const r = simulate(lineup, generateGauntlet(date, day)).result;
+    waves += r.wavesCleared;
+    damage += r.damageDealt;
+  }
+  return { waves: waves / SAMPLES, damage: damage / SAMPLES };
 }
 
-const fillerBaseline = depthWithFiller(null, 1, 'front');
+// Blend for timeOfDay-gated units; plain measure otherwise.
+function measureUnit(candidateId: string | null, tier: number, day: number, pos: Position, condition?: TimeOfDay): Measure {
+  if (!condition) return measure(roster(candidateId, tier, day, pos), day);
+  const dormant: TimeOfDay = condition === 'beforeNoon' ? 'afterNoon' : 'beforeNoon';
+  const peak = measure(roster(candidateId, tier, day, pos, condition), day);
+  const off = measure(roster(candidateId, tier, day, pos, dormant), day);
+  return { waves: (peak.waves + off.waves) / 2, damage: (peak.damage + off.damage) / 2 };
+}
 
-const CANDIDATES = ['md-rattyfock', 'warren-warden', 'press-kin', 'gnawer', 'dawn-runt', 'dusk-runt'];
+interface Row {
+  id: string;
+  name: string;
+  tier: number;
+  scrapCost: number;
+  bestPos: Position;
+  wavesEff: number; // waves per 100 scrap, better position
+  dmgEff: number; // damage per 100 scrap, same (better-by-waves) position
+}
 
-console.log(
-  `all-unit-value report — day ${UNIT_TEST_DAY} (cap ${boardCapForDay(UNIT_TEST_DAY)}), baseline (all gutter-runt) ${fillerBaseline.toFixed(3)}, ${SAMPLES} dates x 2 timeOfDay halves\n`
-);
-console.log('unit             tier  cost  mergeCost  Δ depth   waves/100scrap');
-for (const id of CANDIDATES) {
+// Baselines depend only on (tier, position) — cache them.
+const baselineCache = new Map<string, Measure>();
+function baseline(tier: number, day: number, pos: Position): Measure {
+  const key = `${tier}|${pos}`;
+  let m = baselineCache.get(key);
+  if (!m) {
+    m = measure(roster(null, tier, day, pos), day);
+    baselineCache.set(key, m);
+  }
+  return m;
+}
+
+const rows: Row[] = [];
+for (const id of CANDIDATE_IDS) {
   const def = UNIT_DEFS[id];
-  if (!def) {
-    console.log(`${id.padEnd(15)}  (not found in UNIT_DEFS)`);
-    continue;
-  }
+  const condition = def.ability?.condition?.timeOfDay;
   for (let tier = 1; tier <= 3; tier++) {
-    const mergeCost = def.cost * Math.pow(3, tier - 1);
-    const front = depthWithFiller(id, tier, 'front') - fillerBaseline;
-    const back = depthWithFiller(id, tier, 'back') - fillerBaseline;
-    const delta = Math.max(front, back);
-    const per100 = (delta / mergeCost) * 100;
-    console.log(
-      `${id.padEnd(15)}  ${tier}     ${String(def.cost).padStart(3)}   ${String(mergeCost).padStart(7)}   ${(delta >= 0 ? '+' : '') + delta.toFixed(3).padStart(6)}   ${per100.toFixed(2)}`
-    );
+    const day = TIER_DAY[tier];
+    const scrapCost = def.cost * Math.pow(3, tier - 1);
+    const positions: Position[] = ['front', 'behind'];
+    let best: { pos: Position; wavesEff: number; dmgEff: number } | null = null;
+    for (const pos of positions) {
+      const base = baseline(tier, day, pos);
+      const withUnit = measureUnit(id, tier, day, pos, condition);
+      const wavesEff = ((withUnit.waves - base.waves) / scrapCost) * 100;
+      const dmgEff = ((withUnit.damage - base.damage) / scrapCost) * 100;
+      if (best === null || wavesEff > best.wavesEff) best = { pos, wavesEff, dmgEff };
+    }
+    rows.push({ id, name: def.name, tier, scrapCost, bestPos: best!.pos, wavesEff: best!.wavesEff, dmgEff: best!.dmgEff });
   }
+}
+
+// Rank within each tier by depth efficiency, computed (never by hand).
+const rank = new Map<string, number>();
+for (let tier = 1; tier <= 3; tier++) {
+  rows
+    .filter((r) => r.tier === tier)
+    .sort((a, b) => b.wavesEff - a.wavesEff)
+    .forEach((r, i) => rank.set(`${tier}|${r.name}`, i + 1));
+}
+
+console.log(`all-unit cost-efficiency (hardened) — ${SAMPLES} dates/measure, tiers at days ${TIER_DAY[1]}/${TIER_DAY[2]}/${TIER_DAY[3]}`);
+console.log(`control: ${TANK} tank + ${FILLER} fillers (ability-less, change-invariant); best of front/behind reported\n`);
+
+console.log('=== DEPTH efficiency — waves/100scrap, best position (F=front, B=behind), #rank in tier ===');
+console.log('unit             T1  eff(pos#)      T2  eff(pos#)      T3  eff(pos#)     trend');
+for (const id of CANDIDATE_IDS) {
+  const name = UNIT_DEFS[id].name;
+  const rs = rows.filter((r) => r.id === id).sort((a, b) => a.tier - b.tier);
+  const cells = rs.map((r) => {
+    const p = r.bestPos === 'front' ? 'F' : 'B';
+    return `${r.wavesEff.toFixed(1).padStart(5)}(${p}${rank.get(`${r.tier}|${r.name}`)})`;
+  });
+  const v = rs.map((r) => r.wavesEff);
+  const trend =
+    name === 'Gutter Runt' ? 'zero-line (control filler)' : v[2] > v[0] ? 'rising' : v[2] < v[0] ? 'falling' : 'flat';
+  console.log(`${name.padEnd(15)}  ${rs[0].scrapCost.toString().padStart(3)} ${cells[0]}   ${rs[1].scrapCost.toString().padStart(3)} ${cells[1]}   ${rs[2].scrapCost.toString().padStart(3)} ${cells[2]}   ${trend}`);
+}
+
+console.log('\n=== DAMAGE efficiency — damageDealt/100scrap at each unit\'s best-by-depth position (saturation-proof signal) ===');
+console.log('unit               T1       T2       T3');
+for (const id of CANDIDATE_IDS) {
+  const name = UNIT_DEFS[id].name;
+  const rs = rows.filter((r) => r.id === id).sort((a, b) => a.tier - b.tier);
+  console.log(`${name.padEnd(15)}  ${rs.map((r) => r.dmgEff.toFixed(1).padStart(7)).join('  ')}`);
 }
