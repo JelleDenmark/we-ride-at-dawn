@@ -322,11 +322,20 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     id: 'dire-rat', name: 'Dire-Rat', attack: 4, health: 5, cost: 8,
     desc: 'hide like a door: shrugs off 2 from every blow',
     damageReduction: 2,
+    // Day-1 shop is deliberately kept plain (Jesper, 2026-07-11): the three
+    // strongest early picks — the armored tank, the Season-1 anchor, and the
+    // front-shield — hold back to day 2, so day 1 is a humble scramble and the
+    // shop gets visibly stronger as the expedition opens up (days 2-4 are the
+    // exciting stretch). Only gates the SHOP roll; a unit already owned/on the
+    // board is unaffected, and the balance scripts build lineups directly so
+    // they don't see this gate.
+    unlockDay: 2,
   },
   'md-rattyfock': {
     id: 'md-rattyfock', name: 'MD Rattyfock', attack: 2, health: 6, cost: 6,
     desc: 'Season 1 survivor, patched and returned; battle: buffs all rats behind it (scales ★)',
     ability: { trigger: 'startOfBattle', effect: { kind: 'buffBehind', attack: 1, health: 1, all: true } },
+    unlockDay: 2, // day-1 shop kept plain — see Dire-Rat's note.
   },
   'press-kin': {
     id: 'press-kin', name: 'Press-Kin', attack: 2, health: 4, cost: 5,
@@ -337,6 +346,7 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     id: 'ward-weaver', name: 'Ward-Weaver', attack: 1, health: 3, cost: 6,
     desc: 'each wave, blocks the front rat’s hit outright — ★2 blocks 2 hits, ★3 blocks 3; resets every wave',
     ability: { trigger: 'startOfWave', effect: { kind: 'blockFrontHits' } },
+    unlockDay: 2, // day-1 shop kept plain — see Dire-Rat's note.
   },
   // Issue #12: a parallel "Runt" pair (Gutter-Runt precedent) tied to the
   // game's dawn/dusk duality rather than literal noon-splitting — the actual

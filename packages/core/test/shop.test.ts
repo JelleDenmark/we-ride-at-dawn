@@ -1384,6 +1384,20 @@ describe('day-gated shop unlocks (issue #12: Dawn-Runt/Dusk-Runt)', () => {
     for (const day of [3, 4, 5, 6, 7]) expect(everAppears(day, 'dusk-runt')).toBe(true);
   });
 
+  it('the three day-2 picks (Dire-Rat, MD Rattyfock, Ward-Weaver) never appear on day 1', () => {
+    // Day-1 shop kept deliberately plain (2026-07-11): the armored tank, the
+    // Season-1 anchor, and the front-shield hold back to day 2.
+    for (const defId of ['dire-rat', 'md-rattyfock', 'ward-weaver']) {
+      expect(everAppears(1, defId)).toBe(false);
+    }
+  });
+
+  it('the three day-2 picks appear from day 2 onward, every later day too', () => {
+    for (const defId of ['dire-rat', 'md-rattyfock', 'ward-weaver']) {
+      for (const day of [2, 3, 4, 5, 6, 7]) expect(everAppears(day, defId)).toBe(true);
+    }
+  });
+
   it('newBuild wires the shop day through to rollOfferings (day 1 build never offers either Runt)', () => {
     for (let d = 0; d < 20; d++) {
       const date = `2026-09-${String(d + 1).padStart(2, '0')}`;
