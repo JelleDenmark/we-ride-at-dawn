@@ -26,38 +26,45 @@ const DAY = 7; // deepest shop tier (t3), latest gauntlet
 // is a deliberately optimistic "leaderboard chaser" board: deeper than any
 // shop-economy player reaches (snowball §7 tops ~10-11), so its ceiling is the
 // number the WAVE_COUNT=45 guardrail must clear.
-const ORDER = [
-  'dire-rat', 'warren-warden', 'corpse-glutton', 'gnawer',
-  'bone-priest', 'plague-bearer', 'blight-witch', 'dire-rat',
-];
+// Best offensive relic loadout, front-to-back (gore-cleaver = top deep-end
+// depth relic; fat-tick = top overall). Held constant across comps below.
 const RELICS = [
   'gore-cleaver', 'rusted-nail', 'fat-tick', 'fat-tick',
   'fat-tick', 'fat-tick', 'fat-tick', 'fat-tick',
 ];
 
-function maxedBoard(): Lineup {
-  const units = ORDER.slice(0, BOARD_CAP).map((defId, i) => ({
-    defId,
-    tier: 3,
-    relicIds: [RELICS[i]],
-  }));
+// Several candidate 8-unit boards — we want the DEEPEST reachable, since the
+// guardrail is about the ceiling. `original` is the first-cut comp; `top-depth`
+// uses the units that rank highest on T3 depth-per-scrap (MD Rattyfock,
+// Ward-Weaver, Press-Kin, Blight-Witch...); `press-kin-core` clusters the
+// neighbour-buffer in the middle where its buff hits the most rats.
+const COMPS: Record<string, string[]> = {
+  original: ['dire-rat', 'warren-warden', 'corpse-glutton', 'gnawer', 'bone-priest', 'plague-bearer', 'blight-witch', 'dire-rat'],
+  'top-depth': ['md-rattyfock', 'ward-weaver', 'press-kin', 'blight-witch', 'dusk-runt', 'bone-priest', 'corpse-glutton', 'dire-rat'],
+  'press-kin-core': ['ward-weaver', 'md-rattyfock', 'press-kin', 'dusk-runt', 'blight-witch', 'md-rattyfock', 'corpse-glutton', 'bone-priest'],
+};
+
+function board(order: string[]): Lineup {
+  const units = order.slice(0, BOARD_CAP).map((defId, i) => ({ defId, tier: 3, relicIds: [RELICS[i]] }));
   return { units, teamRelicIds: ['filth-totem'] };
 }
 
-const lineup = maxedBoard();
-const depths: number[] = [];
-for (let s = 0; s < SAMPLES; s++) {
-  const date = new Date(Date.parse(`${START}T12:00:00Z`) + s * 86_400_000).toISOString().slice(0, 10);
-  depths.push(simulate(lineup, generateGauntlet(date, DAY)).result.wavesCleared);
-}
-depths.sort((a, b) => a - b);
-const avg = depths.reduce((a, b) => a + b, 0) / depths.length;
-const p95 = depths[Math.floor(depths.length * 0.95)];
-const max = depths[depths.length - 1];
-
 console.log(
-  `enemy HP scale: perWave=${ENEMY_HEALTH_SCALE_PER_WAVE} quad=${ENEMY_HEALTH_SCALE_QUADRATIC}`
+  `enemy HP scale: perWave=${ENEMY_HEALTH_SCALE_PER_WAVE} quad=${ENEMY_HEALTH_SCALE_QUADRATIC}  (day ${DAY}, ${SAMPLES} dates, all t3, best relics + filth-totem)\n`
 );
-console.log(`maxed t3 board (8 units, gore-cleaver+rusted-nail+fat-tick, filth-totem), day ${DAY}, ${SAMPLES} dates:`);
-console.log(`  avg depth ${avg.toFixed(2)}   p95 ${p95}   MAX ${max}   (WAVE_COUNT=45)`);
-console.log(`  headroom below cap: avg ${(45 - avg).toFixed(1)}, max ${45 - max}`);
+console.log('comp             avg     p95   MAX / 45   maxHeadroom');
+for (const [name, order] of Object.entries(COMPS)) {
+  const lineup = board(order);
+  const depths: number[] = [];
+  for (let s = 0; s < SAMPLES; s++) {
+    const date = new Date(Date.parse(`${START}T12:00:00Z`) + s * 86_400_000).toISOString().slice(0, 10);
+    depths.push(simulate(lineup, generateGauntlet(date, DAY)).result.wavesCleared);
+  }
+  depths.sort((a, b) => a - b);
+  const avg = depths.reduce((a, b) => a + b, 0) / depths.length;
+  const p95 = depths[Math.floor(depths.length * 0.95)];
+  const max = depths[depths.length - 1];
+  console.log(
+    `${name.padEnd(15)} ${avg.toFixed(2).padStart(6)}  ${String(p95).padStart(4)}  ${String(max).padStart(5)}       ${String(45 - max).padStart(3)}`
+  );
+}
