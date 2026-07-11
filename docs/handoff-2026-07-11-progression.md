@@ -123,6 +123,37 @@ introducing a new imbalance under time pressure.
   needs Jesper's explicit per-session OK or a standing Bash rule he adds — you can't
   self-grant it.
 
+## RESULTS (2026-07-11, branch `progression-fix` off dev — NOT merged/deployed)
+
+**#90 done — diminishing income.** `scrapForDepth(depth)` in `shop.ts` is the single income
+source (App.svelte, snowball, slot-value all use it). `SCRAP_FULL_DEPTH=7`, `SCRAP_DEEP_RATE=0.4`:
+first 7 waves pay full, deeper pay 0.4, floored. Leaderboard score stays raw depth. A depth-20
+run now pays 13 not 20 (throttle grows with depth). Week income lands 1029 (+0.9% vs 1020).
+
+**#91 done — free board growth restored.** `BOARD_GROWTH = [5,5,6,6,7,7,7]` (day-indexed);
+8th seat still buy-only via `SLOT_PRICES` (now stacks on top of free growth). Median depth
+curve (snowball §7): before `2.95/4.05/5.60/6.87/7.25/7.89/7.88` → after
+`2.95/4.03/6.16/8.07/9.45/10.38/10.61`. Day-7 +35%, plateau GONE (climbs every day), days 1-2
+unchanged. `SCRAP_FULL_DEPTH` was retuned 9→7 here so #90 absorbs the deeper runs and income
+stays neutral. **The curve is pending Jesper's sign-off** — alt `[5,6,6,7,7,7,7]` gives a
+stronger day-2 hook (4.51 vs 4.03) at +4.7% income and a slight day-7 dip.
+
+**#92 DROPPED (data-backed).** New probe `scripts/maxed-board-guardrail.ts`: a maxed 8-unit t3
+board already tops **avg 28 / p95 41 / MAX 43 of 45** at CURRENT (unsoftened) constants.
+Softening 0.20/0.004→0.18/0.0025 pushes it to MAX 44 / p95 43 (saturates the WAVE_COUNT=45
+leaderboard) while adding only +0.07 to the median (the median is roster-limited, which #91 already
+fixes). A targeted linear-down/quadratic-up variant held the ceiling but gave the median nothing.
+So `sim.ts` is UNCHANGED — no golden-log regeneration needed. Recommend defer/skip #92 entirely.
+
+**#93 verification (all on the branch):** 189/189 tests pass (shop tests updated for the new
+board curve); app build compiles; snowball §1 edges CONVERGE (not a snowball); exploit-stress
+0/13 flagged; compounding-law canary 9/9; unit/relic/depth bands unchanged (Fat Tick→Marrow-Snap
+ordering intact, no dead-weight/dominant outlier). Interest share still ~1%. `PATCH-NOTES-DRAFT.md`
+Economy section reconciled (buy-only claim was stale) — curve-agnostic prose, pending sign-off.
+
+**Not done (needs Jesper):** pick the growth curve; sign off #90 numbers; merge `progression-fix`→dev;
+deploy decision (deploy-race rule). #92 recommended dropped.
+
 ## Related open issues (not part of this fix, context only)
 
 #81 leaderboard has no server-side score verification (pre-existing, launch-risk call
