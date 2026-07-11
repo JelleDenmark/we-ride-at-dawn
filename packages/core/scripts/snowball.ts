@@ -744,6 +744,38 @@ console.log(
 );
 console.log('the full ladder is a genuine multi-day investment, and a player who prioritizes it reaches the hard cap.');
 
+// ---------------------------------------------------------------------------
+// 7) EXPECTED DEPTH PER DAY — the real-player curve.
+//    depth-scaling.ts reports the CEILING (hand-built optimal-ish lineups,
+//    ignoring the shop/economy/unlockDay). THIS is what a normal player
+//    actually reaches: the default greedy shop-buyer (reuses `baselineRuns`),
+//    board pinned at the natural floor of 5 — it NEVER buys extra horde slots
+//    (that's `runWeekBoardMaxing`, section 6). Depth and the scrap it earns
+//    are shown together because they're coupled: income = depth x rides, so
+//    anything that shifts the depth curve (e.g. a difficulty-constant change)
+//    shifts the whole economy with it — the exact tension to weigh before
+//    touching WAVE_BUDGET_QUADRATIC / WAVE_UNIT_CAP.
+// ---------------------------------------------------------------------------
+console.log('\n=== 7) EXPECTED DEPTH PER DAY (default player, board floor 5, NO purchased slots) ===\n');
+console.log('day  avgDepth  [min..max across seeds]   avgScrap/day   (shop tier: t1 d1-3, t2 d4-5, t3 d6-7)');
+for (let day = 1; day <= 7; day++) {
+  const perSeedDepth = baselineRuns.map((r) => dayAvgDepth(r.samples, day));
+  const perSeedScrap = baselineRuns.map((r) =>
+    r.samples.filter((s) => s.day === day).reduce((sum, s) => sum + s.scrapEarned, 0)
+  );
+  const d = avg(perSeedDepth);
+  console.log(
+    `${day}    ${d.toFixed(2).padStart(6)}   [${Math.min(...perSeedDepth).toFixed(1)}..${Math.max(...perSeedDepth).toFixed(1)}]` +
+      `           ${avg(perSeedScrap).toFixed(1).padStart(6)}`
+  );
+}
+console.log(
+  '\n(this is the curve to tune enemy difficulty against — NOT depth-scaling.ts, which assumes a roster the shop economy may never actually hand a real player.'
+);
+console.log(
+  ' Board is the natural floor of 5 the whole week here: the default player spends on units/relics, never on horde slots — confirmed via spendGreedily(expandBoard=false).)'
+);
+
 console.log('\n=== NOTES ===');
 console.log('Greedy policy: merge-completing buy > best (attack+health+abilityBonus)/cost affordable unit');
 console.log('  (bar: value >= 0.9) > relic with an open target > bounded reroll (max 2/hour) > pass.');
