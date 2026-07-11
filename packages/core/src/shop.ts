@@ -15,65 +15,104 @@ export const SEASON_DAYS = 7;
  * counter-tech, not a second board. */
 export const BENCH_SIZE = 3;
 
-// Idle economy: the horde skirmishes hourly, earning SCRAP_PER_DEPTH per wave
-// cleared. Interest (TFT-style, 5% of the bank, capped) is paid once per DAY
-// at dawn, not per hour — the daily cadence + cap keep the bank from
-// snowballing over the hundreds of hours in an expedition.
+// Idle economy: the horde skirmishes hourly, earning scrap per wave cleared.
+// Interest (TFT-style, 5% of the bank, capped) is paid once per DAY at dawn,
+// not per hour — the daily cadence + cap keep the bank from snowballing over
+// the hundreds of hours in an expedition.
 export const SCRAP_PER_DEPTH = 1;
 export const INTEREST_RATE = 0.05;
 export const INTEREST_CAP = 5;
+
+// Income decoupling (issue #90). Income used to be a flat `depth *
+// SCRAP_PER_DEPTH` — every extra wave cleared paid the same, so ANY change
+// that let players push deeper (roster acceleration #91, enemy softening #92)
+// inflated the bank in lockstep, snowballing the economy #70 just tuned. So
+// income is now DIMINISHING in depth: the first `SCRAP_FULL_DEPTH` waves pay
+// full rate, and every wave beyond pays the reduced `SCRAP_DEEP_RATE`. This
+// keeps the LEADERBOARD chase from snowballing the bank (a depth-30 run is
+// still mostly paid at the 0.4 deep rate) while leaving score itself raw,
+// undiminished depth — depth is the prestige metric.
+//
+// full=8 is a DELIBERATE mild surplus, not income-neutral: with #91's deeper
+// median it lands week income ~1140 (~+12% over the pre-#90 ~1020 baseline,
+// see snowball §5/§7). The neutral value was 7; Jesper chose 8 (2026-07-11) so
+// a merge-fishing player has scrap to actually chase a T3 unit — a rewarding
+// payoff — rather than banking an unspendable surplus against a too-tight
+// economy. Income is NOT the real T3 gate (fishing RNG is), so this is a small
+// generosity lever to validate with live feedback next season, not a fix.
+export const SCRAP_FULL_DEPTH = 8;
+export const SCRAP_DEEP_RATE = 0.4;
+
+/**
+ * Scrap earned for clearing `depth` waves in one ride — the single source of
+ * truth for idle income (issue #90), so app, balance scripts, and any future
+ * server re-sim agree. Diminishing past `SCRAP_FULL_DEPTH`; floored to keep
+ * the economy integer (scrap is spent in whole units everywhere). NOTE: this
+ * is INCOME only — leaderboard score / max-depth is still raw `depth`.
+ */
+export function scrapForDepth(depth: number): number {
+  const full = Math.min(depth, SCRAP_FULL_DEPTH);
+  const deep = Math.max(0, depth - SCRAP_FULL_DEPTH);
+  return Math.floor(full * SCRAP_PER_DEPTH + deep * SCRAP_DEEP_RATE);
+}
 
 export function interestFor(scrap: number): number {
   return Math.min(INTEREST_CAP, Math.floor(scrap * INTEREST_RATE));
 }
 
-/** Starting/day-1 board size floor (issue #70). Previously `boardCapForDay`
- * grew for free across the expedition (5,5,6,6,7,7,8) — every slot beyond
- * this floor now has to be bought via `buyBoardSlot`/`SLOT_PRICES`. Kept at
- * the old day-1 value (5) rather than lowered further: day 1 already has a
- * tight `DAILY_SCRAP` budget relative to unit costs, and shrinking the
- * starting board on top of removing free growth would compound into a much
- * harsher early game than the buy-only redesign is trying to create. */
+/** Starting/day-1 board size floor. The board opens at 5 seats on day 1 and
+ * grows for free over the week (see `BOARD_GROWTH`). */
 export const BOARD_FLOOR = 5;
 
-/** Buildable board size floor — constant across the whole expedition (issue
- * #70: no more free day-based growth; every slot beyond this floor is
- * purchase-only, see `SLOT_PRICES`/`buyBoardSlot`). Takes `day` for call-site
- * compatibility (many balance scripts and `effectiveBoardCap` call it per
- * day) but the day argument is now unused — kept so none of those callers
- * need to change shape. */
-export function boardCapForDay(_day: number): number {
-  return BOARD_FLOOR;
+/**
+ * Free board growth by expedition day (issue #91). `BOARD_GROWTH[day-1]` is
+ * the number of seats the horde gets for free on that day, no purchase
+ * required: 5,6,6,7,7,7,7 — the 6th seat opens on day 2, the 7th by day 4,
+ * then it holds.
+ *
+ * WHY THIS EXISTS / #70 TENSION: issue #70 froze the board at a flat 5 all
+ * week and made every seat beyond it a steep buy (`SLOT_PRICES`). That made
+ * the top slots feel "earned", but it was ALSO the single biggest throttle on
+ * progression: the median player never expands past 5 units, so against a
+ * season-fixed 45-wave gauntlet their depth goes flat after ~day 4 (measured:
+ * snowball §7 plateaued at ~7.9 days 5-7). #91 restores free growth to 7 to
+ * give the median horde room to actually get deeper day-to-day, while keeping
+ * the 8th (final) seat purchase-only (`SLOT_PRICES[0]`) so #70's "earned top
+ * slot" survives in spirit — it's now ONE deliberate late purchase, not three.
+ * The curve is FRONT-LOADED (6th seat on day 2, not day 3): day 1 is a
+ * build-only freeze, so day 2 is the first real grind day and the one players
+ * quit on — opening a visible new seat there is the "don't give up day 2" hook.
+ */
+export const BOARD_GROWTH: readonly number[] = [5, 6, 6, 7, 7, 7, 7];
+
+/** Buildable board size for a given expedition day (1..7): the free-growth
+ * seats for that day (`BOARD_GROWTH`), before any purchased slots stack on
+ * top (see `effectiveBoardCap`). Days outside 1..7 clamp to the ends. */
+export function boardCapForDay(day: number): number {
+  const idx = Math.min(BOARD_GROWTH.length, Math.max(1, day)) - 1;
+  return BOARD_GROWTH[idx];
 }
 
 /**
- * The ONLY way to grow the board (issue #70): buy extra board slots beyond
- * `BOARD_FLOOR`, up to the hard `BOARD_CAP = 8` ceiling. Purchased slots
- * persist for the rest of the expedition (carried by `advanceAfterDawn`,
- * reset to 0 on a fresh season by `newBuild`) and stack additively on top of
- * the floor: `effectiveBoardCap = min(BOARD_CAP, BOARD_FLOOR +
- * purchasedSlots)`.
+ * Buy extra board seats beyond the day's free-growth cap (`BOARD_GROWTH`), up
+ * to the hard `BOARD_CAP = 8` ceiling. Purchased slots persist for the rest of
+ * the expedition (carried by `advanceAfterDawn`, reset to 0 on a fresh season
+ * by `newBuild`) and stack additively ON TOP of free growth:
+ * `effectiveBoardCap = min(BOARD_CAP, boardCapForDay(day) + purchasedSlots)`.
  *
- * Before issue #70, `boardCapForDay` handed out 3 of these slots for free by
- * day 7 (5,5,6,6,7,7,8) and `SLOT_PRICES = [36, 40, 44]` only bought the
- * board up to the hard cap EARLY. Now there is no free growth at all, so the
- * same 3 slots that used to be a late-game luxury purchase are the only path
- * from 5 to 8 — pricing them at the old ladder would trivialize the redesign
- * (a strong player would buy all 3 inside day 1). `scripts/slot-value.ts`
- * models the new all-purchase world (constant floor every day) and finds the
- * weekly scrap-equivalent value of each slot is now far higher than before
- * (each one is worth for the ENTIRE week what free growth used to hand over
- * for free) — see that script's derivation and output for the numbers this
- * ladder is built from. The ladder is priced as a genuine multi-day sink:
- * slot 1 alone (60) costs more than a full day's `DAILY_SCRAP` stipend, and
- * the full climb from 5 to 8 (400 total) is a multi-day slice of an idle
- * player's weekly ride income (~1400 scrap/week baseline, per
- * `snowball.ts`'s income-coupling section) — reachable by a strong,
- * deliberately-saving player by the back half of a 7-day expedition, not on
- * day 1, and not guaranteed for a passive/reactive-spend player at all (a
- * deliberate "earned" gate, not a dead end — see `snowball.ts`'s
- * board-slot-buying pass for confirmation a saving-focused player reaches 8
- * mid-to-late week).
+ * HISTORY / #70 → #91: issue #70 removed all free growth (flat 5 all week) and
+ * made SLOT_PRICES = [60,120,220] the only path from 5 to 8. That over-gated
+ * progression (see `BOARD_GROWTH`), so #91 restored free growth to 7. With
+ * free growth back, the price index (`SLOT_PRICES[purchasedSlots]`) now buys:
+ *   - for the PATIENT player (free growth already gave them 7 by day 5): a
+ *     single purchase to reach the 8th and final seat, at SLOT_PRICES[0] = 60
+ *     — a steep-but-reachable "earned top slot" (60 > 2× the DAILY_SCRAP
+ *     stipend), preserving #70's intent for that last seat;
+ *   - for the IMPATIENT player who wants seats ahead of free growth (e.g. an
+ *     8-wide board on day 1-2 before growth catches up): the full 60/120/220
+ *     ladder for those 2-3 early seats — a genuine multi-day sink, a deliberate
+ *     "pay to rush" premium over just waiting for the free seats.
+ * `scripts/slot-value.ts` models each seat's weekly scrap-equivalent value.
  */
 export const SLOT_PRICES: readonly number[] = [60, 120, 220];
 

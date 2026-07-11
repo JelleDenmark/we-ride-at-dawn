@@ -123,6 +123,46 @@ introducing a new imbalance under time pressure.
   needs Jesper's explicit per-session OK or a standing Bash rule he adds — you can't
   self-grant it.
 
+## RESULTS (2026-07-11, branch `progression-fix` off dev — NOT merged/deployed)
+
+**#90 done — diminishing income.** `scrapForDepth(depth)` in `shop.ts` is the single income
+source (App.svelte, snowball, slot-value all use it). `SCRAP_FULL_DEPTH=8`, `SCRAP_DEEP_RATE=0.4`:
+first 8 waves pay full, deeper pay 0.4, floored. Leaderboard score stays raw depth. A depth-30
+run is still mostly paid at 0.4 (throttles the leaderboard bank). `SCRAP_FULL_DEPTH=8` SIGNED OFF
+by Jesper (2026-07-11) — a deliberate mild surplus (week income ~1140, +12% vs 1020) over the
+income-neutral 7, so a merge-fishing player has scrap to chase a T3 unit rather than banking an
+unspendable surplus. Income is NOT the real T3 gate (fishing RNG is) — flagged to validate with
+live feedback next season.
+
+**#91 done — free board growth restored.** `BOARD_GROWTH = [5,6,6,7,7,7,7]` (day-indexed;
+front-loaded curve SIGNED OFF by Jesper 2026-07-11 over the neutral `[5,5,6,6,7,7,7]` — day 1
+is a build-only freeze so day 2 is the quit day, and this opens the 6th seat there). 8th seat
+still buy-only via `SLOT_PRICES` (now stacks on top of free growth). Median depth curve
+(snowball §7): before `2.95/4.05/5.60/6.87/7.25/7.89/7.88` → after
+`2.95/4.51/6.58/8.78/10.05/10.80/10.41`. Day-2 hook 4.05→4.51, day-6 peak +37%, plateau GONE.
+Week income 1140 (+12%, at `SCRAP_FULL_DEPTH=8` — see #90). (Neutral alt `[5,5,6,6,7,7,7]`:
+day-7 10.61, no dip — swap is a one-line `BOARD_GROWTH` change + the shop-test curve assertion
+if reconsidered.)
+
+**#92 DROPPED (data-backed).** New probe `scripts/maxed-board-guardrail.ts`: a maxed 8-unit t3
+board already tops **avg 28 / p95 41 / MAX 43 of 45** at CURRENT (unsoftened) constants.
+Softening 0.20/0.004→0.18/0.0025 pushes it to MAX 44 / p95 43 (saturates the WAVE_COUNT=45
+leaderboard) while adding only +0.07 to the median (the median is roster-limited, which #91 already
+fixes). A targeted linear-down/quadratic-up variant held the ceiling but gave the median nothing.
+So `sim.ts` is UNCHANGED — no golden-log regeneration needed. Recommend defer/skip #92 entirely.
+
+**#93 verification (all on the branch):** 189/189 tests pass (shop tests updated for the new
+board curve); app build compiles; snowball §1 edges CONVERGE (not a snowball); exploit-stress
+0/13 flagged; compounding-law canary 9/9; unit/relic/depth bands unchanged (Fat Tick→Marrow-Snap
+ordering intact, no dead-weight/dominant outlier). Interest share still ~1%. `PATCH-NOTES-DRAFT.md`
+Economy section reconciled (buy-only claim was stale) — curve-agnostic prose, pending sign-off.
+
+**Signed off (2026-07-11):** growth curve `[5,6,6,7,7,7,7]`; #90 `SCRAP_FULL_DEPTH=8`/
+`SCRAP_DEEP_RATE=0.4`; #92 dropped. **Still needs Jesper:** merge `progression-fix`→dev; deploy
+decision (deploy-race rule). **Flagged follow-up:** T3 reachability is gated by merge-fishing,
+not income — model a fishing player + test reroll cost 2→1 next; gather live feedback on the +12%
+economy.
+
 ## Related open issues (not part of this fix, context only)
 
 #81 leaderboard has no server-side score verification (pre-existing, launch-risk call

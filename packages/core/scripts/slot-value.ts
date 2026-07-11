@@ -20,7 +20,7 @@
 import { generateGauntlet } from '../src/gauntlet';
 import { simulate } from '../src/sim';
 import type { Lineup } from '../src/data/units';
-import { BOARD_FLOOR, SCRAP_PER_DEPTH, DAILY_SCRAP, SLOT_PRICES } from '../src/shop';
+import { BOARD_FLOOR, scrapForDepth, DAILY_SCRAP, SLOT_PRICES } from '../src/shop';
 import { BOARD_CAP } from '../src/sim';
 
 const START = '2026-07-06'; // synchronized-week Monday (day 1)
@@ -87,8 +87,15 @@ console.log('slot#  sumDeltaWaves(7 days)  scrapValue(x24)');
 const ladder: { slot: number; value: number }[] = [];
 for (let s = 1; s <= MAX_SLOTS; s++) {
   let sumDelta = 0;
-  for (let day = 1; day <= 7; day++) sumDelta += depthTable[day - 1][s] - depthTable[day - 1][s - 1];
-  const value = sumDelta * SCRAP_PER_DEPTH * 24;
+  let value = 0;
+  for (let day = 1; day <= 7; day++) {
+    sumDelta += depthTable[day - 1][s] - depthTable[day - 1][s - 1];
+    // Income delta is #90-aware: the extra waves this seat unlocks sit at the
+    // TOP of the run (the deepest band), where scrapForDepth diminishes them —
+    // so value the seat by the actual income gap between the two absolute
+    // depths (x24 rides/day), not flat waves x SCRAP_PER_DEPTH.
+    value += (scrapForDepth(depthTable[day - 1][s]) - scrapForDepth(depthTable[day - 1][s - 1])) * 24;
+  }
   ladder.push({ slot: s, value });
   console.log(`${s}      ${sumDelta.toFixed(2).padStart(6)}                 ${value.toFixed(0)}`);
 }
