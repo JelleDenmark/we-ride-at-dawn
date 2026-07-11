@@ -570,26 +570,30 @@ describe('expedition', () => {
     expect(next.teamRelicIds).toEqual([]);
   });
 
-  it('board cap is a constant floor across the whole expedition — no more free day-based growth (issue #70)', () => {
+  it('board cap follows the free-growth curve across the expedition (issue #91: 5,5,6,6,7,7,7)', () => {
     const caps = [1, 2, 3, 4, 5, 6, 7].map(boardCapForDay);
-    expect(caps).toEqual([5, 5, 5, 5, 5, 5, 5]);
-    expect(boardCapForDay(99)).toBe(5);
+    expect(caps).toEqual([5, 5, 6, 6, 7, 7, 7]);
+    // Days outside 1..7 clamp to the ends (day-1 floor below, day-7 cap above).
+    expect(boardCapForDay(0)).toBe(5);
+    expect(boardCapForDay(99)).toBe(7);
   });
 
-  it('does NOT let the board grow past the floor on later days without buying a slot (issue #70)', () => {
-    const base = newBuild('2026-07-04', 6);
+  it('does NOT let the board grow past the day cap without buying a slot (issue #91)', () => {
+    // Day 7 free-growth cap is 7; seven distinct rats already fill it (no
+    // three-of-a-kind, so no merge on the next buy) — an 8th rat has nowhere
+    // to go on the board without a purchased slot.
+    const base = newBuild('2026-07-04', 7);
     const s = {
       ...base,
       scrap: 99,
-      // Five distinct rats already fill the floor (no three-of-a-kind, so no
-      // merge on the next buy) — a 6th rat has nowhere to go without a
-      // purchased slot, regardless of how late into the expedition this is.
       board: [
         { defId: 'dire-rat', tier: 1, relicIds: [] },
         { defId: 'gnawer', tier: 1, relicIds: [] },
         { defId: 'rat-piper', tier: 1, relicIds: [] },
         { defId: 'brood-mother', tier: 1, relicIds: [] },
         { defId: 'bone-priest', tier: 1, relicIds: [] },
+        { defId: 'corpse-glutton', tier: 1, relicIds: [] },
+        { defId: 'blight-witch', tier: 1, relicIds: [] },
       ],
       bench: [],
       shop: {
@@ -603,7 +607,7 @@ describe('expedition', () => {
     // describe block below for the dedicated overflow tests.
     expect(res.ok).toBe(true);
     if (res.ok) {
-      expect(res.state.board.length).toBe(5);
+      expect(res.state.board.length).toBe(7);
       expect(res.state.bench.length).toBe(1);
     }
   });
@@ -1181,14 +1185,14 @@ describe('buyable horde slots (issue #9)', () => {
     }
   });
 
-  it('effectiveBoardCap adds purchased slots on top of the (now-constant) floor, hard-capped at BOARD_CAP', () => {
-    expect(effectiveBoardCap({ day: 1, purchasedSlots: 1 })).toBe(boardCapForDay(1) + 1);
+  it('effectiveBoardCap adds purchased slots on top of the day free-growth cap, hard-capped at BOARD_CAP', () => {
+    expect(effectiveBoardCap({ day: 1, purchasedSlots: 1 })).toBe(boardCapForDay(1) + 1); // 5+1=6
     expect(effectiveBoardCap({ day: 1, purchasedSlots: 3 })).toBe(BOARD_CAP); // 5 + 3 = 8
     expect(effectiveBoardCap({ day: 1, purchasedSlots: 99 })).toBe(BOARD_CAP); // clamped
-    // Issue #70: day no longer matters at all — day 7 with 1 purchased slot
-    // is the same 5+1=6 as day 1 with 1 purchased slot, since the floor no
-    // longer grows on its own.
-    expect(effectiveBoardCap({ day: 7, purchasedSlots: 1 })).toBe(6);
+    // Issue #91: free growth is back, so the day DOES matter again — the same
+    // 1 purchased slot reaches the hard cap on day 7 (7 free + 1 = 8) but only
+    // 6 on day 1 (5 free + 1). Purchased slots stack on top of free growth.
+    expect(effectiveBoardCap({ day: 7, purchasedSlots: 1 })).toBe(BOARD_CAP); // 7+1=8
   });
 
   it('buyBoardSlot charges the ladder price in order and increments purchasedSlots', () => {
@@ -1230,16 +1234,14 @@ describe('buyable horde slots (issue #9)', () => {
     if (!res.ok) expect(res.reason).toMatch(/not enough scrap/);
   });
 
-  it('rejects buying once all purchasable slots are bought (hard cap reached via purchase only, issue #70)', () => {
-    // Post-#70 there is no more "day already reached BOARD_CAP naturally" —
-    // boardCapForDay is a constant floor even on day 7. The hard cap can now
-    // ONLY be reached by buying every slot in SLOT_PRICES.
-    expect(boardCapForDay(SEASON_DAYS)).toBe(BOARD_FLOOR);
+  it('rejects buying once the hard cap is reached (issue #91: free growth + purchases)', () => {
+    // On day 7 free growth already gives 7 seats, so a single purchase reaches
+    // BOARD_CAP=8 and further buys are rejected — the last seat is one buy, not
+    // the whole ladder (contrast the day-1 full-ladder path in the test above).
+    expect(boardCapForDay(SEASON_DAYS)).toBe(7);
     let s = { ...newBuild('2026-07-10', SEASON_DAYS), scrap: 500 };
-    for (let i = 0; i < SLOT_PRICES.length; i++) {
-      s = (buyBoardSlot(s) as { ok: true; state: BuildState }).state;
-    }
-    expect(effectiveBoardCap(s)).toBe(BOARD_CAP);
+    s = (buyBoardSlot(s) as { ok: true; state: BuildState }).state;
+    expect(effectiveBoardCap(s)).toBe(BOARD_CAP); // 7 free + 1 purchased = 8
     const res = buyBoardSlot(s);
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.reason).toMatch(/hard cap/);
