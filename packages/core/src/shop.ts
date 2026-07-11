@@ -28,13 +28,19 @@ export const INTEREST_CAP = 5;
 // that let players push deeper (roster acceleration #91, enemy softening #92)
 // inflated the bank in lockstep, snowballing the economy #70 just tuned. So
 // income is now DIMINISHING in depth: the first `SCRAP_FULL_DEPTH` waves pay
-// full rate (the band a normal player already reaches, so this is ~neutral at
-// today's depths), and every wave beyond pays `SCRAP_DEEP_RATE`. This lets
-// depth climb freely for progression feel AND the leaderboard (which still
-// scores raw, undiminished depth — depth is the prestige metric) while the
-// bank stays controlled. Tuned so total week income at CURRENT depths stays
-// within a few % of the pre-#90 ~1020 baseline (see snowball §5/§7).
-export const SCRAP_FULL_DEPTH = 7;
+// full rate, and every wave beyond pays the reduced `SCRAP_DEEP_RATE`. This
+// keeps the LEADERBOARD chase from snowballing the bank (a depth-30 run is
+// still mostly paid at the 0.4 deep rate) while leaving score itself raw,
+// undiminished depth — depth is the prestige metric.
+//
+// full=8 is a DELIBERATE mild surplus, not income-neutral: with #91's deeper
+// median it lands week income ~1140 (~+12% over the pre-#90 ~1020 baseline,
+// see snowball §5/§7). The neutral value was 7; Jesper chose 8 (2026-07-11) so
+// a merge-fishing player has scrap to actually chase a T3 unit — a rewarding
+// payoff — rather than banking an unspendable surplus against a too-tight
+// economy. Income is NOT the real T3 gate (fishing RNG is), so this is a small
+// generosity lever to validate with live feedback next season, not a fix.
+export const SCRAP_FULL_DEPTH = 8;
 export const SCRAP_DEEP_RATE = 0.4;
 
 /**

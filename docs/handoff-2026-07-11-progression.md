@@ -126,9 +126,13 @@ introducing a new imbalance under time pressure.
 ## RESULTS (2026-07-11, branch `progression-fix` off dev — NOT merged/deployed)
 
 **#90 done — diminishing income.** `scrapForDepth(depth)` in `shop.ts` is the single income
-source (App.svelte, snowball, slot-value all use it). `SCRAP_FULL_DEPTH=7`, `SCRAP_DEEP_RATE=0.4`:
-first 7 waves pay full, deeper pay 0.4, floored. Leaderboard score stays raw depth. A depth-20
-run now pays 13 not 20 (throttle grows with depth). Week income lands 1029 (+0.9% vs 1020).
+source (App.svelte, snowball, slot-value all use it). `SCRAP_FULL_DEPTH=8`, `SCRAP_DEEP_RATE=0.4`:
+first 8 waves pay full, deeper pay 0.4, floored. Leaderboard score stays raw depth. A depth-30
+run is still mostly paid at 0.4 (throttles the leaderboard bank). `SCRAP_FULL_DEPTH=8` SIGNED OFF
+by Jesper (2026-07-11) — a deliberate mild surplus (week income ~1140, +12% vs 1020) over the
+income-neutral 7, so a merge-fishing player has scrap to chase a T3 unit rather than banking an
+unspendable surplus. Income is NOT the real T3 gate (fishing RNG is) — flagged to validate with
+live feedback next season.
 
 **#91 done — free board growth restored.** `BOARD_GROWTH = [5,6,6,7,7,7,7]` (day-indexed;
 front-loaded curve SIGNED OFF by Jesper 2026-07-11 over the neutral `[5,5,6,6,7,7,7]` — day 1
@@ -136,9 +140,9 @@ is a build-only freeze so day 2 is the quit day, and this opens the 6th seat the
 still buy-only via `SLOT_PRICES` (now stacks on top of free growth). Median depth curve
 (snowball §7): before `2.95/4.05/5.60/6.87/7.25/7.89/7.88` → after
 `2.95/4.51/6.58/8.78/10.05/10.80/10.41`. Day-2 hook 4.05→4.51, day-6 peak +37%, plateau GONE.
-`SCRAP_FULL_DEPTH` retuned 9→7 so #90 absorbs the deeper runs; week income 1068 (+4.7%,
-accepted). (Neutral alt `[5,5,6,6,7,7,7]`: +0.9% income, day-7 10.61, no dip — swap is a
-one-line `BOARD_GROWTH` change + the shop-test curve assertion if reconsidered.)
+Week income 1140 (+12%, at `SCRAP_FULL_DEPTH=8` — see #90). (Neutral alt `[5,5,6,6,7,7,7]`:
+day-7 10.61, no dip — swap is a one-line `BOARD_GROWTH` change + the shop-test curve assertion
+if reconsidered.)
 
 **#92 DROPPED (data-backed).** New probe `scripts/maxed-board-guardrail.ts`: a maxed 8-unit t3
 board already tops **avg 28 / p95 41 / MAX 43 of 45** at CURRENT (unsoftened) constants.
@@ -153,9 +157,11 @@ board curve); app build compiles; snowball §1 edges CONVERGE (not a snowball); 
 ordering intact, no dead-weight/dominant outlier). Interest share still ~1%. `PATCH-NOTES-DRAFT.md`
 Economy section reconciled (buy-only claim was stale) — curve-agnostic prose, pending sign-off.
 
-**Not done (needs Jesper):** sign off #90 numbers (`SCRAP_FULL_DEPTH=7`/`SCRAP_DEEP_RATE=0.4`);
-merge `progression-fix`→dev; deploy decision (deploy-race rule). Growth curve ✓ signed off
-(front-loaded). #92 recommended dropped.
+**Signed off (2026-07-11):** growth curve `[5,6,6,7,7,7,7]`; #90 `SCRAP_FULL_DEPTH=8`/
+`SCRAP_DEEP_RATE=0.4`; #92 dropped. **Still needs Jesper:** merge `progression-fix`→dev; deploy
+decision (deploy-race rule). **Flagged follow-up:** T3 reachability is gated by merge-fishing,
+not income — model a fishing player + test reroll cost 2→1 next; gather live feedback on the +12%
+economy.
 
 ## Related open issues (not part of this fix, context only)
 
