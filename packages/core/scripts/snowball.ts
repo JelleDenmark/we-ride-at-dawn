@@ -5,7 +5,7 @@
  * REAL income -> spend -> depth loop from the live game (see App.svelte's
  * idle heartbeat effect, which this mirrors):
  *
- *   each hour: earn depth * SCRAP_PER_DEPTH scrap for that hour's ride
+ *   each hour: earn scrapForDepth(depth) scrap for that hour's ride
  *              (simulate() against generateGauntlet(date, day, hour))
  *   at dawn (every 24 rides): interestFor(scrap) is added, then
  *              advanceAfterDawn() rolls the day forward (board/bench/relics
@@ -33,7 +33,7 @@ import {
   lineupFromBuild,
   boardCapForDay,
   DAILY_SCRAP,
-  SCRAP_PER_DEPTH,
+  scrapForDepth,
   SEASON_DAYS,
   type BuildState,
 } from '../src/shop';
@@ -259,7 +259,7 @@ function runWeek(startDate: string, startingScrapBonus = 0): RunResult {
   for (let h = 0; h < TOTAL_HOURS; h++) {
     const lineup = lineupFromBuild(build);
     const depth = lineup.units.length > 0 ? simulate(lineup, generateGauntlet(build.date, build.day, h)).result.wavesCleared : 0;
-    const earned = depth * SCRAP_PER_DEPTH;
+    const earned = scrapForDepth(depth);
     totalIncome += earned;
     build = { ...build, scrap: build.scrap + earned };
 
@@ -307,7 +307,7 @@ function runWeekBoardMaxing(startDate: string): BoardMaxRunResult {
   for (let h = 0; h < TOTAL_HOURS; h++) {
     const lineup = lineupFromBuild(build);
     const depth = lineup.units.length > 0 ? simulate(lineup, generateGauntlet(build.date, build.day, h)).result.wavesCleared : 0;
-    const earned = depth * SCRAP_PER_DEPTH;
+    const earned = scrapForDepth(depth);
     totalIncome += earned;
     build = { ...build, scrap: build.scrap + earned };
 
@@ -362,7 +362,7 @@ function runWeekWithEarlyMerge(startDate: string): RunResult {
   for (let h = 0; h < TOTAL_HOURS; h++) {
     const lineup = lineupFromBuild(build);
     const depth = lineup.units.length > 0 ? simulate(lineup, generateGauntlet(build.date, build.day, h)).result.wavesCleared : 0;
-    const earned = depth * SCRAP_PER_DEPTH;
+    const earned = scrapForDepth(depth);
     totalIncome += earned;
     build = { ...build, scrap: build.scrap + earned };
     samples.push({ hour: h, day: build.day, depth, scrapEarned: earned, bank: build.scrap });
@@ -689,7 +689,7 @@ for (let day = 1; day <= 7; day++) {
       const currentDay = build.day;
       const lineup = lineupFromBuild(build);
       const depth = lineup.units.length > 0 ? simulate(lineup, generateGauntlet(build.date, build.day, h)).result.wavesCleared : 0;
-      const earned = depth * SCRAP_PER_DEPTH;
+      const earned = scrapForDepth(depth);
       build = { ...build, scrap: build.scrap + earned };
       if (currentDay === day) dayIncome += earned;
       build = spendGreedily(build);

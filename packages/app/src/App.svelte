@@ -12,7 +12,7 @@
     weekdayFor,
     seasonIdFor,
     interestFor,
-    SCRAP_PER_DEPTH,
+    scrapForDepth,
     SEASON_DAYS,
     buyUnit,
     canRecruit,
@@ -189,7 +189,7 @@
       : null
   );
   const currentDepth = $derived(currentOutcome ? currentOutcome.result.wavesCleared : 0);
-  const scrapPerHour = $derived(currentDepth * SCRAP_PER_DEPTH);
+  const scrapPerHour = $derived(scrapForDepth(currentDepth));
   const secondsToNextHour = $derived(3600 - (Math.floor(nowTick / 1000) % 3600));
   // True only during the day-1 recruitment freeze (see isFrozenHour above) —
   // drives the idle-panel status line. The live ride preview below is
@@ -550,7 +550,7 @@
           if (isFrozenHour(h, build.seasonId)) continue;
           const timedLineup = { ...lineup, timeOfDay: timeOfDayAt(new Date(h * HOUR_MS)) };
           const { result } = simulate(timedLineup, generateGauntlet(build.date, build.day));
-          const scrap = result.wavesCleared * SCRAP_PER_DEPTH;
+          const scrap = scrapForDepth(result.wavesCleared);
           earned += scrap;
           rides.push({
             hour: h,
@@ -686,7 +686,7 @@
       if (isFrozenHour(hourBucket, build.seasonId)) continue;
       const timedLineup = { ...lineup, timeOfDay: timeOfDayAt(new Date(hourBucket * HOUR_MS)) };
       const { result } = simulate(timedLineup, generateGauntlet(build.date, build.day));
-      const scrap = result.wavesCleared * SCRAP_PER_DEPTH;
+      const scrap = scrapForDepth(result.wavesCleared);
       earned += scrap;
       rides.push({
         hour: hourBucket,
@@ -1163,9 +1163,9 @@
         </div>
         <p class="idle-note">
           {#if inRecruitmentWindow}
-            "next haul" is a preview of your build, not banked yet — it won't be credited until 10:00 CET · +{SCRAP_PER_DEPTH} scrap per depth cleared once rides start · gets tougher deeper
+            "next haul" is a preview of your build, not banked yet — it won't be credited until 10:00 CET · scrap per depth cleared once rides start (deeper waves pay less) · gets tougher deeper
           {:else}
-            +{SCRAP_PER_DEPTH} scrap per depth cleared, every hour · +{interestFor(build.scrap)} interest banked each dawn · gets tougher deeper
+            scrap per depth cleared, every hour (deeper waves pay less) · +{interestFor(build.scrap)} interest banked each dawn · gets tougher deeper
           {/if}
         </p>
         <button class="watch" onclick={watchRide}>▶ watch the next ride</button>

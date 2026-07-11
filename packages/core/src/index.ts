@@ -42,6 +42,7 @@ export {
   interestFor,
   SEASON_DAYS,
   SCRAP_PER_DEPTH,
+  scrapForDepth,
   INTEREST_CAP,
   rollOfferings,
   buyUnit,

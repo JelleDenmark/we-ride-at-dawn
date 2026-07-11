@@ -15,13 +15,40 @@ export const SEASON_DAYS = 7;
  * counter-tech, not a second board. */
 export const BENCH_SIZE = 3;
 
-// Idle economy: the horde skirmishes hourly, earning SCRAP_PER_DEPTH per wave
-// cleared. Interest (TFT-style, 5% of the bank, capped) is paid once per DAY
-// at dawn, not per hour — the daily cadence + cap keep the bank from
-// snowballing over the hundreds of hours in an expedition.
+// Idle economy: the horde skirmishes hourly, earning scrap per wave cleared.
+// Interest (TFT-style, 5% of the bank, capped) is paid once per DAY at dawn,
+// not per hour — the daily cadence + cap keep the bank from snowballing over
+// the hundreds of hours in an expedition.
 export const SCRAP_PER_DEPTH = 1;
 export const INTEREST_RATE = 0.05;
 export const INTEREST_CAP = 5;
+
+// Income decoupling (issue #90). Income used to be a flat `depth *
+// SCRAP_PER_DEPTH` — every extra wave cleared paid the same, so ANY change
+// that let players push deeper (roster acceleration #91, enemy softening #92)
+// inflated the bank in lockstep, snowballing the economy #70 just tuned. So
+// income is now DIMINISHING in depth: the first `SCRAP_FULL_DEPTH` waves pay
+// full rate (the band a normal player already reaches, so this is ~neutral at
+// today's depths), and every wave beyond pays `SCRAP_DEEP_RATE`. This lets
+// depth climb freely for progression feel AND the leaderboard (which still
+// scores raw, undiminished depth — depth is the prestige metric) while the
+// bank stays controlled. Tuned so total week income at CURRENT depths stays
+// within a few % of the pre-#90 ~1020 baseline (see snowball §5/§7).
+export const SCRAP_FULL_DEPTH = 9;
+export const SCRAP_DEEP_RATE = 0.4;
+
+/**
+ * Scrap earned for clearing `depth` waves in one ride — the single source of
+ * truth for idle income (issue #90), so app, balance scripts, and any future
+ * server re-sim agree. Diminishing past `SCRAP_FULL_DEPTH`; floored to keep
+ * the economy integer (scrap is spent in whole units everywhere). NOTE: this
+ * is INCOME only — leaderboard score / max-depth is still raw `depth`.
+ */
+export function scrapForDepth(depth: number): number {
+  const full = Math.min(depth, SCRAP_FULL_DEPTH);
+  const deep = Math.max(0, depth - SCRAP_FULL_DEPTH);
+  return Math.floor(full * SCRAP_PER_DEPTH + deep * SCRAP_DEEP_RATE);
+}
 
 export function interestFor(scrap: number): number {
   return Math.min(INTEREST_CAP, Math.floor(scrap * INTEREST_RATE));
