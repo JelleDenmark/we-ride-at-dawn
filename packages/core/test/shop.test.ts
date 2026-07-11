@@ -570,9 +570,9 @@ describe('expedition', () => {
     expect(next.teamRelicIds).toEqual([]);
   });
 
-  it('board cap follows the free-growth curve across the expedition (issue #91: 5,5,6,6,7,7,7)', () => {
+  it('board cap follows the free-growth curve across the expedition (issue #91: 5,6,6,7,7,7,7)', () => {
     const caps = [1, 2, 3, 4, 5, 6, 7].map(boardCapForDay);
-    expect(caps).toEqual([5, 5, 6, 6, 7, 7, 7]);
+    expect(caps).toEqual([5, 6, 6, 7, 7, 7, 7]);
     // Days outside 1..7 clamp to the ends (day-1 floor below, day-7 cap above).
     expect(boardCapForDay(0)).toBe(5);
     expect(boardCapForDay(99)).toBe(7);

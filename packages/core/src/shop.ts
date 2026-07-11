@@ -61,7 +61,8 @@ export const BOARD_FLOOR = 5;
 /**
  * Free board growth by expedition day (issue #91). `BOARD_GROWTH[day-1]` is
  * the number of seats the horde gets for free on that day, no purchase
- * required: 5,5,6,6,7,7,7 — the board opens up to 7 by day 5, then holds.
+ * required: 5,6,6,7,7,7,7 — the 6th seat opens on day 2, the 7th by day 4,
+ * then it holds.
  *
  * WHY THIS EXISTS / #70 TENSION: issue #70 froze the board at a flat 5 all
  * week and made every seat beyond it a steep buy (`SLOT_PRICES`). That made
@@ -72,8 +73,11 @@ export const BOARD_FLOOR = 5;
  * give the median horde room to actually get deeper day-to-day, while keeping
  * the 8th (final) seat purchase-only (`SLOT_PRICES[0]`) so #70's "earned top
  * slot" survives in spirit — it's now ONE deliberate late purchase, not three.
+ * The curve is FRONT-LOADED (6th seat on day 2, not day 3): day 1 is a
+ * build-only freeze, so day 2 is the first real grind day and the one players
+ * quit on — opening a visible new seat there is the "don't give up day 2" hook.
  */
-export const BOARD_GROWTH: readonly number[] = [5, 5, 6, 6, 7, 7, 7];
+export const BOARD_GROWTH: readonly number[] = [5, 6, 6, 7, 7, 7, 7];
 
 /** Buildable board size for a given expedition day (1..7): the free-growth
  * seats for that day (`BOARD_GROWTH`), before any purchased slots stack on

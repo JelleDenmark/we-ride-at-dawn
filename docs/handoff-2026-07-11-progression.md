@@ -130,13 +130,15 @@ source (App.svelte, snowball, slot-value all use it). `SCRAP_FULL_DEPTH=7`, `SCR
 first 7 waves pay full, deeper pay 0.4, floored. Leaderboard score stays raw depth. A depth-20
 run now pays 13 not 20 (throttle grows with depth). Week income lands 1029 (+0.9% vs 1020).
 
-**#91 done — free board growth restored.** `BOARD_GROWTH = [5,5,6,6,7,7,7]` (day-indexed);
-8th seat still buy-only via `SLOT_PRICES` (now stacks on top of free growth). Median depth
-curve (snowball §7): before `2.95/4.05/5.60/6.87/7.25/7.89/7.88` → after
-`2.95/4.03/6.16/8.07/9.45/10.38/10.61`. Day-7 +35%, plateau GONE (climbs every day), days 1-2
-unchanged. `SCRAP_FULL_DEPTH` was retuned 9→7 here so #90 absorbs the deeper runs and income
-stays neutral. **The curve is pending Jesper's sign-off** — alt `[5,6,6,7,7,7,7]` gives a
-stronger day-2 hook (4.51 vs 4.03) at +4.7% income and a slight day-7 dip.
+**#91 done — free board growth restored.** `BOARD_GROWTH = [5,6,6,7,7,7,7]` (day-indexed;
+front-loaded curve SIGNED OFF by Jesper 2026-07-11 over the neutral `[5,5,6,6,7,7,7]` — day 1
+is a build-only freeze so day 2 is the quit day, and this opens the 6th seat there). 8th seat
+still buy-only via `SLOT_PRICES` (now stacks on top of free growth). Median depth curve
+(snowball §7): before `2.95/4.05/5.60/6.87/7.25/7.89/7.88` → after
+`2.95/4.51/6.58/8.78/10.05/10.80/10.41`. Day-2 hook 4.05→4.51, day-6 peak +37%, plateau GONE.
+`SCRAP_FULL_DEPTH` retuned 9→7 so #90 absorbs the deeper runs; week income 1068 (+4.7%,
+accepted). (Neutral alt `[5,5,6,6,7,7,7]`: +0.9% income, day-7 10.61, no dip — swap is a
+one-line `BOARD_GROWTH` change + the shop-test curve assertion if reconsidered.)
 
 **#92 DROPPED (data-backed).** New probe `scripts/maxed-board-guardrail.ts`: a maxed 8-unit t3
 board already tops **avg 28 / p95 41 / MAX 43 of 45** at CURRENT (unsoftened) constants.
@@ -151,8 +153,9 @@ board curve); app build compiles; snowball §1 edges CONVERGE (not a snowball); 
 ordering intact, no dead-weight/dominant outlier). Interest share still ~1%. `PATCH-NOTES-DRAFT.md`
 Economy section reconciled (buy-only claim was stale) — curve-agnostic prose, pending sign-off.
 
-**Not done (needs Jesper):** pick the growth curve; sign off #90 numbers; merge `progression-fix`→dev;
-deploy decision (deploy-race rule). #92 recommended dropped.
+**Not done (needs Jesper):** sign off #90 numbers (`SCRAP_FULL_DEPTH=7`/`SCRAP_DEEP_RATE=0.4`);
+merge `progression-fix`→dev; deploy decision (deploy-race rule). Growth curve ✓ signed off
+(front-loaded). #92 recommended dropped.
 
 ## Related open issues (not part of this fix, context only)
 
