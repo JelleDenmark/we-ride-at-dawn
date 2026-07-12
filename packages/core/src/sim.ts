@@ -320,6 +320,17 @@ export function simulate(
         break;
       }
       case 'poisonTarget': {
+        // Midden-Hag (data/enemies.ts), the only user: `afterAttack`, so this
+        // fires on every clash tick the enemy survives, not once per wave.
+        // NOTE: uses flat `effect.stacks * tier` scaling, unlike its poison
+        // siblings (poisonFrontEnemy/poisonAllEnemies), which both read from
+        // the shared `poisonStacksForTier` table — no design note explains
+        // the exemption; flagged here as an inconsistency, not confirmed
+        // intentional. Compounding-law check: safe across the 45-wave battle
+        // regardless (enemies are re-instantiated every wave, and poison on
+        // the horde is cleared at `waveClear` same as the enemy side), but a
+        // long single wave could still stack this unusually high within that
+        // one wave given the per-tick trigger — not benchmarked.
         const target = opposing(source.side)[0];
         if (target && target.health > 0) applyPoisonStacks(target, effect.stacks * tier);
         break;

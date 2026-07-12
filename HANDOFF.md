@@ -1,5 +1,7 @@
 # We Ride at Dawn — Handoff Summary
 
+> ⚠ **STALE — read `CONTEXT.md` and `docs/adr/` first.** Last updated 2026-07-08 (v0.6.3/0.6.4); the project has since shipped v0.6.5 (new units, the Monday progression fix #90-93, reroll cost, etc.) and this file was never updated to match — treat everything below as historical narrative, not current state. For current terminology use `CONTEXT.md`; for current state check `git log` and the most recent `docs/handoff-*.md` (dated, single-session handoffs are the live pattern now, not this file).
+
 _Last updated **2026-07-08**. **Prod is live on v0.6.3.** **`dev` is AHEAD of prod** (`dev` = `c9ff335`): Glass Shard rework, the **`startOfBattle` compounding fix**, **Dire-Rat armor**, **summon headroom**, and a **Bone-Priest double-revive hotfix** (`69f47ba`, cherry-pick candidate for prod — see "⚠ Live exploit" below). The Bone-Priest hotfix **shipped to prod as v0.6.4** on 2026-07-08 (cherry-pick `69f47ba` → master `b492b1f`, verified serving `index-9vbKqu3A.js` / `0.6.4` with the `raised` guard). Balance changes ship as **0.6.5** at the Monday reset. Companion docs: **`ROADMAP.md`** (forward backlog — **§4 is the balance backlog / active work**), `PWA-SCOPE.md` (phased PWA plan), `plan.md` (decision history), `we-ride-at-dawn-spec.md` (original spec), `PATCH-0.6.0.md` / `PATCH-0.6.1.md` (patch rundowns). Deeper background + operational gotchas live in Claude Code memory (incl. the Discord bot — `wrad-discord-feedback-bot`)._
 
 ## What it is

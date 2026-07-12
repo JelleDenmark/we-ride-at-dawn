@@ -96,7 +96,10 @@ export function loadPlayerName(): string | null {
 }
 
 /** Best depth reached this season (headline leaderboard score), plus the
- * hour bucket of the ride that set it (for anti-cheat re-simulation). */
+ * hour bucket of the ride that set it (for anti-cheat re-simulation).
+ * NOT YET IMPLEMENTED — see issue #81: there is currently no server-side
+ * re-simulation, so submitted scores are entirely client-trusted. This
+ * field is captured now so that work is a client-side no-op when it lands. */
 export function saveSeasonBest(seasonId: string, best: number, hour?: number): void {
   try {
     localStorage.setItem(`${NS}:best`, JSON.stringify({ seasonId, best, hour }));

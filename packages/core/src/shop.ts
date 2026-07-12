@@ -285,15 +285,6 @@ const clone = (state: BuildState): BuildState => JSON.parse(JSON.stringify(state
 const fail = (reason: string): ActionResult => ({ ok: false, reason });
 
 /**
- * Three copies of the same unit at the same tier merge into one, a tier up.
- * Merges resolve across board *and* bench (the whole point of the bench —
- * it relieves merge-3 frustration by letting stray copies wait there). A
- * match is scanned board-first, then bench, so the merged unit lands on the
- * board if any of the three copies was already fighting; otherwise it lands
- * on the bench. When the bench is empty this is byte-identical to the old
- * board-only combine.
- */
-/**
  * Refund for a single relic lost outside of a direct sale (a merge-dedup
  * discard, or a relic pinned to a unit that's sold): half its cost, rounded
  * down, floored at 1 — matching the unit sell rate so neither path lets a
@@ -304,6 +295,15 @@ function relicRefund(relicId: string): number {
   return cost === undefined ? 0 : Math.max(1, Math.floor(cost / 2));
 }
 
+/**
+ * Three copies of the same unit at the same tier merge into one, a tier up.
+ * Merges resolve across board *and* bench (the whole point of the bench —
+ * it relieves merge-3 frustration by letting stray copies wait there). A
+ * match is scanned board-first, then bench, so the merged unit lands on the
+ * board if any of the three copies was already fighting; otherwise it lands
+ * on the bench. When the bench is empty this is byte-identical to the old
+ * board-only combine.
+ */
 function combineAll(state: BuildState): void {
   for (;;) {
     // Tag each unit with its pool so the earliest match (board scanned

@@ -1,4 +1,21 @@
 <script lang="ts">
+  // Orientation for a cold read of this ~2300-line file (search for these
+  // anchors rather than reading linearly):
+  //   - Imports from `core` (below) — this file is UI/orchestration only;
+  //     all game logic (gauntlet/sim/shop rules) lives in packages/core.
+  //   - `onMount(...)` — PWA update/install-prompt wiring.
+  //   - "Idle heartbeat" comment — the hourly auto-ride loop: advances the
+  //     day at each dawn boundary, runs `simulate()` for elapsed hours,
+  //     updates scrap/seasonBest/ride log. This is the real economy loop;
+  //     `packages/core/scripts/snowball.ts` models the same loop headlessly.
+  //   - `stopReplay` / `skipReplay` — the "watch the next ride" replay
+  //     controls (a live preview of the current build, not a past ride).
+  //   - `clickShopSlot` and nearby — shop purchase/reroll/freeze actions,
+  //     thin wrappers around the pure functions imported from `core`'s
+  //     `shop.ts` (this file never mutates game rules itself).
+  //   - `fetchTop` / `fetchRank` — leaderboard panel data, from `leaderboard.ts`.
+  //   - the closing script tag below this block — the markup/template
+  //     starts right after it; component state above is what drives it.
   import { onMount } from 'svelte';
   import {
     currentRideDate,
