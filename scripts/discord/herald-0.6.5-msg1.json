@@ -1,0 +1,12 @@
+{
+  "embeds": [
+    {
+      "title": "v0.6.5 — the drains run deeper (1/2)",
+      "description": "⏳ **24 hours to a new season.** Monday 06:00 CET the drains reset — new week, new board, and the biggest shake-up to the curve since launch: star tiers hit way harder, the horde grows into a bigger board as the week goes on, and four new rats join the warren.\n\n**New rats** (Ward-Weaver unlocks day 2; Dawn/Dusk-Runt day 3)\n• Press-Kin — battle: buffs both rats beside it; the middle of the line is the strongest seat now.\n• Ward-Weaver — each wave: wards the front rat against its first hit outright (★2 blocks 2, ★3 blocks 3), resets clean every wave.\n• Dawn-Runt & Dusk-Runt — a matched pair. Dawn-Runt wakes before noon CET and hardens the horde's attack; Dusk-Runt takes over after noon and hardens its health.\n\n**Reworked**\n• Star power hits harder: every star is now 3x the last star's attack AND health, on every unit (was a flat multiply). Tiering up finally feels like tiering up.\n• The drains eased their grip to match — the curve isn't just a stomp or a wall now.\n• Blight-Witch stopped poking single targets — she opens every wave by rotting the whole enemy line. Costs more to match (6 → 8 scrap).\n• Poison stacks scale on a steeper table per star.\n• Bone-Priest's revive brings a rat back on a real per-star HP curve, capped at their own max — tiering the priest up finally matters.\n• Rat-Piper and Plague-Bearer fire every wave now instead of once a battle.\n• Dire-Rat finally has a job: 2 flat armor shrugs off every attack that lands (poison still gets through — armor doesn't stop rot).\n• Warren-Warden has retired from the shop stalls. Still rides if you've already got one; the stalls don't sell him anymore.",
+      "color": 5793266,
+      "footer": {
+        "text": "we ride at dawn · season resets Monday 06:00 CET"
+      }
+    }
+  ]
+}
