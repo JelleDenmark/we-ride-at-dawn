@@ -207,12 +207,19 @@
   );
   const currentDepth = $derived(currentOutcome ? currentOutcome.result.wavesCleared : 0);
   const scrapPerHour = $derived(scrapForDepth(currentDepth));
-  const secondsToNextHour = $derived(3600 - (Math.floor(nowTick / 1000) % 3600));
   // True only during the day-1 recruitment freeze (see isFrozenHour above) —
   // drives the idle-panel status line. The live ride preview below is
   // unaffected: it always simulates the current board, freeze or not.
   const inRecruitmentWindow = $derived(
     isFrozenHour(Math.floor(nowTick / HOUR_MS), build.seasonId)
+  );
+  // While frozen, the first ride is 10:00 CET, not the next wall-clock hour
+  // (which could be hours away from 10:00 on an early-morning day-1 login) —
+  // count down to the actual freeze boundary instead.
+  const secondsToNextHour = $derived(
+    inRecruitmentWindow
+      ? DAY1_CUTOFF_SEC - copenhagenSeconds(new Date(nowTick))
+      : 3600 - (Math.floor(nowTick / 1000) % 3600)
   );
   let telemetry = $state(telemetryEnabled());
 
