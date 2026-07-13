@@ -768,8 +768,9 @@
     return false;
   }
 
-  /** Apply an action and auto-reroll the shop if all stalls are bought.
-   * Used for actions that can empty shop slots (buyUnit, buyRelic). */
+  /** Apply an action and auto-reroll the shop if every rat stall is bought out
+   * (relics may still linger). Used for actions that empty shop slots (buyUnit,
+   * buyRelic). */
   function applyAndAutoReroll(res: ActionResult): boolean {
     if (apply(res)) {
       const autoRoll = autoRerollShop(build);
