@@ -217,6 +217,19 @@ function shopUnitPoolForDay(day: number): UnitDef[] {
 }
 
 /**
+ * Units still locked on `day` but arriving later this week, soonest first —
+ * lets the app tell players new rats are coming instead of them only
+ * noticing once the pool quietly grows (there was no such signal until this
+ * was added; players had no way to know day-gated units existed at all).
+ * Pure function of `day`, same shape as `shopUnitPoolForDay`.
+ */
+export function upcomingUnlocks(day: number): UnitDef[] {
+  return SHOP_UNIT_POOL.filter((u) => u.unlockDay !== undefined && u.unlockDay > day).sort(
+    (a, b) => (a.unlockDay ?? 0) - (b.unlockDay ?? 0)
+  );
+}
+
+/**
  * Offerings are deterministic for a given (date, roll #, owned team relics,
  * day). A team relic the horde already carries can never be bought again, so
  * it's filtered out of the pool rather than rolled as a dead, unbuyable

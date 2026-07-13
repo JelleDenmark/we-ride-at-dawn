@@ -53,6 +53,7 @@
     effectiveBoardCap,
     nextSlotPrice,
     buyBoardSlot,
+    upcomingUnlocks,
     tierAttackMultiplier,
     tierHealthMultiplier,
     reviveHpForTier,
@@ -207,6 +208,10 @@
   );
   const currentDepth = $derived(currentOutcome ? currentOutcome.result.wavesCleared : 0);
   const scrapPerHour = $derived(scrapForDepth(currentDepth));
+  // Rats gated to a later day (issue #12 and friends) are otherwise
+  // invisible until the day they show up in the shop pool — nothing told
+  // players they existed at all. Soonest-unlocking first.
+  const upcoming = $derived(upcomingUnlocks(build.day));
   // True only during the day-1 recruitment freeze (see isFrozenHour above) —
   // drives the idle-panel status line. The live ride preview below is
   // unaffected: it always simulates the current board, freeze or not.
@@ -1141,6 +1146,17 @@
     </div>
     </div>
 
+    {#if upcoming.length > 0}
+      <div class="arriving">
+        <span class="panel-label">arriving later this week</span>
+        <div class="chips">
+          {#each upcoming as def}
+            <span class="chip">{def.name} · day {def.unlockDay}</span>
+          {/each}
+        </div>
+      </div>
+    {/if}
+
     {#if build.board.length === 0 && build.scrap > 0}
       <p class="onboarding-hint">your warren is empty — spend your {build.scrap} ⚙ to recruit your first rats</p>
     {/if}
@@ -1602,6 +1618,28 @@
     padding: 10px 12px 12px;
     border: 1px solid #322820;
     border-radius: 10px;
+  }
+
+  .arriving {
+    margin-top: 10px;
+    padding: 8px 12px;
+    border: 1px dashed #4a3520;
+    border-radius: 8px;
+  }
+
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 5px;
+  }
+
+  .chip {
+    font-size: 12px;
+    padding: 3px 10px;
+    border-radius: 10px;
+    background: #2a2118;
+    color: #c9b891;
   }
 
   .phase-divider {
