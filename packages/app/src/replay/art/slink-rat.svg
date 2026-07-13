@@ -1,0 +1,31 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <!-- Slink-Rat: fragile backline sniper, lean and crouched, lining up a ranged shot -->
+
+  <!-- tail (thin, curved, retreating posture) -->
+  <path d="M8 48 Q2 45 1 38 Q0 32 5 30" fill="none" stroke="#5e3120" stroke-width="2.2" stroke-linecap="round"/>
+
+  <!-- lean crouched body (low, wiry, fragile silhouette) -->
+  <path d="M8 50 C5 42 8 32 18 30 C26 29 32 32 34 38 L38 42 C35 36 28 34 24 36 Z" fill="#8a4b2f" stroke="none"/>
+  <path d="M8 50 C5 42 8 30 20 28 C28 27 34 31 37 39 C38 43 36 49 28 52 C22 54 11 54 8 50 Z" fill="#8a4b2f" stroke="#201209" stroke-width="1.5" stroke-linejoin="round"/>
+
+  <!-- shading to emphasize thin, wiry build -->
+  <path d="M14 32 C11 35 10 44 14 50 C10 44 10 35 14 32 Z" fill="#7a4128" opacity="0.6"/>
+
+  <!-- small tense head (forward/down in hunting position, not upright) -->
+  <path d="M33 30 C31 25 36 21 42 23 L48 29 C49 30.2 48 32 46.5 31.8 L39 32 C36 33 34 32 33 30 Z" fill="#8a4b2f" stroke="#201209" stroke-width="1.5" stroke-linejoin="round"/>
+  <circle cx="35" cy="21" r="3.2" fill="#8a4b2f" stroke="#201209" stroke-width="1.4"/>
+  <circle cx="35" cy="21" r="1.4" fill="#b4715a"/>
+  <circle cx="44" cy="28" r="1.4" fill="#201209"/>
+
+  <!-- sling weapon (ready to fire - one hand holding the sling line, taut) -->
+  <path d="M30 36 L26 30 L28 28" fill="none" stroke="#5e3120" stroke-width="1.8" stroke-linecap="round"/>
+  <!-- sling pouch (small stone/projectile) -->
+  <circle cx="24" cy="28" r="1.8" fill="#7a6b5a" stroke="#201209" stroke-width="0.9"/>
+
+  <!-- arm tension line (rear arm extended back for tension) -->
+  <path d="M20 40 L16 35" fill="none" stroke="#5e3120" stroke-width="1.5" stroke-linecap="round" opacity="0.7"/>
+
+  <!-- hind legs (thin, wiry, in crouch position) -->
+  <rect x="16" y="49" width="3.5" height="8" rx="1.6" fill="#5e3120"/>
+  <rect x="28" y="50" width="3.5" height="8" rx="1.6" fill="#5e3120"/>
+</svg>
