@@ -98,6 +98,8 @@ interface BattleUnit {
   tier: number;
   side: Side;
   ability?: Ability;
+  /** Pack-Caller's `buffAdjacentByTribe` (issue #88) counts board rats sharing this tag. */
+  tribe?: string;
   relics: RelicDef[];
   poison: number;
   firstAttackDone: boolean;
@@ -181,6 +183,7 @@ export function simulate(
       tier,
       side,
       ability: def.ability,
+      tribe: def.tribe,
       relics,
       poison: 0,
       firstAttackDone: false,
@@ -306,6 +309,30 @@ export function simulate(
         if (index > 0) targets.push(board[index - 1]);
         if (index < board.length - 1) targets.push(board[index + 1]);
         for (const target of targets) buff(target, effect.attack * tierAttackMultiplier(tier), effect.health * tierHealthMultiplier(tier));
+        break;
+      }
+      case 'buffAdjacentByTribe': {
+        // Pack-Caller (issue #88). Same adjacency shape as `buffAdjacent`
+        // above (both neighbors, whichever exist — middle placement hits
+        // both), but the magnitude is multiplied by a live count of OTHER
+        // board rats sharing this unit's own `tribe` tag. `startOfBattle`
+        // (fireEntryTriggers), so — same as `buffAdjacent` — `removed` is
+        // never true here and `index` is always the live board position.
+        // Compounding-law note is on the Effect's doc comment in
+        // data/units.ts: fires once per instance, ever, and the count is
+        // bounded by board size (at most BOARD_CAP-1 other units), so
+        // there's no per-wave re-stacking vector.
+        const targets: BattleUnit[] = [];
+        if (index > 0) targets.push(board[index - 1]);
+        if (index < board.length - 1) targets.push(board[index + 1]);
+        if (targets.length > 0 && source.tribe) {
+          const sameTribeCount = board.filter((u) => u !== source && u.tribe === source.tribe).length;
+          if (sameTribeCount > 0) {
+            const atk = effect.attack * sameTribeCount * tierAttackMultiplier(tier);
+            const hp = effect.health * sameTribeCount * tierHealthMultiplier(tier);
+            for (const target of targets) buff(target, atk, hp);
+          }
+        }
         break;
       }
       case 'poisonFrontEnemy': {
