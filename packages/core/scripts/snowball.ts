@@ -649,7 +649,9 @@ console.log(
   `\nFilth Totem (team, cost ${RELIC_DEFS['filth-totem'].cost}): whole-horde Δ ${(teamWith - relicBase).toFixed(3)} (Δ/cost ${((teamWith - relicBase) / RELIC_DEFS['filth-totem'].cost).toFixed(4)})`
 );
 
-// Team relic (The Forgotten Backpack, issue #24) — whole-horde per-tick regen.
+// Team relic (The Forgotten Backpack, issue #24) — flat +2/+2 whole-horde
+// combat-start buff (same mechanism as Filth Totem, applied once via
+// instantiate()).
 const teamWithBackpack = (() => {
   const units = relicBoard();
   const ds = RELIC_TEST_DATES.map(
