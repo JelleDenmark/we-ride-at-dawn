@@ -519,17 +519,25 @@ export function rerollShop(state: BuildState): ActionResult {
   return { ok: true, state: s };
 }
 
-/** Check if all shop slots are empty (every stall has been bought). */
+/** Whether the shop has no rats left to buy — every unit stall has been
+ * bought out. Relic stalls are ignored: a player who's cleared all the rats
+ * has spent the shop's main purpose, so we refresh even if unaffordable /
+ * unwanted relics still linger (the screenshot dead-end where 0-scrap players
+ * stared at 4 empty rat stalls + 2 stuck relics). A freshly rolled shop always
+ * carries units again, so this can never re-fire on its own output — no free
+ * reroll loop. Freezing a relic still keeps it across the reroll (see
+ * autoRerollShop), so nothing worth saving is lost. */
 export function isShopDead(state: BuildState): boolean {
-  return state.shop.slots.every((slot) => slot.kind === 'empty');
+  return !state.shop.slots.some((slot) => slot.kind === 'unit');
 }
 
-/** Auto-reroll the shop for free when all stalls are bought. This does NOT
- * consume scrap — the only thing that distinguishes this from `rerollShop`.
+/** Auto-reroll the shop for free when every rat stall is bought out. This does
+ * NOT consume scrap — the only thing that distinguishes this from `rerollShop`.
  * `shop.rolls` is purely an internal seed counter for `rollOfferings` (never
  * shown to the player or used for cost scaling), so it must still advance
  * here — otherwise the next manual reroll would reuse the same roll number
- * and hand back an identical shop, silently wasting the player's scrap. */
+ * and hand back an identical shop, silently wasting the player's scrap.
+ * Non-empty frozen stalls (incl. relics) are preserved, same as rerollShop. */
 export function autoRerollShop(state: BuildState): ActionResult {
   if (!isShopDead(state)) return { ok: false, reason: 'shop is not dead' };
   const s = clone(state);

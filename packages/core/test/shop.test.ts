@@ -212,18 +212,69 @@ describe('shop basics', () => {
     expect(rolled.shop.frozen[i]).toBe(true);
   });
 
-  it('isShopDead detects when all slots are empty', () => {
+  it('isShopDead detects when no rat stalls remain', () => {
     const s = newBuild('2026-07-03');
     expect(isShopDead(s)).toBe(false);
-    // Empty all slots manually
+    // All slots empty (every stall bought): dead.
     const allEmpty = {
+      ...s,
+      shop: { ...s.shop, slots: Array(6).fill({ kind: 'empty' as const }) },
+    };
+    expect(isShopDead(allEmpty)).toBe(true);
+  });
+
+  it('isShopDead is true once the rats are gone even if relics linger', () => {
+    const s = newBuild('2026-07-03');
+    // Every unit stall bought (empty), but two relic stalls still on offer —
+    // the 0-scrap dead-end. The shop should still count as dead so it refreshes.
+    const ratsGone = {
       ...s,
       shop: {
         ...s.shop,
-        slots: Array(6).fill({ kind: 'empty' as const }),
+        slots: [
+          { kind: 'empty' as const },
+          { kind: 'empty' as const },
+          { kind: 'empty' as const },
+          { kind: 'empty' as const },
+          { kind: 'relic' as const, relicId: 'gore-cleaver' },
+          { kind: 'relic' as const, relicId: 'glass-shard' },
+        ],
       },
     };
-    expect(isShopDead(allEmpty)).toBe(true);
+    expect(isShopDead(ratsGone)).toBe(true);
+    // And a lone remaining rat stall keeps it alive.
+    const oneRatLeft = {
+      ...ratsGone,
+      shop: {
+        ...ratsGone.shop,
+        slots: [{ kind: 'unit' as const, defId: 'gutter-runt' }, ...ratsGone.shop.slots.slice(1)],
+      },
+    };
+    expect(isShopDead(oneRatLeft)).toBe(false);
+  });
+
+  it('auto-rerolling a rats-gone shop refills rats (no free-reroll loop)', () => {
+    const s = newBuild('2026-07-03');
+    const ratsGone = {
+      ...s,
+      scrap: 3,
+      shop: {
+        ...s.shop,
+        slots: [
+          { kind: 'empty' as const },
+          { kind: 'empty' as const },
+          { kind: 'empty' as const },
+          { kind: 'empty' as const },
+          { kind: 'relic' as const, relicId: 'gore-cleaver' },
+          { kind: 'relic' as const, relicId: 'glass-shard' },
+        ],
+      },
+    };
+    const rolled = must(autoRerollShop(ratsGone)).state;
+    expect(rolled.scrap).toBe(3); // free
+    // Fresh shop carries rats again, so it is no longer dead — cannot re-fire.
+    expect(rolled.shop.slots.some((slot) => slot.kind === 'unit')).toBe(true);
+    expect(isShopDead(rolled)).toBe(false);
   });
 
   it('autoRerollShop fails if shop is not dead', () => {
