@@ -69,12 +69,15 @@ export const RELIC_DEFS: Record<string, RelicDef> = {
   },
   // Easter egg (issue #24): the name is the whole point — someone else's
   // gear, left behind on an earlier ride, still has a little use left in it.
-  // Team-scope heal distributed per-unit to prevent unbounded scaling with
-  // board size (#75). Total team heal pool per tick is 1, divided among all
-  // horde units (so 1 unit gets 1/tick, 2 units get 0.5/tick each, etc).
-  // Bounded per compounding law: each unit's heal is clamped to maxHealth - health.
+  // Flat team-wide +2/+2 combat-start buff, same mechanism as Filth Totem:
+  // applied once via instantiate() before the wave loop starts, not a
+  // repeating trigger, so it's inherently safe under the compounding law.
+  // Previously a per-tick-split heal, but that was mostly wasted — only the
+  // front-line horde unit (horde[0]) can ever take damage in this game's
+  // combat model, so splitting a heal pool across the whole board mostly
+  // healed units that could never be hit. Redesigned as a flat stat buff.
   'forgotten-backpack': {
     id: 'forgotten-backpack', name: 'The Forgotten Backpack', scope: 'team', cost: 12,
-    desc: 'whole horde heals 1/clash (split)', healPerTick: 1,
+    desc: '+2/+2, whole horde', attack: 2, health: 2,
   },
 };
