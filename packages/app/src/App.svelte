@@ -485,6 +485,16 @@
     // Persist the income clock on first ever load so offline hours accrue
     // from here on (without this, each reload would reset the baseline).
     if (loadLastIncomeHour() === null) saveLastIncomeHour(lastIncomeHour);
+    // Heal a shop that was already dead before this session — e.g. a player who
+    // bought their last rat under the old "every stall must be empty" rule and
+    // got stuck with no rats and only unaffordable relics. The free reroll
+    // otherwise only fires reactively after a buy, so an already-dead shop
+    // never self-heals; do it once on load. autoRerollShop no-ops unless dead.
+    const healed = autoRerollShop(build);
+    if (healed.ok) {
+      build = healed.state;
+      saveBuild(build);
+    }
     const id = setInterval(() => (nowTick = Date.now()), 1000);
     // Load the board now, then keep it loosely fresh while the tab is open.
     void refreshBoard();
