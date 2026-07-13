@@ -185,7 +185,7 @@
   // Cumulative season total of enemies felled across every completed ride —
   // only climbs, resets with seasonBest. Leaderboard tiebreak under depth.
   let seasonKills = $state(loadSeasonKills(build.seasonId));
-  let rideLog = $state<RideLogEntry[]>(loadRideLog());
+  let rideLog = $state<RideLogEntry[]>(loadRideLog(build.seasonId));
   let lastRide = $state<LastRide | null>(loadLastRide());
   let lastIncomeHour = $state<number>(loadLastIncomeHour() ?? Math.floor(Date.now() / HOUR_MS));
   let awaySummary = $state<{ rides: number; scrap: number } | null>(null);
@@ -604,7 +604,7 @@
       saveLastIncomeHour(nowHour);
       if (rides.length > 0) {
         rideLog = [...rides.reverse(), ...rideLog].slice(0, RIDE_LOG_MAX);
-        saveRideLog(rideLog);
+        saveRideLog(build.seasonId, rideLog);
         // Only completed rides count toward the weekly best (the leaderboard
         // score) — a deep preview that never rides earns nothing. Same rule
         // for the cumulative kill total: it only grows from rides that ran.
@@ -639,8 +639,10 @@
       seasonBest = 0;
       seasonBestHour = undefined;
       seasonKills = 0;
+      rideLog = [];
       saveSeasonBest(build.seasonId, 0);
       saveSeasonKills(build.seasonId, 0);
+      saveRideLog(build.seasonId, []);
       void refreshBoard(); // new week → pull the fresh (empty) board
     }
     // Auto-submit the season-best on any improvement (guarded so an
@@ -740,7 +742,7 @@
       return;
     }
     rideLog = [...rides.reverse(), ...rideLog].slice(0, RIDE_LOG_MAX);
-    saveRideLog(rideLog);
+    saveRideLog(build.seasonId, rideLog);
     const deepest = rides.reduce((a, r) => (r.depth > a.depth ? r : a));
     if (deepest.depth > seasonBest) {
       seasonBest = deepest.depth;
