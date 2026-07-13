@@ -17,6 +17,28 @@ describe('seed derivation', () => {
     expect(currentRideDate(new Date('2026-07-03T03:59:00+02:00'))).toBe('2026-07-02');
     expect(currentRideDate(new Date('2026-07-03T06:01:00+02:00'))).toBe('2026-07-03');
   });
+
+  // Guards the iOS-weak-shop / Android-strong-shop bug: this string is the
+  // cross-platform seed key, so its exact byte layout must be canonical
+  // YYYY-MM-DD regardless of engine locale formatting. Assembling from
+  // formatToParts (not .format()) is what makes this hold; these cases lock
+  // the shape, including single-digit month/day that a naive engine might
+  // leave unpadded.
+  it('always emits a canonical zero-padded YYYY-MM-DD key', () => {
+    const shape = /^\d{4}-\d{2}-\d{2}$/;
+    // Instants chosen so the Copenhagen ride-date lands on single-digit
+    // month and day (post-06:00 so no dawn rollover shifts the date).
+    expect(currentRideDate(new Date('2026-01-05T12:00:00+01:00'))).toBe('2026-01-05');
+    expect(currentRideDate(new Date('2026-09-09T12:00:00+02:00'))).toBe('2026-09-09');
+    for (const iso of [
+      '2026-01-05T12:00:00+01:00',
+      '2026-09-09T12:00:00+02:00',
+      '2026-12-31T23:30:00+01:00',
+      '2026-07-13T06:01:00+02:00',
+    ]) {
+      expect(currentRideDate(new Date(iso))).toMatch(shape);
+    }
+  });
 });
 
 describe('prng', () => {

@@ -45,6 +45,7 @@ export {
   scrapForDepth,
   INTEREST_CAP,
   rollOfferings,
+  upcomingUnlocks,
   buyUnit,
   canRecruit,
   buyRelic,

@@ -637,6 +637,26 @@ describe('synchronized seasons', () => {
     const b = newBuild('2026-07-01', 3);
     expect(b.seasonId).toBe(seasonIdFor('2026-07-01'));
   });
+
+  // The mid-season re-issue of 2026-07-13 (cross-platform seed divergence): the
+  // bumped id must reset clients without a DB wipe. That relies on three
+  // orderings/round-trips holding — this guards them so a future edit to the
+  // reissue map can't silently break the reset semantics.
+  it('re-issues the 2026-07-13 season with a reset-safe token', () => {
+    const reissued = seasonIdFor('2026-07-13');
+    // (a) distinct from the natural id, so leaderboard key + local best/kills reset
+    expect(reissued).not.toBe('2026-07-13');
+    // (b) sorts AFTER the natural id, so stored day-1 builds hit the dawn reset
+    expect(reissued > '2026-07-13').toBe(true);
+    // (c) still sorts BEFORE next Monday, so next week rolls over normally
+    expect(reissued < seasonIdFor('2026-07-20')).toBe(true);
+    // (d) keeps the real Monday date readable (weekdayFor + "Week of" label)
+    expect(weekdayFor(reissued)).toBe(1);
+    expect(reissued.slice(0, 10)).toBe('2026-07-13');
+    // every day of the reissued week shares the one bumped id
+    const week = Array.from({ length: 7 }, (_, i) => addDays('2026-07-13', i));
+    expect(new Set(week.map(seasonIdFor)).size).toBe(1);
+  });
 });
 
 describe('idle economy', () => {

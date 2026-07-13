@@ -53,6 +53,7 @@
     effectiveBoardCap,
     nextSlotPrice,
     buyBoardSlot,
+    upcomingUnlocks,
     tierAttackMultiplier,
     tierHealthMultiplier,
     reviveHpForTier,
@@ -207,12 +208,23 @@
   );
   const currentDepth = $derived(currentOutcome ? currentOutcome.result.wavesCleared : 0);
   const scrapPerHour = $derived(scrapForDepth(currentDepth));
-  const secondsToNextHour = $derived(3600 - (Math.floor(nowTick / 1000) % 3600));
+  // Rats gated to a later day (issue #12 and friends) are otherwise
+  // invisible until the day they show up in the shop pool — nothing told
+  // players they existed at all. Soonest-unlocking first.
+  const upcoming = $derived(upcomingUnlocks(build.day));
   // True only during the day-1 recruitment freeze (see isFrozenHour above) —
   // drives the idle-panel status line. The live ride preview below is
   // unaffected: it always simulates the current board, freeze or not.
   const inRecruitmentWindow = $derived(
     isFrozenHour(Math.floor(nowTick / HOUR_MS), build.seasonId)
+  );
+  // While frozen, the first ride is 10:00 CET, not the next wall-clock hour
+  // (which could be hours away from 10:00 on an early-morning day-1 login) —
+  // count down to the actual freeze boundary instead.
+  const secondsToNextHour = $derived(
+    inRecruitmentWindow
+      ? DAY1_CUTOFF_SEC - copenhagenSeconds(new Date(nowTick))
+      : 3600 - (Math.floor(nowTick / 1000) % 3600)
   );
   let telemetry = $state(telemetryEnabled());
 
@@ -959,7 +971,7 @@
 >
   <h1>WE RIDE AT DAWN</h1>
   <p class="sub">
-    Week of {build.seasonId} · day {build.day}/{SEASON_DAYS} · rides hourly{CHANNEL === 'dev'
+    Week of {build.seasonId.slice(0, 10)} · day {build.day}/{SEASON_DAYS} · rides hourly{CHANNEL === 'dev'
       ? ' · dev build'
       : ''}
   </p>
@@ -1134,6 +1146,17 @@
     </div>
     </div>
 
+    {#if upcoming.length > 0}
+      <div class="arriving">
+        <span class="panel-label">arriving later this week</span>
+        <div class="chips">
+          {#each upcoming as def}
+            <span class="chip">{def.name} · day {def.unlockDay}</span>
+          {/each}
+        </div>
+      </div>
+    {/if}
+
     {#if build.board.length === 0 && build.scrap > 0}
       <p class="onboarding-hint">your warren is empty — spend your {build.scrap} ⚙ to recruit your first rats</p>
     {/if}
@@ -1218,7 +1241,7 @@
 
   <div class="leaderboard">
     <div class="lb-head">
-      <span class="panel-label">Deepest riders · week of {build.seasonId}</span>
+      <span class="panel-label">Deepest riders · week of {build.seasonId.slice(0, 10)}</span>
       <button class="lb-refresh" onclick={() => void refreshBoard()} disabled={boardBusy}>
         {boardBusy ? '…' : '↻'}
       </button>
@@ -1595,6 +1618,28 @@
     padding: 10px 12px 12px;
     border: 1px solid #322820;
     border-radius: 10px;
+  }
+
+  .arriving {
+    margin-top: 10px;
+    padding: 8px 12px;
+    border: 1px dashed #4a3520;
+    border-radius: 8px;
+  }
+
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 5px;
+  }
+
+  .chip {
+    font-size: 12px;
+    padding: 3px 10px;
+    border-radius: 10px;
+    background: #2a2118;
+    color: #c9b891;
   }
 
   .phase-divider {
