@@ -713,7 +713,14 @@ export function simulate(
 
     totalDamage += damageThisWave;
     if (ticks > MAX_TICKS_PER_WAVE) break;
-    if (enemies.length === 0 && horde.length > 0) {
+    if (enemies.length === 0) {
+      // Credit the wave clear even if the horde's last unit died on the same
+      // tick as the last enemy (batch damage resolution, not incremental —
+      // both sides resolve before resolveDeaths() runs, so a simultaneous
+      // wipe is possible). Killing every enemy still counts as clearing the
+      // wave; whether the horde can fight the NEXT wave is a separate
+      // question, already gated by the outer loop's `horde.length > 0`
+      // guard, which will correctly stop the run here if horde is empty.
       wavesCleared++;
       events.push({ type: 'waveClear', wave: w + 1 });
       // Antidote between waves: carried damage persists, poison does not —
