@@ -971,7 +971,7 @@
 >
   <h1>WE RIDE AT DAWN</h1>
   <p class="sub">
-    Week of {build.seasonId} · day {build.day}/{SEASON_DAYS} · rides hourly{CHANNEL === 'dev'
+    Week of {build.seasonId.slice(0, 10)} · day {build.day}/{SEASON_DAYS} · rides hourly{CHANNEL === 'dev'
       ? ' · dev build'
       : ''}
   </p>
@@ -1241,7 +1241,7 @@
 
   <div class="leaderboard">
     <div class="lb-head">
-      <span class="panel-label">Deepest riders · week of {build.seasonId}</span>
+      <span class="panel-label">Deepest riders · week of {build.seasonId.slice(0, 10)}</span>
       <button class="lb-refresh" onclick={() => void refreshBoard()} disabled={boardBusy}>
         {boardBusy ? '…' : '↻'}
       </button>

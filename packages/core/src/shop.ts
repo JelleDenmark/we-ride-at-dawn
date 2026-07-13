@@ -146,15 +146,41 @@ export function nextSlotPrice(state: Pick<BuildState, 'day' | 'purchasedSlots'>)
 // Synchronized seasons: a week runs Monday→Sunday, so the expedition day
 // (1–7) is the ISO weekday of the ride-date, and the season id is the
 // Monday that starts that week. Everyone shares the same clock.
+//
+// `date.slice(0, 10)` keeps this reading only the YYYY-MM-DD prefix: a season
+// id may carry a re-issue suffix (see SEASON_REISSUES), and weekdayFor must
+// still resolve it to the real weekday. Ride-dates are already bare 10-char
+// dates, so the slice is a no-op for them.
 export function weekdayFor(date: string): number {
-  const d = new Date(`${date}T12:00:00Z`).getUTCDay(); // 0=Sun … 6=Sat
+  const d = new Date(`${date.slice(0, 10)}T12:00:00Z`).getUTCDay(); // 0=Sun … 6=Sat
   return d === 0 ? 7 : d; // 1=Mon … 7=Sun
 }
+
+// Mid-season re-issues: when a live season has to be restarted in place — e.g.
+// the 2026-07-13 cross-platform seed divergence, where iOS and Android hashed
+// different ride-date strings into different shops/gauntlets — we bump its id
+// to a new token instead of wiping the leaderboard DB by hand. A reissued id:
+//   (a) sorts lexicographically AFTER the original (a suffix on the same
+//       prefix always does), so every client's stored build resets via the
+//       App's `build.seasonId < season` dawn-rollover check;
+//   (b) is a brand-new leaderboard key, so the board starts empty and the old
+//       rows are simply orphaned under the old id (no deletion needed);
+//   (c) fails the local season-best/kills equality check (both are keyed by
+//       the season id string), so those reset too;
+//   (d) reseeds the week's gauntlet.
+// The token keeps the natural Monday date as its first 10 chars, so weekdayFor
+// and the UI's "Week of" label still read the true date. It still sorts before
+// the next natural Monday (the day-of-month digit dominates), so next week
+// rolls over normally.
+const SEASON_REISSUES: Record<string, string> = {
+  '2026-07-13': '2026-07-13.2',
+};
 
 export function seasonIdFor(date: string): string {
   const monday = new Date(`${date}T12:00:00Z`);
   monday.setUTCDate(monday.getUTCDate() - (weekdayFor(date) - 1));
-  return monday.toISOString().slice(0, 10);
+  const id = monday.toISOString().slice(0, 10);
+  return SEASON_REISSUES[id] ?? id;
 }
 
 export type ShopSlot =
