@@ -155,6 +155,29 @@ export type Effect =
    */
   | { kind: 'blockFrontHits' }
   /**
+   * Backline damage path (issue #85; "Slink-Rat option B" in
+   * `docs/design/future-minions.md`). The reusable primitive behind future
+   * backline snipers: a non-front unit adds its own current `attack`
+   * directly to the frontmost enemy, once per wave, taking no retaliation
+   * (it isn't the one clashing — see `blockFrontHits`'s "front" targeting
+   * for contrast, which this deliberately bypasses). Always wired to
+   * `startOfWave`, same firing point as `poisonFrontEnemy`/`blockFrontHits`,
+   * so it lands before the tick loop's clash/poison resolution even begins
+   * for that wave (see the `backlineDamage` case in sim.ts's `applyEffect`
+   * for the full ordering rationale against Marrow-Snap, Ward-Weaver, and
+   * Gore-Cleaver).
+   *
+   * Compounding-law note: this is a FIXED, non-accumulating per-wave
+   * contribution — each living non-front carrier deals its current attack
+   * once at that wave's start, then nothing more until the next wave's
+   * `startOfWave` fires again. It does not grow with tick count, wave
+   * count, or anything other than the unit's own (tier-scaled) attack stat,
+   * and multiple carriers stack only additively, bounded by however many
+   * non-front slots the board cap allows — the same "safe because bounded
+   * by board size" shape as `poisonAllEnemies`'s multi-caster stacking.
+   */
+  | { kind: 'backlineDamage' }
+  /**
    * Whole-team stat grant (issue #12: Dawn-Runt/Dusk-Runt) — every horde unit
    * currently on the board gets `+attack`/`+health`, including the caster
    * itself (unlike `buffBehind`, which deliberately excludes the caster —
