@@ -1,0 +1,27 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <!-- Pack-Caller: tribal rallier with bone whistle, head raised in call -->
+  <!-- tail curved up -->
+  <path d="M10 48 Q4 45 6 34 Q7 28 12 27" fill="none" stroke="#5e3120" stroke-width="2.4" stroke-linecap="round"/>
+  <!-- body, leaning forward -->
+  <path d="M12 50 C9 41 14 29 28 27 C38 26 45 30 48 36 L54 41 C55.2 42.2 54.4 43.8 53 43.6 L45 43.5 C42 49 35 52 26 52 C17 52 13 51 12 50 Z" fill="#8a4b2f" stroke="#201209" stroke-width="1.5" stroke-linejoin="round"/>
+  <!-- chest detail for emphasis -->
+  <path d="M20 35 C22 40 24 46 26 50" stroke="#756552" stroke-width="1.2"/>
+  <!-- raised arm reaching up (calling gesture) -->
+  <ellipse cx="38" cy="28" rx="6" ry="4" fill="#b9a78f" stroke="#201209" stroke-width="1"/>
+  <!-- head tilted back/raised, mouth open for howl -->
+  <circle cx="42" cy="20" r="6.5" fill="#8a4b2f" stroke="#201209" stroke-width="1.4"/>
+  <!-- raised snout/muzzle -->
+  <path d="M38 15 C37 10 42 7 48 8 L52 13 C52.8 14 51.8 15.2 50.5 15 L44 14.5 C41 15 39 15 38 15 Z" fill="#8a4b2f" stroke="#201209" stroke-width="1.4" stroke-linejoin="round"/>
+  <!-- open mouth (dark shadow) -->
+  <path d="M46 16 L48 22 L44 21 Z" fill="#201209"/>
+  <!-- eye -->
+  <circle cx="50" cy="19" r="1.3" fill="#201209"/>
+  <!-- crude bone whistle/horn held at mouth -->
+  <path d="M45 12 L52 6 L54 8 L48 14 Z" fill="#e8e2cf" stroke="#201209" stroke-width="1.2" stroke-linejoin="round"/>
+  <!-- sound wave lines emanating from whistle (3 small curves) -->
+  <path d="M53 8 Q58 5 60 10" stroke="#5f7288" stroke-width="1" fill="none" stroke-linecap="round"/>
+  <path d="M54 12 Q59 11 61 16" stroke="#5f7288" stroke-width="1" fill="none" stroke-linecap="round" opacity="0.7"/>
+  <!-- hind legs -->
+  <rect x="20" y="51" width="4.5" height="7" rx="1.8" fill="#5e3120"/>
+  <rect x="33" y="51" width="4.5" height="7" rx="1.8" fill="#5e3120"/>
+</svg>
