@@ -168,6 +168,97 @@ console.log(
 );
 
 // ---------------------------------------------------------------------------
+// 3b) Marrow-Snap (pure execute: a foe left at/below 20% of its own max
+// health dies outright) — the attack-punchiness relic from issue #7.
+// Gore-Cleaver is back-loaded (only pays off once enemies are tanky enough
+// to leave meaningful overkill). Marrow-Snap should be front-loaded instead
+// (finishing a nearly-dead foe matters even at low tiers where hits are
+// small relative to health) while NOT snowballing or dominating at depth
+// 40+ — it is a stateless, foe-relative, per-clash check (see the
+// compounding-law comment on `executeThreshold` in data/relics.ts), so
+// there is nothing here that can accumulate across the 45-wave battle.
+// ---------------------------------------------------------------------------
+function rosterForExecute(day: number, frontRelic: 'none' | 'gore-cleaver' | 'marrow-snap'): Lineup {
+  const cap = boardCapForDay(day);
+  const tier = day <= 3 ? 1 : day <= 5 ? 2 : 3;
+  const order = ['dire-rat', 'gnawer', 'corpse-glutton', 'warren-warden', 'bone-priest', 'plague-bearer', 'blight-witch', 'dire-rat'];
+  const units: Lineup['units'] = order.map((defId, i) => {
+    const relicIds: string[] = [];
+    if (i === 0 && frontRelic !== 'none') relicIds.push(frontRelic);
+    else if (i !== 0 && i < cap) relicIds.push(FILLER_RELIC);
+    return { defId, tier, relicIds };
+  });
+  return { units: units.slice(0, cap), teamRelicIds: ['filth-totem'] };
+}
+
+function avgDepthForExecute(day: number, frontRelic: 'none' | 'gore-cleaver' | 'marrow-snap'): number {
+  const lineup = rosterForExecute(day, frontRelic);
+  let total = 0;
+  for (let s = 0; s < SAMPLES; s++) {
+    const date = new Date(Date.parse(`${START}T12:00:00Z`) + s * 86_400_000).toISOString().slice(0, 10);
+    total += simulate(lineup, generateGauntlet(date, day)).result.wavesCleared;
+  }
+  return total / SAMPLES;
+}
+
+console.log('\n3b) Marrow-Snap depth delta vs. Gore-Cleaver, same strong-attack roster, one relic slot varied:');
+console.log('day  none    +cleaver (delta)      +snap (delta)');
+const snapDeltas: number[] = [];
+const cleaveDeltasVsSnap: number[] = [];
+for (let day = 1; day <= 7; day++) {
+  const none = avgDepthForExecute(day, 'none');
+  const withCleaver = avgDepthForExecute(day, 'gore-cleaver');
+  const withSnap = avgDepthForExecute(day, 'marrow-snap');
+  const cleaveDelta = withCleaver - none;
+  const snapDelta = withSnap - none;
+  cleaveDeltasVsSnap.push(cleaveDelta);
+  snapDeltas.push(snapDelta);
+  console.log(
+    `${day.toString().padStart(2)}   ${none.toFixed(2).padStart(5)}   ${withCleaver.toFixed(2)} (${cleaveDelta >= 0 ? '+' : ''}${cleaveDelta.toFixed(2)})      ${withSnap.toFixed(2)} (${snapDelta >= 0 ? '+' : ''}${snapDelta.toFixed(2)})`
+  );
+}
+// Day 1-2 is a rounding-error regime for either relic (roster is tiny,
+// so both deltas are <0.05 waves) — the meaningful comparison is where each
+// relic's value plateau kicks in. Gore-Cleaver needs enemies tanky enough to
+// leave real overkill margin, which only shows up from day 5 onward (0.19,
+// 0.30, 0.33). Marrow-Snap's value shows up as soon as day 3 (0.17) because
+// it doesn't need overkill margin at all — it just needs a hit to land in
+// the last 30% of the foe's own health bar, which happens well before
+// enemies are HP-sponges.
+const crossoverDay = snapDeltas.findIndex((d, i) => d > cleaveDeltasVsSnap[i]) + 1;
+console.log(
+  `\nMarrow-Snap overtakes Gore-Cleaver's delta as early as day ${crossoverDay || 'n/a'} ` +
+    `(day 3: Gore-Cleaver +${cleaveDeltasVsSnap[2].toFixed(2)} vs Marrow-Snap +${snapDeltas[2].toFixed(2)}) — ` +
+    'front-loaded relative to Gore-Cleaver, which only separates from baseline once enemies are tanky (day 5+).'
+);
+
+// High-depth sanity check (issue #7's explicit ask): does Marrow-Snap
+// dominate or blow up at depth 40+? Run the day-7 (deepest achievable)
+// roster and confirm wavesCleared stays within the same order of magnitude
+// as Gore-Cleaver — i.e. no runaway, no free 45/45 clear off one relic.
+console.log('\n3c) Depth-40+ sanity: day-7 roster, none vs Gore-Cleaver vs Marrow-Snap, min/avg/max over all samples:');
+function statsForExecute(day: number, frontRelic: 'none' | 'gore-cleaver' | 'marrow-snap'): { min: number; avg: number; max: number } {
+  const lineup = rosterForExecute(day, frontRelic);
+  const depths: number[] = [];
+  for (let s = 0; s < SAMPLES; s++) {
+    const date = new Date(Date.parse(`${START}T12:00:00Z`) + s * 86_400_000).toISOString().slice(0, 10);
+    depths.push(simulate(lineup, generateGauntlet(date, day)).result.wavesCleared);
+  }
+  return {
+    min: Math.min(...depths),
+    avg: depths.reduce((a, b) => a + b, 0) / depths.length,
+    max: Math.max(...depths),
+  };
+}
+for (const frontRelic of ['none', 'gore-cleaver', 'marrow-snap'] as const) {
+  const { min, avg, max } = statsForExecute(7, frontRelic);
+  console.log(`  ${frontRelic.padEnd(12)} min ${min.toString().padStart(2)}  avg ${avg.toFixed(2).padStart(5)}  max ${max.toString().padStart(2)}`);
+}
+console.log(
+  '\n(no roster above should approach anywhere near WAVE_COUNT=45 — Marrow-Snap converts near-kills into kills, it does not manufacture extra damage or stats, so it cannot produce a runaway full clear the way the fixed exploits did)'
+);
+
+// ---------------------------------------------------------------------------
 // 4) Poison sanity-check: does a poison-leaning roster now dominate attack?
 //
 // Poison damage is flat (fixed stacks per proc) and depth-independent — it
@@ -220,4 +311,67 @@ for (const day of [6, 7]) {
 }
 console.log(
   '\n(report only — poison is flat/depth-independent by design; whether it dominates is a separate future tuning decision)'
+);
+
+// ---------------------------------------------------------------------------
+// 5) Dawn-Runt / Dusk-Runt (issue #12) — day-gated (day 3 / day 4), +2
+// attack-before-noon / +2 health-after-noon team buff. Sanity check: does
+// swapping one board slot for the Runt measurably help on the half-day its
+// buff is active, without being so strong it's an obvious auto-include over
+// every other unit for that slot? Compares the same strong roster with vs.
+// without a Runt occupying its last slot, in both timeOfDay halves, so the
+// "active" and "dormant" cases are both visible.
+// ---------------------------------------------------------------------------
+// The marginal slot is filled with Gutter-Runt (the cheapest generic body) in
+// the baseline, not a second Dire-Rat — swapping out a strong late-tier
+// fighter for a Runt would conflate "this slot is a weak filler" with "the
+// Runt itself is weak," which isn't the choice a player actually faces. The
+// fair comparison is: given a spare slot you'd otherwise fill with a cheap
+// body, is fielding the Runt there (for the half of the day it's live) worth
+// more than that cheap body?
+function rosterWithRunt(day: number, runtId: 'dawn-runt' | 'dusk-runt' | null): Lineup {
+  const cap = boardCapForDay(day);
+  const tier = day <= 3 ? 1 : day <= 5 ? 2 : 3;
+  const relicSlots = Math.min(cap, 1 + day);
+  const baseOrder = ['dire-rat', 'warren-warden', 'corpse-glutton', 'gnawer', 'bone-priest', 'plague-bearer', 'blight-witch'];
+  // Fill up to cap-1 with the strong roster, then guarantee the marginal
+  // slot (Runt vs. Gutter-Runt filler) lands ON the board at every day —
+  // a plain `[...baseOrder, filler].slice(0, cap)` silently drops the
+  // marginal slot whenever cap < baseOrder.length + 1 (true for days 3-6),
+  // making the comparison a no-op before day 7.
+  const order = [...baseOrder.slice(0, cap - 1), runtId ?? 'gutter-runt'];
+  const units: Lineup['units'] = order.map((defId, i) => {
+    const relicIds: string[] = [];
+    if (i !== 0 && i < relicSlots && defId !== runtId) relicIds.push(FILLER_RELIC);
+    return { defId, tier, relicIds };
+  });
+  return { units, teamRelicIds: ['filth-totem'] };
+}
+
+function avgDepthWithRunt(day: number, runtId: 'dawn-runt' | 'dusk-runt' | null, timeOfDay: 'beforeNoon' | 'afterNoon'): number {
+  const lineup = rosterWithRunt(day, runtId);
+  let total = 0;
+  for (let s = 0; s < SAMPLES; s++) {
+    const date = new Date(Date.parse(`${START}T12:00:00Z`) + s * 86_400_000).toISOString().slice(0, 10);
+    total += simulate({ ...lineup, timeOfDay }, generateGauntlet(date, day)).result.wavesCleared;
+  }
+  return total / SAMPLES;
+}
+
+console.log('\n5) Dawn-Runt / Dusk-Runt (issue #12): depth delta from swapping one slot for the Runt, day 3-7:');
+console.log('day  baseline  dawn(beforeNoon)  dawn(afterNoon,dormant)  dusk(afterNoon)  dusk(beforeNoon,dormant)');
+for (let day = 3; day <= 7; day++) {
+  const baseline = avgDepthWithRunt(day, null, 'beforeNoon');
+  const dawnActive = avgDepthWithRunt(day, 'dawn-runt', 'beforeNoon');
+  const dawnDormant = avgDepthWithRunt(day, 'dawn-runt', 'afterNoon');
+  const duskActive = day >= 4 ? avgDepthWithRunt(day, 'dusk-runt', 'afterNoon') : NaN;
+  const duskDormant = day >= 4 ? avgDepthWithRunt(day, 'dusk-runt', 'beforeNoon') : NaN;
+  const fmt = (n: number) => (Number.isNaN(n) ? '  n/a' : n.toFixed(2).padStart(5));
+  console.log(
+    `${day.toString().padStart(2)}   ${baseline.toFixed(2).padStart(6)}    ${dawnActive.toFixed(2).padStart(6)} (${(dawnActive - baseline >= 0 ? '+' : '')}${(dawnActive - baseline).toFixed(2)})    ${dawnDormant.toFixed(2).padStart(6)} (${(dawnDormant - baseline >= 0 ? '+' : '')}${(dawnDormant - baseline).toFixed(2)})          ${fmt(duskActive)} (${day >= 4 ? (duskActive - baseline >= 0 ? '+' : '') + (duskActive - baseline).toFixed(2) : 'n/a'})    ${fmt(duskDormant)} (${day >= 4 ? (duskDormant - baseline >= 0 ? '+' : '') + (duskDormant - baseline).toFixed(2) : 'n/a'})`
+  );
+}
+console.log(
+  '\n(the "active" delta should be a real but modest bump — not negligible (~0) and not dominant (swamping every other slot choice); ' +
+    'the "dormant" delta should sit close to baseline, since a Runt fielded on the wrong half of the day is dead weight for that ride)'
 );

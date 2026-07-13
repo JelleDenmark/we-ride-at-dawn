@@ -1,0 +1,5 @@
+{
+  "imports": {
+    "tweetnacl": "https://esm.sh/tweetnacl@1.0.3"
+  }
+}

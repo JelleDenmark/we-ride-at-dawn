@@ -87,6 +87,28 @@ Independence has some appeal, but the main benefit is **already largely served b
 - **Recommendation:** don't build a full split yet. If a concrete pain shows up in play, the cheaper fix is a **per-row reroll** (reroll just the unit row or just the relic row), not two shops. Revisit only if freeze proves insufficient.
 
 ---
+
+## 4. Balance backlog (from the snowball + unit/relic ranking analysis, `npm run snowball`)
+
+Overall units + relics are well-balanced for this stage. Specific items, in rough priority:
+
+- ✅ **Glass Shard reworked (on `dev`, ships in 0.6.3):** its +3 first-hit now fires **once per wave** instead of once per battle (`3bd362b`). Sim (day 6, WW/CG board, 400 dates): dead weight **+0.008 → +0.192 depth (0.048/scrap)** — now on par with Rusted Nail, still below Fat Tick, so no new dominant pick.
+- ✅ **Dire Rat — flat damage reduction (SHIPPED on `dev`, 0.6.4).** `damageReduction: 2` on `UnitDef`, applied in `applyDamage` to `'attack'` damage only (poison bypasses), floored at ≥1 (no immortal tank), tier-scaled. The game's first **armor primitive** — reusable for the `armored` enemy line and the damage-type RPS idea.
+  **⚠ This section's premise was wrong, and the sim proved it.** Flat armor is **anti-BRUTE, not anti-swarm**. This is a *front-clash* sim — one attacker at a time — so armor saves `min(armor, attack−1)` per hit: ~0–1 against swarm chaff (attack 1–2, the ≥1 floor bites), the full 2 against a brute (attack 6–8). Measured (t2, front, day 5, 240 dates): armor 0 → swarm 3.00 / brute 3.13; armor 2 → swarm 3.36 / **brute 3.85**. Daily-theme counter-play still works; it just points at brutes. The "anti-swarm from many small hits" intuition only holds in sims with *simultaneous multi-attackers*.
+  Cost↔value: Dire-Rat sits at 3.72 depth vs Warren-Warden's post-fix 3.94 — the gap fell from 1.30 waves to 0.22, so most of the cost↔value complaint dissolved once the Warden compounding was fixed. Left at cost 8 pending the full repricing pass.
+- **Cost ↔ value is loose** ("fix at some point" — Jesper) — value-per-scrap spans ~20× (Warren-Warden **0.178** dominant; gnawer/gutter-runt ~0.01–0.03) and cost barely tracks value (Dire-Rat, priciest at 8, ranks ~4th). A pass to **flatten value-per-scrap**: rein in Warren-Warden's team buff; price down or buff up the laggards so expensive units earn their cost.
+- **Fat Tick / sustain dominance** — top relic (0.142/scrap), and the live board leans on it; mild nerf candidate if we want more relic diversity (not urgent).
+- **Snowball — RE-MEASURE FIRST (2026-07-08).** The measured "~3× by day 7" was taken against the `startOfBattle` compounding bug, which was the dominant term (it was a *combat* snowball, not an economy one: the depth-44 board fell to 15 once fixed). The economy analysis was cut short by a session limit. **Re-run `npm run snowball` on the fixed engine before choosing any lever** — the old numbers are inflated and may not justify a change at all. Levers if it survives re-measurement: sub-linear `SCRAP_PER_DEPTH`, catch-up stipend (⚠ analyse sandbagging — the metric is max-depth on a shared seed), interest removal (confirmed vestigial at 0.8% of weekly income).
+- **Buff `startOfWave` design space.** The new trigger (see `handoff.md`'s compounding law) is the *named* version of the per-wave idiom. It's safe for summons/poison and unsafe for anything permanent — that constraint is now enforceable by review, not by luck.
+- _Not a bug, intentional depth:_ Gore-Cleaver wants a **durable/scaling carry** (Corpse-Glutton's growing health keeps it alive to land cleaves), not "the back line" per se; positioning matters and is self-evident from the rats' flavor (no UI hint needed — Jesper).
+
+---
+
+## 5. Security hardening backlog (parked, from a review pass 2026-07-08)
+
+A security review of the live game and backend surfaced several hardening items around the leaderboard's trust boundary, player identity, and database access policies. One urgent item was already fixed live (a database access-control gap); the rest is bigger work — deliberately **parked**, not scheduled yet. Full findings are kept out of this repo's public docs until the remaining items are addressed. Tracked in [issue #19](https://github.com/JelleDenmark/we-ride-at-dawn/issues/19). Overlaps with the existing **P4 anti-cheat** item above (server-side score re-simulation) — that item should absorb this backlog once picked up.
+
+---
 ---
 
 # Detailed sections
@@ -159,6 +181,7 @@ _(Verbatim design output from each panel agent, lightly formatted. Names/stats a
 - **Cosmetic prestige** (banners/frames/skins by all-time milestones; `app`-only, zero sim).
 - **Unlock options not stats** — cleanest fair version: unlocks add to the *shared* pool for everyone that season (community unlocks).
 - **Season lore chapters** on the Codex.
+- **Finite per-rat copy pool / dilution (long-term, blocked on shared-seed design — issue #39).** Cap each unit at N copies per season so 3★ merges get harder as the shared pool depletes, instead of being a pure shop-luck check. Explicitly harder than the unlocks above: it needs *shared mutable state across all players in a season* (every purchase affects everyone else's future odds), which `rollOfferings` has never needed before (it's been a pure function of date/roll throughout) — a real infrastructure step, not a design tweak. Needs its own #6-style fairness pass before it's actionable.
 - Load-bearing rule: `core`'s scored path reads nothing from a per-account store.
 
 **Balance risks:** ⚠️ **poison is the next Rusted Nail** (flat, depth-independent — ship poison-persist relics weak or never). Execute inverts the HP-wall design (cap low / make flat finisher). Cleave → bound to one target. Blood-Debt/Carrion snowball on an immortal front rat (watch Fat Tick + Tail-Charm combo). Meta-progression scope-creep into stats = existential; hard-wall in `core`.

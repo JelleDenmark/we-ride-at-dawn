@@ -1,29 +1,45 @@
 <script lang="ts">
+  // Orientation for a cold read of this ~2300-line file (search for these
+  // anchors rather than reading linearly):
+  //   - Imports from `core` (below) — this file is UI/orchestration only;
+  //     all game logic (gauntlet/sim/shop rules) lives in packages/core.
+  //   - `onMount(...)` — PWA update/install-prompt wiring.
+  //   - "Idle heartbeat" comment — the hourly auto-ride loop: advances the
+  //     day at each dawn boundary, runs `simulate()` for elapsed hours,
+  //     updates scrap/seasonBest/ride log. This is the real economy loop;
+  //     `packages/core/scripts/snowball.ts` models the same loop headlessly.
+  //   - `stopReplay` / `skipReplay` — the "watch the next ride" replay
+  //     controls (a live preview of the current build, not a past ride).
+  //   - `clickShopSlot` and nearby — shop purchase/reroll/freeze actions,
+  //     thin wrappers around the pure functions imported from `core`'s
+  //     `shop.ts` (this file never mutates game rules itself).
+  //   - `fetchTop` / `fetchRank` — leaderboard panel data, from `leaderboard.ts`.
+  //   - the closing script tag below this block — the markup/template
+  //     starts right after it; component state above is what drives it.
   import { onMount } from 'svelte';
   import {
     currentRideDate,
     dailySeed,
     generateGauntlet,
-    scoutReport,
-    ARCHETYPE_LABEL,
     simulate,
     UNIT_DEFS,
     RELIC_DEFS,
     newBuild,
     advanceAfterDawn,
-    boardCapForDay,
     weekdayFor,
     seasonIdFor,
     interestFor,
-    SCRAP_PER_DEPTH,
+    scrapForDepth,
     SEASON_DAYS,
     buyUnit,
     canRecruit,
     buyRelic,
+    hasValidRelicTarget,
     sellUnit,
     sellBenchUnit,
     sellRefund,
     rerollShop,
+    autoRerollShop,
     toggleFreeze,
     moveUnit,
     benchUnit,
@@ -32,11 +48,20 @@
     lineupFromBuild,
     unitStats,
     REROLL_COST,
-    BOARD_CAP,
+    combatCapForBuild,
     BENCH_SIZE,
+    effectiveBoardCap,
+    nextSlotPrice,
+    buyBoardSlot,
+    tierAttackMultiplier,
+    tierHealthMultiplier,
+    reviveHpForTier,
+    poisonStacksForTier,
     type ActionResult,
     type BattleResult,
     type BuildState,
+    type TimeOfDay,
+    type UnitDef,
   } from '@wrad/core';
   import { ReplayPlayer } from './replay/ReplayPlayer';
   import { CHANNEL } from './env';
@@ -57,6 +82,8 @@
     saveRideLog,
     loadRideLog,
     RIDE_LOG_MAX,
+    loadInstallNudgeDismissed,
+    saveInstallNudgeDismissed,
     type RideLogEntry,
     type LastRide,
   } from './persistence';
@@ -75,6 +102,8 @@
     type BoardRow,
   } from './leaderboard';
   import { startUpdateCheck } from './updateCheck';
+  import { startPwaUpdate } from './pwaUpdate';
+  import { startInstallPromptCapture, promptInstall, isIOS, isStandalone } from './pwaInstall';
 
   function addDay(date: string): string {
     return new Date(Date.parse(`${date}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
@@ -94,6 +123,15 @@
     return p[0] * 3600 + p[1] * 60 + p[2];
   }
 
+  // Dawn-Runt/Dusk-Runt (issue #12): which half of the day a given instant
+  // falls in, Copenhagen local time — noon is the cutoff, reusing
+  // copenhagenSeconds the same way the existing dawn (06:00 CET) boundary
+  // does. simulate() never reads the clock itself; this is the one place
+  // real wall-clock time gets resolved and threaded in via Lineup.timeOfDay.
+  function timeOfDayAt(now: Date): TimeOfDay {
+    return copenhagenSeconds(now) < 12 * 3600 ? 'beforeNoon' : 'afterNoon';
+  }
+
   function fmtRideHour(hourBucket: number): string {
     const d = new Date(hourBucket * HOUR_MS);
     return `${String(d.getHours()).padStart(2, '0')}:00`;
@@ -110,6 +148,29 @@
 
   const HOUR_MS = 3_600_000;
   const OFFLINE_RIDE_CAP = 24; // credit at most a day of missed skirmishes at once
+
+  // Day-1 recruitment freeze: every board resets empty at the Monday 06:00
+  // CET season boundary, so a player who logs in at 06:00 can start earning
+  // immediately while one who logs in at 09:00 has already missed hours with
+  // nothing to show for them (an empty board earns nothing, and — unlike a
+  // gap later in the week — there's no built board to retroactively credit)
+  // — a standing bias against anyone not awake for a European Monday
+  // morning. No hour before 10:00 CET on day 1 credits income (a 06:05
+  // login and a 09:55 login are treated identically, so there's no new
+  // incentive to rush-build for backdated credit). The first hour that
+  // counts is the 10:00–11:00 bucket. Every other day already has a real
+  // roster earning through any gap, so this only applies to day 1.
+  const DAY1_CUTOFF_SEC = 10 * 3600;
+
+  /** Whether hour bucket `h` (epoch hours) falls inside the day-1 freeze:
+   * its ride-date is the season's Monday and its Copenhagen local time is
+   * before 10:00. Checked per hour (not just "now") so offline catch-up on
+   * day 1 skips only the frozen hours, not the ones after 10:00 — and stays
+   * correct even if catch-up crosses into day 2 before it's credited. */
+  function isFrozenHour(h: number, seasonId: string): boolean {
+    const instant = new Date(h * HOUR_MS);
+    return currentRideDate(instant) === seasonId && copenhagenSeconds(instant) < DAY1_CUTOFF_SEC;
+  }
 
   // build.date is the current expedition day's date; the horde rides its
   // gauntlet every hour for scrap. Day is the ISO weekday (synchronized:
@@ -130,21 +191,29 @@
   let nowTick = $state(Date.now());
   let speed = $state(1);
 
-  // The ride at the top of hour H uses gauntlet(date, day, H): waves
-  // reshuffle hourly under a fixed daily theme. The preview always shows the
-  // NEXT ride — the one the countdown points at.
-  const nextRideHour = $derived(Math.floor(nowTick / HOUR_MS) + 1);
-  const currentGauntlet = $derived(generateGauntlet(build.date, build.day, nextRideHour));
-  const report = $derived(scoutReport(currentGauntlet));
+  // The ride shows the daily gauntlet: the same waves all day, every day.
+  const currentGauntlet = $derived(generateGauntlet(build.date, build.day));
   const theme = $derived(currentGauntlet.theme);
   // Live outcome of the current horde on the next ride — updates as you
-  // build (and as the hour flips), so you see your depth change in real time.
+  // build (and as the hour flips, and as the noon boundary flips — Dawn-Runt/
+  // Dusk-Runt care about it), so you see your depth change in real time.
   const currentOutcome = $derived(
-    build.board.length > 0 ? simulate(lineupFromBuild(build), currentGauntlet) : null
+    build.board.length > 0
+      ? simulate(
+          { ...lineupFromBuild(build), timeOfDay: timeOfDayAt(new Date(nowTick)) },
+          currentGauntlet
+        )
+      : null
   );
   const currentDepth = $derived(currentOutcome ? currentOutcome.result.wavesCleared : 0);
-  const scrapPerHour = $derived(currentDepth * SCRAP_PER_DEPTH);
+  const scrapPerHour = $derived(scrapForDepth(currentDepth));
   const secondsToNextHour = $derived(3600 - (Math.floor(nowTick / 1000) % 3600));
+  // True only during the day-1 recruitment freeze (see isFrozenHour above) —
+  // drives the idle-panel status line. The live ride preview below is
+  // unaffected: it always simulates the current board, freeze or not.
+  const inRecruitmentWindow = $derived(
+    isFrozenHour(Math.floor(nowTick / HOUR_MS), build.seasonId)
+  );
   let telemetry = $state(telemetryEnabled());
 
   // Leaderboard identity: a themed default until the player names their
@@ -212,44 +281,127 @@
   let notice = $state('');
 
   const TRIGGER_WHEN: Record<string, string> = {
-    startOfBattle: 'At the start of battle,',
+    startOfBattle: 'At the start of the ride,',
+    startOfWave: 'At the start of every wave,',
     faint: 'When it faints,',
     afterAttack: 'After it attacks,',
     allyFaint: 'Whenever a friendly rat faints,',
   };
 
+  const TIME_OF_DAY_LABEL: Record<string, string> = {
+    beforeNoon: ' (before noon)',
+    afterNoon: ' (after noon)',
+  };
+
+  // --- Inspect-sheet ability text (Jesper, pre-launch): the tile shows only
+  // a keyword tag, so THIS is where a player learns what a unit really does —
+  // including exactly how much it scales per star. Numbers come from the same
+  // core tables the sim uses (never hand-copied), so they can't drift.
+
+  /** "+2/+2 (★2 +6/+6 · ★3 +18/+18)" for the 3x-per-star buff curve. */
+  function buffScale(attack: number, health: number): string {
+    const at = (t: number) =>
+      health > 0 && attack > 0
+        ? `+${attack * tierAttackMultiplier(t)}/+${health * tierHealthMultiplier(t)}`
+        : attack > 0
+          ? `+${attack * tierAttackMultiplier(t)} attack`
+          : `+${health * tierHealthMultiplier(t)} health`;
+    return `${at(1)} (★2 ${at(2)} · ★3 ${at(3)})`;
+  }
+
   function abilitySentence(defId: string): string {
     const def = UNIT_DEFS[defId];
-    if (!def?.ability) return 'No special trick — just a body to swell the ranks.';
+    // Passive armor is not an `ability`, but it's absolutely something the
+    // player must be told about — Dire-Rat's whole identity lives here.
+    const armor = def?.damageReduction ?? 0;
+    const armorSentence =
+      armor > 0
+        ? `Shrugs off ${armor} from every blow that lands (★2 ${armor * 2} · ★3 ${armor * 3}) — a hit always lands for at least 1, and rot (poison) seeps straight through.`
+        : '';
+    if (!def?.ability) {
+      return armorSentence || 'No special trick — just a body to swell the ranks.';
+    }
     const e = def.ability.effect;
+    if (e.kind === 'blockFrontHits') {
+      return 'Each wave, blocks the front rat’s first incoming hit outright — whoever is front at the time. ★2 blocks the first 2 hits, ★3 the first 3. Charges reset every wave and never carry over.';
+    }
     let what = '';
     switch (e.kind) {
       case 'summon': {
         const name = UNIT_DEFS[e.unitId]?.name ?? e.unitId;
-        what = `summons ${e.count} ${name}${e.count > 1 ? 's' : ''} in front`;
+        what = `summons ${e.count} ${name}${e.count > 1 ? 's' : ''} (★2 ${e.count * 2} · ★3 ${e.count * 3}) in front`;
         break;
       }
       case 'buffBehind':
-        what = `grants +${e.attack}/+${e.health} to ${e.all ? 'every rat behind it' : 'the rat behind it'}`;
+        what = `grants ${buffScale(e.attack, e.health)} to ${e.all ? 'every rat behind it' : 'the rat behind it'}`;
         break;
       case 'poisonFrontEnemy':
-        what = `applies ${e.stacks} poison to the frontmost enemy`;
+        what = `applies ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) to the frontmost enemy — poison bites for its full count every clash and clears when the wave falls`;
         break;
       case 'poisonTarget':
-        what = `applies ${e.stacks} poison to whatever it just struck`;
+        what = `applies ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) to whatever it just struck`;
         break;
       case 'gainStats':
-        what = `gains +${e.attack}/+${e.health}`;
+        what = `gains ${buffScale(e.attack, e.health)}`;
         break;
       case 'revive':
-        what = `revives your first fallen rat at ${e.health} health`;
+        what = `revives your first fallen rat at ${reviveHpForTier(1)} health (★2 ${reviveHpForTier(2)} · ★3 ${reviveHpForTier(3)}), never above the rat's own max; each fallen rat can only be raised once`;
+        break;
+      case 'buffAdjacent':
+        what = `grants ${buffScale(e.attack, e.health)} to the rat(s) beside it — a middle seat buffs both neighbours`;
+        break;
+      case 'teamBuff':
+        what = `grants ${buffScale(e.attack, e.health)} to the whole horde, itself included`;
+        break;
+      case 'poisonAllEnemies':
+        what = `rots every enemy in the wave with ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) — poison bites for its full count every clash, ignores armor, and clears when the wave falls`;
         break;
     }
-    return `${TRIGGER_WHEN[def.ability.trigger]} it ${what}. Effects scale with tier.`;
+    const when = def.ability.condition
+      ? `${TIME_OF_DAY_LABEL[def.ability.condition.timeOfDay] ?? ''}`
+      : '';
+    const abilityPart = `${TRIGGER_WHEN[def.ability.trigger]} it ${what}${when}.`;
+    return armorSentence ? `${abilityPart} ${armorSentence}` : abilityPart;
   }
 
   function isSummoner(defId: string): boolean {
     return UNIT_DEFS[defId]?.ability?.effect.kind === 'summon';
+  }
+
+  // Compact tile tag (issue: mobile shop overflow) — the tile shows only a
+  // symbol + 1-2 word keyword; the full sentence lives in the inspect sheet
+  // (abilitySentence, above) which already exists as the tap-to-detail
+  // destination, so the tile no longer needs to repeat it. Symbol register
+  // matches the game's existing restrained-glyph vocabulary (⚙ ❄ ✦ ★), not
+  // illustrated icons or emoji.
+  const TIME_OF_DAY_ICON: Record<string, string> = { beforeNoon: '☀', afterNoon: '☾' };
+
+  function keywordTag(def: UnitDef): string | null {
+    const ability = def.ability;
+    if (ability) {
+      switch (ability.effect.kind) {
+        case 'summon':
+          return '❋ summon';
+        case 'buffBehind':
+        case 'buffAdjacent':
+        case 'gainStats':
+          return '▲ buff';
+        case 'teamBuff': {
+          const icon = ability.condition ? (TIME_OF_DAY_ICON[ability.condition.timeOfDay] ?? '▲') : '▲';
+          return `${icon} buff`;
+        }
+        case 'poisonFrontEnemy':
+        case 'poisonTarget':
+        case 'poisonAllEnemies':
+          return '☠ poison';
+        case 'revive':
+          return '✚ revive';
+        case 'blockFrontHits':
+          return '⛨ block';
+      }
+    }
+    if ((def.damageReduction ?? 0) > 0) return '⛨ armor';
+    return null;
   }
 
   let stageEl: HTMLDivElement;
@@ -261,16 +413,60 @@
   // already-open tab on its own. `updateAvailable` flips true when the
   // poller notices `./index.html` now points at a different entry bundle
   // than the one this tab booted with; `updateDismissed` hides the banner
-  // until the next detection re-shows it (simple by design).
+  // until the next detection re-shows it (simple by design). Phase 2
+  // (pwaUpdate.ts) feeds the same flag from a waiting service worker, so
+  // there's still only ever one banner regardless of which signal fires.
   let updateAvailable = $state(false);
   let updateDismissed = $state(false);
+  // Set once pwaUpdate.ts has a waiting SW ready to activate; null means
+  // "no SW involved this session" (unsupported browser, or Phase 1's poll
+  // fired instead) and reloadForUpdate falls back to a plain reload.
+  let applyPwaUpdate: ((reload?: boolean) => Promise<void>) | null = null;
 
   function dismissUpdateBanner() {
     updateDismissed = true;
   }
 
   function reloadForUpdate() {
-    location.reload();
+    if (applyPwaUpdate) {
+      // Activates the waiting SW (skipWaiting) and reloads once it's in
+      // control — without this, a plain location.reload() could still be
+      // served by the *old* SW.
+      void applyPwaUpdate(true);
+    } else {
+      location.reload();
+    }
+  }
+
+  // Install nudge (PWA-SCOPE.md Phase 2): ROADMAP.md's retention-loop notes
+  // want this surfaced after the player's first good ride, not cold on
+  // load — `seasonBest > 0` (below) is exactly that gate, and it's already
+  // persisted so a returning player who hasn't installed yet sees it right
+  // away rather than waiting for a fresh "first" ride.
+  let canInstall = $state(false); // beforeinstallprompt captured (Chromium/Android)
+  let installDismissed = $state(loadInstallNudgeDismissed());
+  let installOutcome = $state<'accepted' | 'dismissed' | 'unavailable' | null>(null);
+  const iosInstallEligible = isIOS() && !isStandalone();
+  // The actual "first good ride" gate: seasonBest only climbs from a
+  // completed ride that cleared at least one wave (see the income-loop
+  // effect below), so `seasonBest > 0` is precisely "the player's first
+  // good ride has happened" and stays true afterward all season.
+  let showInstallNudge = $derived(
+    seasonBest > 0 && !installDismissed && (canInstall || iosInstallEligible)
+  );
+  let bannerCount = $derived(
+    (updateAvailable && !updateDismissed ? 1 : 0) + (showInstallNudge ? 1 : 0)
+  );
+
+  function dismissInstallNudge() {
+    installDismissed = true;
+    saveInstallNudgeDismissed();
+  }
+
+  async function doInstall() {
+    const outcome = await promptInstall();
+    installOutcome = outcome;
+    if (outcome !== 'unavailable') dismissInstallNudge();
   }
 
   onMount(() => {
@@ -285,6 +481,22 @@
       updateDismissed = false;
       updateAvailable = true;
     });
+    void startPwaUpdate(() => {
+      updateDismissed = false;
+      updateAvailable = true;
+    }).then((updateSW) => {
+      applyPwaUpdate = updateSW;
+    });
+    const stopInstallCapture = startInstallPromptCapture(
+      () => {
+        canInstall = true;
+      },
+      () => {
+        // Installed via our button or the browser's own UI — stop nudging.
+        canInstall = false;
+        dismissInstallNudge();
+      }
+    );
     void (async () => {
       player = new ReplayPlayer();
       await player.init(stageEl);
@@ -293,6 +505,7 @@
       clearInterval(id);
       clearInterval(boardId);
       stopUpdateCheck();
+      stopInstallCapture();
     };
   });
 
@@ -311,6 +524,7 @@
       // A new week (or a stale/legacy build): everyone resets Monday, and a
       // mid-week joiner starts cold at the current day's difficulty. (A build
       // that's *ahead* — dev fast-forward — is left alone.)
+      stopReplay();
       build = newBuild(today, weekdayFor(today));
       saveBuild(build);
       lastIncomeHour = Math.floor(nowTick / HOUR_MS);
@@ -322,7 +536,8 @@
       while (currentRideDate(now) > build.date && guard++ < 40) {
         const lineup = lineupFromBuild(build);
         if (lineup.units.length > 0) {
-          const outcome = simulate(lineup, generateGauntlet(build.date, build.day));
+          const timedLineup = { ...lineup, timeOfDay: timeOfDayAt(now) };
+          const outcome = simulate(timedLineup, generateGauntlet(build.date, build.day));
           const ride: LastRide = { date: build.date, day: build.day, lineup, result: outcome.result };
           saveLastRide(ride);
           lastRide = ride;
@@ -335,8 +550,8 @@
       }
     }
 
-    // Credit each elapsed hour as its own ride: the horde fights that hour's
-    // reshuffled gauntlet, earns that ride's depth, and the ride is logged.
+    // Credit each elapsed hour as its own ride: the horde fights the day's
+    // gauntlet, earns that ride's depth, and the ride is logged.
     // (Offline hours use the current board and day — the honest limit of
     // lazy crediting; the 24h cap keeps the drift small.)
     const nowHour = Math.floor(nowTick / HOUR_MS);
@@ -347,8 +562,12 @@
       const rides: RideLogEntry[] = [];
       if (lineup.units.length > 0) {
         for (let h = nowHour - elapsed + 1; h <= nowHour; h++) {
-          const { result } = simulate(lineup, generateGauntlet(build.date, build.day, h));
-          const scrap = result.wavesCleared * SCRAP_PER_DEPTH;
+          // Day-1 recruitment freeze: this hour bucket earned nothing for
+          // anyone (see isFrozenHour) — skip it rather than credit a ride.
+          if (isFrozenHour(h, build.seasonId)) continue;
+          const timedLineup = { ...lineup, timeOfDay: timeOfDayAt(new Date(h * HOUR_MS)) };
+          const { result } = simulate(timedLineup, generateGauntlet(build.date, build.day));
+          const scrap = scrapForDepth(result.wavesCleared);
           earned += scrap;
           rides.push({
             hour: h,
@@ -378,7 +597,9 @@
       }
       if (earned > 0) {
         build = { ...build, scrap: build.scrap + earned };
-        awaySummary = { rides: elapsed, scrap: earned };
+        // rides.length, not elapsed — elapsed can include day-1 frozen
+        // hours that were skipped above and never became a ride.
+        awaySummary = { rides: rides.length, scrap: earned };
       }
       saveBuild(build);
     } else if (advanced) {
@@ -405,7 +626,26 @@
     void submitBest();
   });
 
+  /**
+   * Kill any in-flight or finished replay whenever `build` is replaced
+   * wholesale (week reset, fresh build, dev day-advance). Without this the
+   * stage keeps animating the OLD roster's fight next to a board that no
+   * longer contains those rats (playtest finding, 2026-07-11). The
+   * generation counter lets watchRide detect that its ride was obsoleted
+   * mid-play and skip writing `result`/`phase` for a ride nobody's watching.
+   */
+  let replayGeneration = 0;
+  function stopReplay() {
+    replayGeneration++;
+    // Drain an in-flight play() instantly — same trick as the skip button;
+    // the next watchRide resets speed from the user's chosen multiplier.
+    if (phase === 'riding' && player) player.speed = 1e9;
+    phase = 'idle';
+    result = null;
+  }
+
   function freshBuild() {
+    stopReplay();
     build = newBuild(build.date, build.day);
     saveBuild(build);
     inspect = null;
@@ -423,13 +663,15 @@
   function simulateDawn() {
     const lineup = lineupFromBuild(build);
     if (lineup.units.length > 0) {
-      const outcome = simulate(lineup, generateGauntlet(build.date, build.day));
+      const timedLineup = { ...lineup, timeOfDay: timeOfDayAt(new Date()) };
+      const outcome = simulate(timedLineup, generateGauntlet(build.date, build.day));
       const ride: LastRide = { date: build.date, day: build.day, lineup, result: outcome.result };
       saveLastRide(ride);
       lastRide = ride;
       submitRun({ rideDate: build.date, lineup, result: outcome.result, dev: true });
     }
     const dawnInterest = build.day >= SEASON_DAYS ? 0 : interestFor(build.scrap);
+    stopReplay();
     build = advanceAfterDawn(build, addDay(build.date));
     if (dawnInterest > 0) build = { ...build, scrap: build.scrap + dawnInterest };
     saveBuild(build);
@@ -440,8 +682,13 @@
   }
 
   // Dev: credit some hours of idle income without waiting — simulates the
-  // next h hourly gauntlets so the log shows real variance. (A scrap cheat:
+  // next h hourly gauntlets using the day's fixed gauntlet. (A scrap cheat:
   // the wall clock will ride those hours again for real.)
+  // Respects the day-1 recruitment freeze by default (see isFrozenHour),
+  // same as the real hourly loop, so dev-testing sees what real players see.
+  // To test the game *past* the freeze, either skip past 10:00 CET first
+  // with a couple of small skips, or skip enough hours in one call that the
+  // later ones land after 10:00 — those still credit normally.
   function devSkipHours(h: number) {
     const lineup = lineupFromBuild(build);
     if (lineup.units.length === 0) {
@@ -452,16 +699,23 @@
     let earned = 0;
     const rides: RideLogEntry[] = [];
     for (let i = 1; i <= h; i++) {
-      const { result } = simulate(lineup, generateGauntlet(build.date, build.day, nowHour + i));
-      const scrap = result.wavesCleared * SCRAP_PER_DEPTH;
+      const hourBucket = nowHour + i;
+      if (isFrozenHour(hourBucket, build.seasonId)) continue;
+      const timedLineup = { ...lineup, timeOfDay: timeOfDayAt(new Date(hourBucket * HOUR_MS)) };
+      const { result } = simulate(timedLineup, generateGauntlet(build.date, build.day));
+      const scrap = scrapForDepth(result.wavesCleared);
       earned += scrap;
       rides.push({
-        hour: nowHour + i,
+        hour: hourBucket,
         depth: result.wavesCleared,
         scrap,
         survivors: result.survivors.length,
         enemiesDefeated: result.enemiesDefeated,
       });
+    }
+    if (rides.length === 0) {
+      notice = 'those hours are inside the day-1 recruitment freeze (rides start 10:00 CET)';
+      return;
     }
     rideLog = [...rides.reverse(), ...rideLog].slice(0, RIDE_LOG_MAX);
     saveRideLog(rideLog);
@@ -474,7 +728,7 @@
     seasonKills += rides.reduce((sum, r) => sum + r.enemiesDefeated, 0);
     saveSeasonKills(build.seasonId, seasonKills);
     build = { ...build, scrap: build.scrap + earned };
-    awaySummary = { rides: h, scrap: earned };
+    awaySummary = { rides: rides.length, scrap: earned };
     saveBuild(build);
   }
 
@@ -502,6 +756,20 @@
     return false;
   }
 
+  /** Apply an action and auto-reroll the shop if all stalls are bought.
+   * Used for actions that can empty shop slots (buyUnit, buyRelic). */
+  function applyAndAutoReroll(res: ActionResult): boolean {
+    if (apply(res)) {
+      const autoRoll = autoRerollShop(build);
+      if (autoRoll.ok) {
+        build = autoRoll.state;
+        saveBuild(build);
+      }
+      return true;
+    }
+    return false;
+  }
+
   // Tapping a stall opens its inspect card; the card houses the buy/pin
   // action, so nothing is spent by accident.
   function clickShopSlot(i: number) {
@@ -511,7 +779,7 @@
 
   function clickBoardUnit(boardIndex: number) {
     if (pendingRelic !== null) {
-      if (apply(buyRelic(build, pendingRelic, boardIndex))) pendingRelic = null;
+      if (applyAndAutoReroll(buyRelic(build, pendingRelic, boardIndex))) pendingRelic = null;
       return;
     }
     if (pendingSwap !== null) {
@@ -519,6 +787,17 @@
       return;
     }
     inspect = { area: 'board', index: boardIndex };
+  }
+
+  // General escape hatch for armed relic/swap selection ("pick a rat to
+  // carry it" / "pick a rat to swap out"). Covers any dead-end this class of
+  // two-step interaction could hit — not just the all-rats-already-carry-it
+  // case guarded upfront in pinRelicFromCard — e.g. arming a unit relic with
+  // zero rats on the board, or simply changing your mind mid-pick.
+  function cancelPending() {
+    pendingRelic = null;
+    pendingSwap = null;
+    notice = '';
   }
 
   function clickBenchUnit(benchIndex: number) {
@@ -537,14 +816,28 @@
   }
 
   function recruitFromCard(i: number) {
-    if (apply(buyUnit(build, i))) inspect = null;
+    if (applyAndAutoReroll(buyUnit(build, i))) inspect = null;
+  }
+
+  // The ONLY way to grow the board beyond BOARD_FLOOR, up to the hard
+  // BOARD_CAP (issue #9, steepened + made purchase-only by issue #70). Not
+  // gated behind the inspect card — it's a standing shop action, like reroll.
+  function buySlot() {
+    apply(buyBoardSlot(build));
   }
 
   function pinRelicFromCard(i: number) {
     const slot = build.shop.slots[i];
     if (slot.kind !== 'relic') return;
     if (RELIC_DEFS[slot.relicId].scope === 'team') {
-      if (apply(buyRelic(build, i))) inspect = null;
+      if (applyAndAutoReroll(buyRelic(build, i))) inspect = null;
+    } else if (!hasValidRelicTarget(build, slot.relicId)) {
+      // Every board rat already carries it (or the board is empty) — arming
+      // "pick a rat to carry it" here would soft-lock, since every possible
+      // tap would fail buyRelic's per-rat check with nothing to clear
+      // pendingRelic. The card's disabled state should already prevent this
+      // click, but guard here too in case it's ever called another way.
+      notice = 'every rat already carries this';
     } else {
       // Unit relics need a target: close the card, arm the pick-a-rat mode.
       // Only one armed-selection mode at a time — arming this one clears
@@ -613,7 +906,12 @@
     // Capture the outcome: the hour can flip (or the horde change) while the
     // replay runs, and the result must match the ride that was watched.
     const outcome = currentOutcome;
+    const gen = replayGeneration;
     await player.play(outcome.events);
+    // A build replacement (week reset / fresh build / dev day-advance) may
+    // have stopped this replay mid-play — its result belongs to a roster
+    // that no longer exists, so don't write it over the fresh idle state.
+    if (gen !== replayGeneration) return;
     result = outcome.result;
     phase = 'done';
   }
@@ -624,16 +922,41 @@
   }
 </script>
 
-{#if updateAvailable && !updateDismissed}
-  <div class="update-banner" role="status">
-    <button class="update-banner-reload" onclick={reloadForUpdate}>
-      ⚔ a fresh build rode in — tap to reload
-    </button>
-    <button class="update-banner-dismiss" onclick={dismissUpdateBanner} aria-label="dismiss">✕</button>
+{#if (updateAvailable && !updateDismissed) || showInstallNudge}
+  <div class="banner-stack">
+    {#if updateAvailable && !updateDismissed}
+      <div class="update-banner" role="status">
+        <button class="update-banner-reload" onclick={reloadForUpdate}>
+          ⚔ a fresh build rode in — tap to reload
+        </button>
+        <button class="update-banner-dismiss" onclick={dismissUpdateBanner} aria-label="dismiss"
+          >✕</button
+        >
+      </div>
+    {/if}
+    {#if showInstallNudge}
+      <div class="install-banner" role="status">
+        {#if canInstall}
+          <button class="install-banner-action" onclick={doInstall}>
+            🐀 install We Ride at Dawn — ride offline, one tap away
+          </button>
+        {:else}
+          <span class="install-banner-action install-banner-static">
+            🐀 add to Home Screen (Share → Add to Home Screen) to ride offline
+          </span>
+        {/if}
+        <button class="install-banner-dismiss" onclick={dismissInstallNudge} aria-label="dismiss"
+          >✕</button
+        >
+      </div>
+    {/if}
   </div>
 {/if}
 
-<main class:update-banner-open={updateAvailable && !updateDismissed}>
+<main
+  class:update-banner-open={(updateAvailable && !updateDismissed) || showInstallNudge}
+  style:padding-top={bannerCount > 1 ? '104px' : undefined}
+>
   <h1>WE RIDE AT DAWN</h1>
   <p class="sub">
     Week of {build.seasonId} · day {build.day}/{SEASON_DAYS} · rides hourly{CHANNEL === 'dev'
@@ -657,27 +980,20 @@
   </div>
   {/if}
 
-  <div class="scout">
-    <div class="panel-label">the drains right now — what your horde fights</div>
-    <p class="scout-flavor">&ldquo;{report.flavor}&rdquo;</p>
-    <div class="chips">
-      {#each report.hints as hint}
-        <span class="chip">
-          {ARCHETYPE_LABEL[hint.archetype]}{hint.fromWave ? ` · wave ${hint.fromWave}+` : ''}
-        </span>
-      {/each}
-    </div>
-  </div>
-
   <div class="build">
     <div class="status-row">
       <span class="scrap">⚙ {build.scrap} scrap</span>
-      {#if notice}<span class="notice">{notice}</span>{/if}
+      <span class="status-notice">
+        {#if notice}<span class="notice">{notice}</span>{/if}
+        {#if pendingRelic !== null || pendingSwap !== null}
+          <button class="cancel-pending" onclick={cancelPending}>cancel</button>
+        {/if}
+      </span>
     </div>
 
     <div class="horde-panel">
     <div class="panel-label row-label">
-      <span>your horde · {build.board.length}/{boardCapForDay(build.day)}</span>
+      <span>your horde · {build.board.length}/{effectiveBoardCap(build)}</span>
       <span>front → into the drains</span>
     </div>
     <div class="board horde-board">
@@ -698,15 +1014,26 @@
             {#if unit.relicIds.length > 0}
               ✦ {unit.relicIds.map((r) => RELIC_DEFS[r].name).join(', ')}
             {:else}
-              {UNIT_DEFS[unit.defId].desc ?? ''}
+              {keywordTag(UNIT_DEFS[unit.defId]) ?? ''}
             {/if}
           </span>
         </button>
       {/each}
-      {#each Array.from({ length: Math.max(0, boardCapForDay(build.day) - build.board.length) }) as _}
+      {#each Array.from({ length: Math.max(0, effectiveBoardCap(build) - build.board.length) }) as _}
         <div class="tile empty-tile">empty</div>
       {/each}
     </div>
+    {#if nextSlotPrice(build) !== undefined}
+      <div class="market-actions slot-actions">
+        <button
+          class="buy-slot"
+          disabled={build.scrap < (nextSlotPrice(build) ?? Infinity)}
+          onclick={buySlot}
+        >
+          + warren slot ({effectiveBoardCap(build)} → {effectiveBoardCap(build) + 1}) · {nextSlotPrice(build)} scrap
+        </button>
+      </div>
+    {/if}
     {#if build.teamRelicIds.length > 0}
       <div class="team-relics">
         Team: {build.teamRelicIds.map((r) => RELIC_DEFS[r].name).join(', ')}
@@ -737,7 +1064,7 @@
             {#if unit.relicIds.length > 0}
               ✦ {unit.relicIds.map((r) => RELIC_DEFS[r].name).join(', ')}
             {:else}
-              {UNIT_DEFS[unit.defId].desc ?? ''}
+              {keywordTag(UNIT_DEFS[unit.defId]) ?? ''}
             {/if}
           </span>
         </button>
@@ -750,7 +1077,7 @@
 
     <div class="shop-panel">
     <div class="panel-label row-label">
-      <span>the scrap-market</span>
+      <span>the scrap-market · ⚙ {build.scrap}</span>
       <span>❄ keeps a stall when you reroll</span>
     </div>
     <div class="board">
@@ -767,7 +1094,7 @@
             {/if}
             <span class="tile-name">{def.name}</span>
             <span class="tile-stats">{def.attack}/{def.health}</span>
-            <span class="tile-sub">{def.desc ?? ''}</span>
+            <span class="tile-sub">{keywordTag(def) ?? ''}</span>
             <span class="tile-cost">⚙ {def.cost}</span>
             <span
               class="freeze"
@@ -800,7 +1127,10 @@
       {/each}
     </div>
     <div class="market-actions">
-      <button onclick={() => apply(rerollShop(build))}>↻ reroll · {REROLL_COST} scrap</button>
+      <button
+        onclick={() => apply(rerollShop(build))}
+        disabled={pendingRelic !== null || pendingSwap !== null}
+      >↻ reroll · {REROLL_COST} scrap</button>
     </div>
     </div>
 
@@ -832,21 +1162,28 @@
             ? `⚑ the drains cleared — ${result.survivors.length} rats ride home`
             : 'until the last rat falls'}
         </p>
-        <p class="result-note">each hourly ride reshuffles the drains — same threats, new arrangement</p>
+        <p class="result-note">the drains hold steady through the day, changing anew each dawn</p>
       {/if}
       <button class="ride" onclick={backToWarren} disabled={phase === 'riding'}>
         {phase === 'riding' ? 'Riding…' : '← back to the warren'}
       </button>
     {:else}
       <div class="idle">
-        <p class="muster-line">Your horde rides the drains <strong>every hour</strong>, hauling back scrap by how deep it pushes. Each ride the drains reshuffle — same threats, new arrangement.</p>
+        <p class="muster-line">Your horde rides the drains <strong>every hour</strong>, hauling back scrap by how deep it pushes. The drains hold steady through the day, changing anew each dawn.</p>
+        {#if inRecruitmentWindow}
+          <p class="onboarding-hint">recruitment window — the horde doesn't ride until <strong>10:00 CET</strong>. Build your board now; the first haul lands at 10:00.</p>
+        {/if}
         <div class="idle-stats">
           <div class="stat"><span class="stat-big">{currentDepth}</span><span class="stat-lbl">next depth</span></div>
           <div class="stat"><span class="stat-big">+{scrapPerHour}</span><span class="stat-lbl">next haul</span></div>
           <div class="stat"><span class="stat-big">{formatCountdown(secondsToNextHour)}</span><span class="stat-lbl">rides in</span></div>
         </div>
         <p class="idle-note">
-          +{SCRAP_PER_DEPTH} scrap per depth cleared, every hour · +{interestFor(build.scrap)} interest banked each dawn · harder every dawn
+          {#if inRecruitmentWindow}
+            "next haul" is a preview of your build, not banked yet — it won't be credited until 10:00 CET · scrap per depth cleared once rides start (deeper waves pay less) · gets tougher deeper
+          {:else}
+            scrap per depth cleared, every hour (deeper waves pay less) · +{interestFor(build.scrap)} interest banked each dawn · gets tougher deeper
+          {/if}
         </p>
         <button class="watch" onclick={watchRide}>▶ watch the next ride</button>
         <p class="season-best">Deepest ride this week: <strong>wave {seasonBest}</strong> · resets Monday</p>
@@ -934,19 +1271,21 @@
             {@const afford = build.scrap >= def.cost}
             {@const recruitable = canRecruit(build, ins.index)}
             {@const copies = build.board.filter((u) => u.defId === def.id && u.tier === 1).length}
+            {@const t2 = unitStats({ defId: def.id, tier: 2, relicIds: [] })}
+            {@const t3 = unitStats({ defId: def.id, tier: 3, relicIds: [] })}
             <div class="card-head">
               {#if ART_URL[def.id]}<img class="card-portrait" src={ART_URL[def.id]} alt="" />{/if}
               <div>
                 <div class="card-name">{def.name}</div>
                 <div class="card-stats">
                   {def.attack}/{def.health}
-                  <span class="card-tier">★2 {def.attack * 2}/{def.health * 2} · ★3 {def.attack * 3}/{def.health * 3}</span>
+                  <span class="card-tier">★2 {t2.attack}/{t2.health} · ★3 {t3.attack}/{t3.health}</span>
                 </div>
               </div>
             </div>
             <p class="card-ability">{abilitySentence(def.id)}</p>
             {#if isSummoner(def.id)}
-              <p class="card-hint">summons pause when your warren is full ({BOARD_CAP})</p>
+              <p class="card-hint">summoned rats fight beyond your warren's size (up to {combatCapForBuild(build)} in the drains)</p>
             {/if}
             <p class="card-hint">recruit three of a kind and they merge into one stronger ★ rat</p>
             <div class="card-actions">
@@ -962,6 +1301,7 @@
             {@const relic = RELIC_DEFS[slot.relicId]}
             {@const afford = build.scrap >= relic.cost}
             {@const owned = relic.scope === 'team' && build.teamRelicIds.includes(relic.id)}
+            {@const noTarget = relic.scope === 'unit' && !hasValidRelicTarget(build, relic.id)}
             <div class="card-head">
               <div class="card-relic-icon">✦</div>
               <div>
@@ -972,12 +1312,13 @@
             <p class="card-ability">{relic.desc}.</p>
             <p class="card-hint">one of each per {relic.scope === 'team' ? 'horde' : 'rat'} — no stacking duplicates</p>
             <div class="card-actions">
-              <button class="primary" disabled={!afford || owned} onclick={() => pinRelicFromCard(ins.index)}>
+              <button class="primary" disabled={!afford || owned || noTarget} onclick={() => pinRelicFromCard(ins.index)}>
                 {relic.scope === 'team' ? 'Add' : 'Pin'} · ⚙ {relic.cost}
               </button>
               <button onclick={() => (inspect = null)}>close</button>
             </div>
             {#if owned}<div class="card-warn">the horde already carries one</div>
+            {:else if noTarget}<div class="card-warn">every rat already carries this</div>
             {:else if !afford}<div class="card-warn">not enough scrap</div>{/if}
           {/if}
         {:else if ins.area === 'board'}
@@ -995,7 +1336,7 @@
             </div>
             <p class="card-ability">{abilitySentence(unit.defId)}</p>
             {#if isSummoner(unit.defId)}
-              <p class="card-hint">summons pause when your warren is full ({BOARD_CAP})</p>
+              <p class="card-hint">summoned rats fight beyond your warren's size (up to {combatCapForBuild(build)} in the drains)</p>
             {/if}
             {#if unit.relicIds.length > 0}
               <p class="card-relics">✦ {unit.relicIds.map((r) => RELIC_DEFS[r].name).join(', ')}</p>
@@ -1014,7 +1355,7 @@
           {#if unit}
             {@const def = UNIT_DEFS[unit.defId]}
             {@const stats = unitStats(unit)}
-            {@const boardFull = build.board.length >= boardCapForDay(build.day)}
+            {@const boardFull = build.board.length >= effectiveBoardCap(build)}
             <div class="card-head">
               {#if ART_URL[unit.defId]}<img class="card-portrait" src={ART_URL[unit.defId]} alt="" />{/if}
               <div>
@@ -1072,21 +1413,36 @@
 </main>
 
 <style>
-  .update-banner {
+  .banner-stack {
     position: fixed;
     top: 0;
     left: 0;
     right: 0;
     z-index: 100;
     display: flex;
+    flex-direction: column;
+  }
+
+  .update-banner,
+  .install-banner {
+    display: flex;
     align-items: stretch;
     justify-content: center;
-    background: var(--accent);
-    border-bottom: 1px solid #7a3018;
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
   }
 
-  .update-banner-reload {
+  .update-banner {
+    background: var(--accent);
+    border-bottom: 1px solid #7a3018;
+  }
+
+  .install-banner {
+    background: var(--ink-dim);
+    border-bottom: 1px solid var(--bg);
+  }
+
+  .update-banner-reload,
+  .install-banner-action {
     flex: 1;
     max-width: 940px;
     padding: 8px 12px;
@@ -1099,16 +1455,28 @@
     cursor: pointer;
   }
 
-  .update-banner-dismiss {
+  .install-banner-static {
+    cursor: default;
+  }
+
+  .update-banner-dismiss,
+  .install-banner-dismiss {
     padding: 8px 14px;
     font-family: inherit;
     font-size: 13px;
     color: #f5ead2;
     background: transparent;
     border: none;
-    border-left: 1px solid #7a3018;
     cursor: pointer;
     opacity: 0.85;
+  }
+
+  .update-banner-dismiss {
+    border-left: 1px solid #7a3018;
+  }
+
+  .install-banner-dismiss {
+    border-left: 1px solid var(--bg);
   }
 
   main {
@@ -1194,35 +1562,6 @@
     color: #4a3520;
   }
 
-  .scout {
-    max-width: 620px;
-    margin: 0 auto 14px;
-    padding: 10px 16px;
-    background: var(--panel);
-    border: 1px solid #4a3520;
-    border-radius: 8px;
-    text-align: left;
-  }
-
-  .scout-flavor {
-    margin: 5px 0 8px;
-    font-size: 14px;
-    font-style: italic;
-  }
-
-  .chips {
-    display: flex;
-    gap: 6px;
-  }
-
-  .chip {
-    font-size: 12px;
-    padding: 3px 10px;
-    border-radius: 10px;
-    background: #2a2118;
-    color: #c9b891;
-  }
-
   .build {
     max-width: 620px;
     margin: 0 auto 16px;
@@ -1292,9 +1631,24 @@
     color: #d4af37;
   }
 
+  .status-notice {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+
   .notice {
     font-size: 13px;
     color: #d8452e;
+  }
+
+  .cancel-pending {
+    font-size: 12px;
+    padding: 2px 8px;
+    border: 1px solid #6b4a2a;
+    border-radius: 6px;
+    background: transparent;
+    color: #d4af37;
   }
 
   .row-label {
@@ -1331,6 +1685,13 @@
 
   .tile {
     position: relative;
+    /* Grid items default to min-width: auto, which refuses to shrink below
+       the widest unbreakable content (a long name, a cost string) — with a
+       fixed-column grid parent that forces the whole row wider than the
+       viewport instead of wrapping. min-width: 0 lets the track actually
+       shrink to the column's share of available space; overflow-wrap below
+       then wraps any long word within it instead of overflowing sideways. */
+    min-width: 0;
     min-height: 86px;
     padding: 7px 4px;
     display: flex;
@@ -1365,6 +1726,7 @@
   .tile-name {
     font-size: 11.5px;
     line-height: 1.15;
+    overflow-wrap: break-word;
   }
 
   .tile-stats {
@@ -1437,6 +1799,15 @@
     border: 1px solid #4a3520;
     border-radius: 6px;
     cursor: pointer;
+  }
+
+  .market-actions button:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+
+  .slot-actions {
+    margin-top: 6px;
   }
 
   .sheet-backdrop {

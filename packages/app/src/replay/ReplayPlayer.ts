@@ -204,7 +204,10 @@ export class ReplayPlayer {
         const sprite = this.sprites.get(event.targetId);
         const s = this.stats.get(event.targetId);
         if (!sprite || !s) break;
-        s.health = event.remainingHealth;
+        // Clamp for display: the sim reports true (possibly negative) health
+        // and resolves the death at end of tick, but a rat standing at -9
+        // reads as a bug to a player. The death event still removes it.
+        s.health = Math.max(0, event.remainingHealth);
         sprite.setStats(s.attack, s.health);
         await this.floatText(sprite.root.x, sprite.root.y - 44, `-${event.amount}`, 0xd8452e);
         break;
@@ -213,7 +216,10 @@ export class ReplayPlayer {
         const sprite = this.sprites.get(event.targetId);
         const s = this.stats.get(event.targetId);
         if (!sprite || !s) break;
-        s.health = event.remainingHealth;
+        // Clamp for display: the sim reports true (possibly negative) health
+        // and resolves the death at end of tick, but a rat standing at -9
+        // reads as a bug to a player. The death event still removes it.
+        s.health = Math.max(0, event.remainingHealth);
         sprite.setStats(s.attack, s.health);
         await this.floatText(sprite.root.x, sprite.root.y - 44, `-${event.amount} ☠`, 0x9b59b6);
         break;
@@ -300,14 +306,25 @@ export class ReplayPlayer {
   }
 
   private layout(ms: number): Promise<unknown> {
+    // Spacing compresses when a side outgrows its half of the stage. The
+    // fixed 84px SPACING dates from the board-cap-5 era: index 5+ computed
+    // to x < 0 and rats silently queued OFF-CANVAS (a 7-rat board looked
+    // like only 5 ever fought). Combat can now hold up to 10 a side (8
+    // board + 2 summon headroom), so pack them in instead — overlap beats
+    // invisible.
+    const HALF_WIDTH = W / 2 - FRONT_GAP - 48; // 48px margin to the stage edge
+    const spacingFor = (n: number): number =>
+      n > 1 ? Math.min(SPACING, HALF_WIDTH / (n - 1)) : SPACING;
     const moves: Promise<void>[] = [];
+    const hordeSpacing = spacingFor(this.order.horde.length);
     this.order.horde.forEach((id, i) => {
       const sprite = this.sprites.get(id);
-      if (sprite) moves.push(tween(sprite.root, { x: W / 2 - FRONT_GAP - i * SPACING, y: GROUND_Y }, ms));
+      if (sprite) moves.push(tween(sprite.root, { x: W / 2 - FRONT_GAP - i * hordeSpacing, y: GROUND_Y }, ms));
     });
+    const gauntletSpacing = spacingFor(this.order.gauntlet.length);
     this.order.gauntlet.forEach((id, i) => {
       const sprite = this.sprites.get(id);
-      if (sprite) moves.push(tween(sprite.root, { x: W / 2 + FRONT_GAP + i * SPACING, y: GROUND_Y }, ms));
+      if (sprite) moves.push(tween(sprite.root, { x: W / 2 + FRONT_GAP + i * gauntletSpacing, y: GROUND_Y }, ms));
     });
     return Promise.all(moves);
   }

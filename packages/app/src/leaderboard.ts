@@ -60,8 +60,10 @@ export async function submitScore(args: {
   depth: number;
   day: number;
   lineup: Lineup;
-  /** Hour bucket of the ride that set this best — lets the P4 anti-cheat
-   * re-simulate the exact gauntlet. Tucked into the lineup jsonb. */
+  /** Hour bucket of the ride that set this best — would let a P4 anti-cheat
+   * pass re-simulate the exact gauntlet. Tucked into the lineup jsonb.
+   * NOT YET IMPLEMENTED — see issue #81: no server-side re-simulation exists
+   * yet, so submitted scores (this one included) are currently client-trusted. */
   rideHour?: number;
   /** Cumulative season enemies-defeated total (tiebreak). Monotonic — the
    * RPC stores greatest(existing, new) so a stale resubmit never lowers it. */

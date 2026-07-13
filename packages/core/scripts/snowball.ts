@@ -5,7 +5,7 @@
  * REAL income -> spend -> depth loop from the live game (see App.svelte's
  * idle heartbeat effect, which this mirrors):
  *
- *   each hour: earn depth * SCRAP_PER_DEPTH scrap for that hour's ride
+ *   each hour: earn scrapForDepth(depth) scrap for that hour's ride
  *              (simulate() against generateGauntlet(date, day, hour))
  *   at dawn (every 24 rides): interestFor(scrap) is added, then
  *              advanceAfterDawn() rolls the day forward (board/bench/relics
@@ -27,15 +27,17 @@ import {
   buyUnit,
   buyRelic,
   rerollShop,
+  buyBoardSlot,
+  effectiveBoardCap,
   interestFor,
   lineupFromBuild,
   boardCapForDay,
   DAILY_SCRAP,
-  SCRAP_PER_DEPTH,
+  scrapForDepth,
   SEASON_DAYS,
   type BuildState,
 } from '../src/shop';
-import { simulate } from '../src/sim';
+import { simulate, BOARD_CAP } from '../src/sim';
 import { generateGauntlet } from '../src/gauntlet';
 import { UNIT_DEFS } from '../src/data/units';
 import { RELIC_DEFS } from '../src/data/relics';
@@ -94,8 +96,18 @@ function completesMerge(state: BuildState, defId: string): boolean {
   return [...byTier.values()].some((n) => n >= 2);
 }
 
-/** One greedy pass: spend as much of the bank as sensible this hour. */
-function spendGreedily(state: BuildState): BuildState {
+/** One greedy pass: spend as much of the bank as sensible this hour.
+ *
+ * `expandBoard` (issue #70 verification): when true, adds a priority-2.5
+ * step — once the board is full at its current `effectiveBoardCap` (no room
+ * for another unit) and the next `buyBoardSlot` price is affordable, buy it.
+ * This models a player DELIBERATELY investing toward `BOARD_CAP=8` rather
+ * than letting a full-board's surplus scrap idle on relics/rerolls forever.
+ * Defaults to false so the existing SNOWBALL/INCOME sections below (which
+ * predate #70's board-slot economy) keep their original numbers undisturbed
+ * by this addition; the board-maxing reachability check in section 6 turns
+ * it on explicitly. */
+function spendGreedily(state: BuildState, expandBoard = false): BuildState {
   let s = state;
   let rerolls = 0;
 
@@ -140,6 +152,29 @@ function spendGreedily(state: BuildState): BuildState {
             continue;
           }
         }
+      }
+    }
+
+    // 2.5. Board-slot purchase (issue #70), only when opted in: the board is
+    // full (no room for another unit until it's expanded). If the next slot
+    // is affordable right now, buy it. If NOT yet affordable, this player is
+    // deliberately SAVING toward it — stop spending for the hour rather than
+    // falling through to relics/rerolls, which would otherwise perpetually
+    // eat the surplus a hair before it reaches the slot price (a relic shop
+    // refreshes every reroll/hour, so there's always *something* affordable
+    // to buy, which starves the slot purchase forever under the reactive
+    // "spend whatever's available" policy). This is what actually separates
+    // a "strong, deliberately investing" player from the default proxy: not
+    // just buying a slot when the stars align, but holding scrap for it.
+    if (expandBoard) {
+      const cap = effectiveBoardCap(s);
+      if (s.board.length >= cap && cap < BOARD_CAP) {
+        const res = buyBoardSlot(s);
+        if (res.ok) {
+          s = res.state;
+          continue;
+        }
+        break; // affording it is the only thing worth doing this hour — hold and wait
       }
     }
 
@@ -224,7 +259,7 @@ function runWeek(startDate: string, startingScrapBonus = 0): RunResult {
   for (let h = 0; h < TOTAL_HOURS; h++) {
     const lineup = lineupFromBuild(build);
     const depth = lineup.units.length > 0 ? simulate(lineup, generateGauntlet(build.date, build.day, h)).result.wavesCleared : 0;
-    const earned = depth * SCRAP_PER_DEPTH;
+    const earned = scrapForDepth(depth);
     totalIncome += earned;
     build = { ...build, scrap: build.scrap + earned };
 
@@ -243,6 +278,61 @@ function runWeek(startDate: string, startingScrapBonus = 0): RunResult {
   }
 
   return { samples, totalIncome, totalInterest };
+}
+
+interface BoardMaxRunResult extends RunResult {
+  /** Expedition day each purchased slot was bought on (1..7), in order
+   * bought. Length < 3 means the player never reached BOARD_CAP=8. */
+  slotBoughtOnDay: number[];
+  finalPurchasedSlots: number;
+}
+
+/**
+ * Board-maxing run (issue #70 verification): identical to `runWeek` except
+ * `spendGreedily` is called with `expandBoard = true`, so this player buys
+ * the next board slot the moment the board is full and it's affordable —
+ * the "strong, deliberately investing" player the ladder is meant to let
+ * reach BOARD_CAP=8 within the 7-day expedition, not the passive default.
+ */
+function runWeekBoardMaxing(startDate: string): BoardMaxRunResult {
+  let build = newBuild(startDate, 1);
+  build = spendGreedily(build, true);
+
+  const samples: HourSample[] = [];
+  let totalIncome = 0;
+  let totalInterest = 0;
+  const slotBoughtOnDay: number[] = [];
+  let lastPurchasedSlots = build.purchasedSlots ?? 0;
+
+  for (let h = 0; h < TOTAL_HOURS; h++) {
+    const lineup = lineupFromBuild(build);
+    const depth = lineup.units.length > 0 ? simulate(lineup, generateGauntlet(build.date, build.day, h)).result.wavesCleared : 0;
+    const earned = scrapForDepth(depth);
+    totalIncome += earned;
+    build = { ...build, scrap: build.scrap + earned };
+
+    samples.push({ hour: h, day: build.day, depth, scrapEarned: earned, bank: build.scrap });
+
+    build = spendGreedily(build, true);
+    if ((build.purchasedSlots ?? 0) > lastPurchasedSlots) {
+      slotBoughtOnDay.push(build.day);
+      lastPurchasedSlots = build.purchasedSlots ?? 0;
+    }
+
+    if ((h + 1) % HOURS_PER_DAY === 0 && h + 1 < TOTAL_HOURS) {
+      const dawnInterest = interestFor(build.scrap);
+      totalInterest += dawnInterest;
+      build = advanceAfterDawn(build, addDay(build.date, build.day));
+      if (dawnInterest > 0) build = { ...build, scrap: build.scrap + dawnInterest };
+      build = spendGreedily(build, true);
+      if ((build.purchasedSlots ?? 0) > lastPurchasedSlots) {
+        slotBoughtOnDay.push(build.day);
+        lastPurchasedSlots = build.purchasedSlots ?? 0;
+      }
+    }
+  }
+
+  return { samples, totalIncome, totalInterest, slotBoughtOnDay, finalPurchasedSlots: build.purchasedSlots ?? 0 };
 }
 
 /** A lucky early merge: the player's first few shop rolls happened to hand
@@ -272,7 +362,7 @@ function runWeekWithEarlyMerge(startDate: string): RunResult {
   for (let h = 0; h < TOTAL_HOURS; h++) {
     const lineup = lineupFromBuild(build);
     const depth = lineup.units.length > 0 ? simulate(lineup, generateGauntlet(build.date, build.day, h)).result.wavesCleared : 0;
-    const earned = depth * SCRAP_PER_DEPTH;
+    const earned = scrapForDepth(depth);
     totalIncome += earned;
     build = { ...build, scrap: build.scrap + earned };
     samples.push({ hour: h, day: build.day, depth, scrapEarned: earned, bank: build.scrap });
@@ -434,88 +524,71 @@ console.log('\n=== 3) UNIT VALUE RANKING ===\n');
 // evaluated at, since a lone tier-1 copy of a 6-cost unit is rarely the whole
 // story).
 //
-// CAVEAT — putting the unit under test in the FRONT slot means a couple of
-// units interact with the front-clash sim in special (and in one case,
-// degenerate) ways: a front Bone-Priest's faint-revive can end up reviving
-// ITSELF repeatedly (it's the only unit that has fainted yet), turning it
-// into a near-unkillable punching bag that solo-clears every wave at tier 1
-// — see the flagged callout below the table. That's a genuine sim finding,
-// not a script bug, but it would swamp the "normal" ranking, so it's broken
-// out separately rather than silently sorted to the top.
+// Reported at BOTH the front and back slots: position is a real lever in the
+// front-clash sim. Front units tank/act first; faint-synergy units only pay
+// off from the back with a board dying ahead of them (Corpse-Glutton grows
+// +1/+1 per ally faint; Bone-Priest revives fallen allies). Front-only
+// ranking badly underrates them. (The old front-Bone-Priest self-revive
+// exploit that used to dominate this slot was fixed in 0.6.2.)
 const UNIT_TEST_DATES: string[] = [];
 {
   const base = Date.parse('2026-07-06T12:00:00Z');
   for (let i = 0; i < 150; i++) UNIT_TEST_DATES.push(new Date(base + i * 86_400_000).toISOString().slice(0, 10));
 }
-function depthWithFiller(swapDefId: string | null, tier: number): number {
+const UNIT_TEST_DAY = 4;
+function depthWithFiller(swapDefId: string | null, tier: number, pos: 'front' | 'back' = 'front'): number {
   const filler = 'gutter-runt';
-  const units = Array.from({ length: 6 }, (_, i) => ({
-    defId: i === 0 && swapDefId ? swapDefId : filler,
-    tier: i === 0 && swapDefId ? tier : 1,
+  const cap = boardCapForDay(UNIT_TEST_DAY);
+  const slot = pos === 'front' ? 0 : cap - 1;
+  const units = Array.from({ length: cap }, (_, i) => ({
+    defId: i === slot && swapDefId ? swapDefId : filler,
+    tier: i === slot && swapDefId ? tier : 1,
     relicIds: [] as string[],
   }));
   const lineup = { units, teamRelicIds: [] as string[] };
-  const ds = UNIT_TEST_DATES.map((d) => simulate(lineup, generateGauntlet(d, 4)).result.wavesCleared);
+  const ds = UNIT_TEST_DATES.map((d) => simulate(lineup, generateGauntlet(d, UNIT_TEST_DAY)).result.wavesCleared);
   return avg(ds);
 }
 
-const fillerBaseline = depthWithFiller(null, 1);
+const fillerBaseline = depthWithFiller(null, 1); // full gutter-runt board, no swap
 interface UnitRow {
   id: string;
   cost: number;
-  tier1Depth: number;
-  tier1Delta: number;
-  tier1DeltaPerCost: number;
-  tier2Delta: number;
-  tier2DeltaPerCost: number; // per (3x base cost, the merge investment)
+  front: number; // tier-2 depth delta, unit in the FRONT slot
+  back: number; // tier-2 depth delta, unit in the BACK slot
+  bestPerScrap: number; // best of front/back over the 3-copy merge cost
 }
-// 'bone-priest' up front is the self-revive degenerate case (see caveat
-// above) — reported separately below, not mixed into the normal ranking.
 const unitRows: UnitRow[] = Object.values(UNIT_DEFS)
-  .filter((u) => u.id !== 'pup' && u.id !== 'bone-priest')
+  .filter((u) => u.id !== 'pup')
   .map((u) => {
-    const t1 = depthWithFiller(u.id, 1);
-    const t2 = depthWithFiller(u.id, 2);
-    const t1Delta = t1 - fillerBaseline;
-    const t2Delta = t2 - fillerBaseline;
-    return {
-      id: u.id,
-      cost: u.cost,
-      tier1Depth: t1,
-      tier1Delta: t1Delta,
-      tier1DeltaPerCost: t1Delta / u.cost,
-      tier2Delta: t2Delta,
-      tier2DeltaPerCost: t2Delta / (u.cost * 3), // 3 copies merged
-    };
+    const front = depthWithFiller(u.id, 2, 'front') - fillerBaseline;
+    const back = depthWithFiller(u.id, 2, 'back') - fillerBaseline;
+    return { id: u.id, cost: u.cost, front, back, bestPerScrap: Math.max(front, back) / (u.cost * 3) };
   })
-  .sort((a, b) => b.tier1DeltaPerCost - a.tier1DeltaPerCost);
+  .sort((a, b) => b.bestPerScrap - a.bestPerScrap);
 
-console.log(`(filler baseline depth with 6 gutter-runts: ${fillerBaseline.toFixed(2)}, day 4, avg over ${UNIT_TEST_DATES.length} synthetic dates)\n`);
-console.log('unit              cost  T1 Δdepth  T1 Δ/cost  T2(merged) Δdepth  T2 Δ/scrap-invested');
+console.log(
+  `(tier-2 unit swapped into a full gutter-runt board, day ${UNIT_TEST_DAY} cap ${boardCapForDay(UNIT_TEST_DAY)}, baseline ${fillerBaseline.toFixed(2)}, ${UNIT_TEST_DATES.length} dates)\n`
+);
+console.log('unit             cost   Δ FRONT   Δ BACK   best Δ/scrap  wants');
 for (const r of unitRows) {
+  const swing = r.back - r.front;
+  const wants = Math.abs(swing) >= 0.4 ? (swing > 0 ? 'back' : 'front') : '—';
   console.log(
-    `${r.id.padEnd(16)}  ${r.cost.toString().padStart(3)}   ${r.tier1Delta >= 0 ? '+' : ''}${r.tier1Delta.toFixed(2).padStart(5)}    ${r.tier1DeltaPerCost >= 0 ? '+' : ''}${r.tier1DeltaPerCost.toFixed(3).padStart(6)}    ${r.tier2Delta >= 0 ? '+' : ''}${r.tier2Delta.toFixed(2).padStart(6)}          ${r.tier2DeltaPerCost >= 0 ? '+' : ''}${r.tier2DeltaPerCost.toFixed(4)}`
+    `${r.id.padEnd(15)} ${String(r.cost).padStart(3)}   ${(r.front >= 0 ? '+' : '') + r.front.toFixed(2).padStart(5)}   ${(r.back >= 0 ? '+' : '') + r.back.toFixed(2).padStart(5)}   ${r.bestPerScrap.toFixed(3).padStart(6)}   ${wants}`
   );
 }
 
-// --- FLAGGED: front-slot Bone-Priest self-revive loop ---
-// Bone-Priest's ability is `faint: revives first fallen` — with the front
-// unit itself as the only casualty for a stretch of early waves, its OWN
-// faint trigger revives ITSELF (fallen[side].shift() pops the unit that just
-// died, since nothing else has died yet), forever, at 1 HP. It keeps
-// chipping 1 damage/clash and tanking hits it survives at 1 HP, clearing
-// waves indefinitely. This is a severe, tier-1, zero-relic degenerate combo
-// — not a script artifact (traced in sim.ts's revive effect + resolveDeaths).
-const bpTier1 = depthWithFiller('bone-priest', 1);
-console.log(
-  `\n[FLAGGED] bone-priest (front slot, tier 1): avg depth ${bpTier1.toFixed(1)} vs filler baseline ${fillerBaseline.toFixed(2)}` +
-    ` — self-revive loop (faint: revives first fallen, and it's the only casualty) lets it solo-clear the gauntlet at zero investment beyond its 6-scrap cost. Needs a fix (e.g. exclude the caster from its own revive target pool) independent of this analysis.`
-);
+// (Historical: a front-slot tier-1 Bone-Priest used to solo-clear every wave
+// by reviving *itself* — the fallen queue popped the unit that had just died,
+// which was itself. Fixed in 0.6.2; `revive` now skips the caster, so
+// Bone-Priest ranks normally above.)
 
 // ---------------------------------------------------------------------------
-// 4) RELIC VALUE — rank relics by depth gained per scrap, on a strong
-//    attack-forward front unit (dire-rat) at a representative day-6 power
-//    level, isolating one relic slot at a time.
+// 4) RELIC VALUE — on a representative board: Warren-Warden (front),
+//    gutter-runts between, Corpse-Glutton (back). Each unit relic is tested
+//    pinned to the FRONT carrier (Warren-Warden) and the BACK carrier
+//    (Corpse-Glutton), since a relic's payoff depends heavily on who holds it.
 // ---------------------------------------------------------------------------
 console.log('\n=== 4) RELIC VALUE RANKING ===\n');
 
@@ -528,55 +601,66 @@ const RELIC_TEST_DATES: string[] = [];
   for (let i = 0; i < 400; i++) RELIC_TEST_DATES.push(new Date(base + i * 86_400_000).toISOString().slice(0, 10));
 }
 
-function depthWithRelic(relicId: string | null, day: number): number {
-  const cap = boardCapForDay(day);
-  const order = ['dire-rat', 'warren-warden', 'corpse-glutton', 'gnawer', 'bone-priest', 'plague-bearer', 'blight-witch', 'dire-rat'];
-  const units = order.slice(0, cap).map((defId, i) => ({
-    defId,
-    tier: 2,
-    relicIds: i === 0 && relicId ? [relicId] : ([] as string[]),
-  }));
-  const lineup = { units, teamRelicIds: [] as string[] };
-  const ds = RELIC_TEST_DATES.map((d) => simulate(lineup, generateGauntlet(d, day)).result.wavesCleared);
+const RELIC_DAY = 6; // late-expedition, where relics matter most (cap 7)
+// Board: Warren-Warden(front, t2) · gutter-runts(t1) · Corpse-Glutton(back, t2).
+function relicBoard() {
+  const cap = boardCapForDay(RELIC_DAY);
+  return Array.from({ length: cap }, (_, i) => {
+    if (i === 0) return { defId: 'warren-warden', tier: 2, relicIds: [] as string[] };
+    if (i === cap - 1) return { defId: 'corpse-glutton', tier: 2, relicIds: [] as string[] };
+    return { defId: 'gutter-runt', tier: 1, relicIds: [] as string[] };
+  });
+}
+function depthWithRelicAt(relicId: string | null, carrier: 'front' | 'back'): number {
+  const cap = boardCapForDay(RELIC_DAY);
+  const slot = carrier === 'front' ? 0 : cap - 1;
+  const units = relicBoard().map((u, i) => (i === slot && relicId ? { ...u, relicIds: [relicId] } : u));
+  const ds = RELIC_TEST_DATES.map((d) => simulate({ units, teamRelicIds: [] as string[] }, generateGauntlet(d, RELIC_DAY)).result.wavesCleared);
   return avg(ds);
 }
 
-console.log(`relic value on the front unit, day 3 (early) vs day 6 (late) — depth delta and delta/cost (${RELIC_TEST_DATES.length} synthetic dates):\n`);
-console.log('relic          cost  day3 Δdepth  day3 Δ/cost  day6 Δdepth  day6 Δ/cost');
-const relicBase3 = depthWithRelic(null, 3);
-const relicBase6 = depthWithRelic(null, 6);
-const relicRows: { id: string; cost: number; d3: number; d6: number }[] = [];
-for (const relic of Object.values(RELIC_DEFS)) {
-  if (relic.scope !== 'unit') continue; // team relics compared separately below
-  const with3 = depthWithRelic(relic.id, 3);
-  const with6 = depthWithRelic(relic.id, 6);
-  const d3 = with3 - relicBase3;
-  const d6 = with6 - relicBase6;
-  relicRows.push({ id: relic.id, cost: relic.cost, d3, d6 });
+const relicBase = depthWithRelicAt(null, 'front'); // same board, no relic
+console.log(
+  `board: Warren-Warden(front) · gutter-runts · Corpse-Glutton(back), day ${RELIC_DAY} cap ${boardCapForDay(RELIC_DAY)}, baseline ${relicBase.toFixed(2)}, ${RELIC_TEST_DATES.length} dates\n`
+);
+console.log('relic          cost   Δ on WW(front)   Δ on CG(back)   best Δ/cost  best on');
+const relicRows = Object.values(RELIC_DEFS)
+  .filter((r) => r.scope === 'unit')
+  .map((r) => {
+    const f = depthWithRelicAt(r.id, 'front') - relicBase;
+    const b = depthWithRelicAt(r.id, 'back') - relicBase;
+    return { id: r.id, name: r.name, cost: r.cost, f, b, best: Math.max(f, b), bestPerCost: Math.max(f, b) / r.cost };
+  })
+  .sort((a, b) => b.best - a.best);
+for (const r of relicRows) {
+  const on = r.f >= r.b ? 'WW' : 'CG';
   console.log(
-    `${relic.name.padEnd(14)} ${relic.cost.toString().padStart(3)}   ${d3 >= 0 ? '+' : ''}${d3.toFixed(3).padStart(6)}      ${(d3 / relic.cost >= 0 ? '+' : '')}${(d3 / relic.cost).toFixed(4).padStart(7)}     ${d6 >= 0 ? '+' : ''}${d6.toFixed(3).padStart(6)}      ${(d6 / relic.cost >= 0 ? '+' : '')}${(d6 / relic.cost).toFixed(4)}`
+    `${r.name.padEnd(13)} ${String(r.cost).padStart(3)}    ${(r.f >= 0 ? '+' : '') + r.f.toFixed(3).padStart(6)}          ${(r.b >= 0 ? '+' : '') + r.b.toFixed(3).padStart(6)}        ${r.bestPerCost.toFixed(4)}    ${on}`
   );
 }
-relicRows.sort((a, b) => b.d6 - a.d6);
-console.log(`\nranked by day-6 (late-expedition) depth delta: ${relicRows.map((r) => r.id).join(' > ')}`);
 
-// Team relic (filth-totem) compared against no team relic, same front setup.
-function depthWithTeamRelic(teamRelicId: string | null, day: number): number {
-  const cap = boardCapForDay(day);
-  const order = ['dire-rat', 'warren-warden', 'corpse-glutton', 'gnawer', 'bone-priest', 'plague-bearer', 'blight-witch', 'dire-rat'];
-  const units = order.slice(0, cap).map((defId) => ({ defId, tier: 2, relicIds: [] as string[] }));
-  const lineup = { units, teamRelicIds: teamRelicId ? [teamRelicId] : [] };
-  const ds = RELIC_TEST_DATES.map((d) => simulate(lineup, generateGauntlet(d, day)).result.wavesCleared);
+// Team relic (Filth Totem) — whole-horde, same board.
+const teamWith = (() => {
+  const units = relicBoard();
+  const ds = RELIC_TEST_DATES.map((d) => simulate({ units, teamRelicIds: ['filth-totem'] }, generateGauntlet(d, RELIC_DAY)).result.wavesCleared);
   return avg(ds);
-}
-const totemBase3 = depthWithTeamRelic(null, 3);
-const totemWith3 = depthWithTeamRelic('filth-totem', 3);
-const totemBase6 = depthWithTeamRelic(null, 6);
-const totemWith6 = depthWithTeamRelic('filth-totem', 6);
+})();
 console.log(
-  `\nFilth Totem (team, cost ${RELIC_DEFS['filth-totem'].cost}): day3 Δ ${(totemWith3 - totemBase3).toFixed(3)} (Δ/cost ${((totemWith3 - totemBase3) / RELIC_DEFS['filth-totem'].cost).toFixed(4)}), ` +
-    `day6 Δ ${(totemWith6 - totemBase6).toFixed(3)} (Δ/cost ${((totemWith6 - totemBase6) / RELIC_DEFS['filth-totem'].cost).toFixed(4)})`
+  `\nFilth Totem (team, cost ${RELIC_DEFS['filth-totem'].cost}): whole-horde Δ ${(teamWith - relicBase).toFixed(3)} (Δ/cost ${((teamWith - relicBase) / RELIC_DEFS['filth-totem'].cost).toFixed(4)})`
 );
+
+// Team relic (The Forgotten Backpack, issue #24) — whole-horde per-tick regen.
+const teamWithBackpack = (() => {
+  const units = relicBoard();
+  const ds = RELIC_TEST_DATES.map(
+    (d) => simulate({ units, teamRelicIds: ['forgotten-backpack'] }, generateGauntlet(d, RELIC_DAY)).result.wavesCleared
+  );
+  return avg(ds);
+})();
+console.log(
+  `The Forgotten Backpack (team, cost ${RELIC_DEFS['forgotten-backpack'].cost}): whole-horde Δ ${(teamWithBackpack - relicBase).toFixed(3)} (Δ/cost ${((teamWithBackpack - relicBase) / RELIC_DEFS['forgotten-backpack'].cost).toFixed(4)})`
+);
+console.log(`\nranked by best-placement depth delta: ${relicRows.map((r) => r.id).join(' > ')}`);
 
 // ---------------------------------------------------------------------------
 // 5) INTEREST'S SHARE of total income over the week.
@@ -605,7 +689,7 @@ for (let day = 1; day <= 7; day++) {
       const currentDay = build.day;
       const lineup = lineupFromBuild(build);
       const depth = lineup.units.length > 0 ? simulate(lineup, generateGauntlet(build.date, build.day, h)).result.wavesCleared : 0;
-      const earned = depth * SCRAP_PER_DEPTH;
+      const earned = scrapForDepth(depth);
       build = { ...build, scrap: build.scrap + earned };
       if (currentDay === day) dayIncome += earned;
       build = spendGreedily(build);
@@ -631,6 +715,66 @@ for (let day = 1; day <= 7; day++) {
     `day ${day}: bank@start ${avgBank.toFixed(0).padStart(4)}  interest ${avgInterest.toFixed(2).padStart(4)}  rideIncome ${avgRideIncome.toFixed(1).padStart(6)}  share ${share.toFixed(1)}%`
   );
 }
+
+// ---------------------------------------------------------------------------
+// 6) BOARD-SLOT REACHABILITY (issue #70) — does a strong, deliberately
+//    board-maxing player reach BOARD_CAP=8 within the 7-day expedition, and
+//    is the FIRST slot gated well past day 1 (not trivially affordable)?
+// ---------------------------------------------------------------------------
+console.log('\n=== 6) BOARD-SLOT REACHABILITY (issue #70) ===\n');
+const boardMaxRuns = SEED_DATES.map((d) => runWeekBoardMaxing(d));
+const reachedFull = boardMaxRuns.filter((r) => r.finalPurchasedSlots >= 3).length;
+console.log(`board-maxing player reaches BOARD_CAP=8 (buys all 3 slots) by day 7: ${reachedFull}/${boardMaxRuns.length} seeds`);
+for (let slotIdx = 0; slotIdx < 3; slotIdx++) {
+  const days = boardMaxRuns.map((r) => r.slotBoughtOnDay[slotIdx]).filter((d): d is number => d !== undefined);
+  const avgDay = days.length > 0 ? avg(days) : NaN;
+  console.log(
+    `  slot ${slotIdx + 1} (price ${[60, 120, 220][slotIdx]}): bought in ${days.length}/${boardMaxRuns.length} seeds` +
+      (days.length > 0 ? `, avg day ${avgDay.toFixed(1)}, range [${Math.min(...days)}, ${Math.max(...days)}]` : '')
+  );
+}
+const day7DepthMax = avg(boardMaxRuns.map((r) => dayAvgDepth(r.samples, 7)));
+const day7DepthDefault = avg(baselineRuns.map((r) => dayAvgDepth(r.samples, 7)));
+console.log(
+  `\nday-7 avg depth: default (never buys slots) ${day7DepthDefault.toFixed(2)} vs board-maxing player ${day7DepthMax.toFixed(2)}` +
+    ` (delta ${(day7DepthMax - day7DepthDefault >= 0 ? '+' : '') + (day7DepthMax - day7DepthDefault).toFixed(2)})`
+);
+console.log(
+  'Confirms: slot 1 is never affordable on day 1 alone (price 60 > one day of DAILY_SCRAP+ride income at day-1 depth),'
+);
+console.log('the full ladder is a genuine multi-day investment, and a player who prioritizes it reaches the hard cap.');
+
+// ---------------------------------------------------------------------------
+// 7) EXPECTED DEPTH PER DAY — the real-player curve.
+//    depth-scaling.ts reports the CEILING (hand-built optimal-ish lineups,
+//    ignoring the shop/economy/unlockDay). THIS is what a normal player
+//    actually reaches: the default greedy shop-buyer (reuses `baselineRuns`),
+//    board pinned at the natural floor of 5 — it NEVER buys extra horde slots
+//    (that's `runWeekBoardMaxing`, section 6). Depth and the scrap it earns
+//    are shown together because they're coupled: income = depth x rides, so
+//    anything that shifts the depth curve (e.g. a difficulty-constant change)
+//    shifts the whole economy with it — the exact tension to weigh before
+//    touching WAVE_BUDGET_QUADRATIC / WAVE_UNIT_CAP.
+// ---------------------------------------------------------------------------
+console.log('\n=== 7) EXPECTED DEPTH PER DAY (default player, board floor 5, NO purchased slots) ===\n');
+console.log('day  avgDepth  [min..max across seeds]   avgScrap/day   (shop tier: t1 d1-3, t2 d4-5, t3 d6-7)');
+for (let day = 1; day <= 7; day++) {
+  const perSeedDepth = baselineRuns.map((r) => dayAvgDepth(r.samples, day));
+  const perSeedScrap = baselineRuns.map((r) =>
+    r.samples.filter((s) => s.day === day).reduce((sum, s) => sum + s.scrapEarned, 0)
+  );
+  const d = avg(perSeedDepth);
+  console.log(
+    `${day}    ${d.toFixed(2).padStart(6)}   [${Math.min(...perSeedDepth).toFixed(1)}..${Math.max(...perSeedDepth).toFixed(1)}]` +
+      `           ${avg(perSeedScrap).toFixed(1).padStart(6)}`
+  );
+}
+console.log(
+  '\n(this is the curve to tune enemy difficulty against — NOT depth-scaling.ts, which assumes a roster the shop economy may never actually hand a real player.'
+);
+console.log(
+  ' Board is the natural floor of 5 the whole week here: the default player spends on units/relics, never on horde slots — confirmed via spendGreedily(expandBoard=false).)'
+);
 
 console.log('\n=== NOTES ===');
 console.log('Greedy policy: merge-completing buy > best (attack+health+abilityBonus)/cost affordable unit');

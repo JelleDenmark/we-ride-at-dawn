@@ -6,9 +6,14 @@ import { CHANNEL } from './env';
 const NS = CHANNEL === 'prod' ? 'wrad' : 'wrad-dev';
 
 /** Builds saved before the bench feature shipped have no `bench` field —
- * default it to empty so upgrading players don't hit `undefined.length`. */
+ * default it to empty so upgrading players don't hit `undefined.length`.
+ * Builds saved before buyable horde slots (issue #9) have no `purchasedSlots`
+ * field — default it to 0, which is byte-identical to pre-feature behavior. */
 function migrateBuild(build: BuildState): BuildState {
-  return build.bench ? build : { ...build, bench: [] };
+  const withBench = build.bench ? build : { ...build, bench: [] };
+  return withBench.purchasedSlots === undefined
+    ? { ...withBench, purchasedSlots: 0 }
+    : withBench;
 }
 
 /** The horde currently being built for the next dawn (build.date = target ride date). */
@@ -91,7 +96,10 @@ export function loadPlayerName(): string | null {
 }
 
 /** Best depth reached this season (headline leaderboard score), plus the
- * hour bucket of the ride that set it (for anti-cheat re-simulation). */
+ * hour bucket of the ride that set it (for anti-cheat re-simulation).
+ * NOT YET IMPLEMENTED — see issue #81: there is currently no server-side
+ * re-simulation, so submitted scores are entirely client-trusted. This
+ * field is captured now so that work is a client-side no-op when it lands. */
 export function saveSeasonBest(seasonId: string, best: number, hour?: number): void {
   try {
     localStorage.setItem(`${NS}:best`, JSON.stringify({ seasonId, best, hour }));
@@ -159,5 +167,28 @@ export function loadRideLog(): RideLogEntry[] {
     return raw ? (JSON.parse(raw) as RideLogEntry[]) : [];
   } catch {
     return [];
+  }
+}
+
+/** Whether the player has dismissed the PWA install nudge (PWA-SCOPE.md
+ * Phase 2) — shown once after the first good ride (`seasonBest > 0`),
+ * suppressed permanently once dismissed or once installed. Channel-
+ * namespaced like everything else here, even though installing is a
+ * browser/OS-level action, so a dev-channel dismissal never silently
+ * suppresses the prod nudge (they're different origins-paths, same
+ * localStorage origin). */
+export function loadInstallNudgeDismissed(): boolean {
+  try {
+    return localStorage.getItem(`${NS}:installdismissed`) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function saveInstallNudgeDismissed(): void {
+  try {
+    localStorage.setItem(`${NS}:installdismissed`, '1');
+  } catch {
+    // Non-fatal — worst case the nudge reappears next session.
   }
 }

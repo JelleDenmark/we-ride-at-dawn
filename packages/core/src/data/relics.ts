@@ -17,6 +17,21 @@ export interface RelicDef {
   /** Overkill damage that fells the front foe carries to the next enemy in
    * line, once, no chaining (Gore-Cleaver). */
   cleaveOverkill?: boolean;
+  /**
+   * Pure execute (Marrow-Snap): if the bearer's clash hit drives the foe
+   * from ABOVE this fraction of the FOE's own max health to at or below it,
+   * the foe dies outright instead of surviving on a sliver. CROSSING
+   * semantics (season-launch change, Jesper 2026-07-11): the executing blow
+   * itself must do the threshold-crossing work — a foe already under the
+   * line (poison chip, earlier clashes) cannot be tap-executed, so
+   * Blight-Witch's wave-start AoE poison no longer sets up free executes
+   * (it steals the crossing instead of enabling it). Compounding-law note:
+   * stateless and foe-relative — no stat, health, or attack is ever added
+   * to the bearer, so nothing here can accumulate across the 45-wave
+   * battle. Each wave's enemies are freshly instantiated, so the "free" HP
+   * this saves resets every wave along with them.
+   */
+  executeThreshold?: number;
 }
 
 export const RELIC_DEFS: Record<string, RelicDef> = {
@@ -26,19 +41,19 @@ export const RELIC_DEFS: Record<string, RelicDef> = {
   },
   'glass-shard': {
     id: 'glass-shard', name: 'Glass Shard', scope: 'unit', cost: 4,
-    desc: '+3 dmg on first hit', firstHitBonus: 3,
+    desc: '+3 dmg, first hit each wave', firstHitBonus: 3,
   },
   'weeping-boil': {
     id: 'weeping-boil', name: 'Weeping Boil', scope: 'unit', cost: 4,
-    desc: 'faint: 2 dmg to all foes', onFaintDamageAll: 2,
+    desc: 'faint: 2 dmg, all foes', onFaintDamageAll: 2,
   },
   'fat-tick': {
     id: 'fat-tick', name: 'Fat Tick', scope: 'unit', cost: 6,
-    desc: '+1/+2, heals 1 every clash', attack: 1, health: 2, healPerTick: 1,
+    desc: '+1/+2, heal 1/clash', attack: 1, health: 2, healPerTick: 1,
   },
   'tail-charm': {
     id: 'tail-charm', name: 'Tail-Charm', scope: 'unit', cost: 6,
-    desc: 'survive one lethal hit', surviveLethal: true,
+    desc: 'cheats death once', surviveLethal: true,
   },
   'filth-totem': {
     id: 'filth-totem', name: 'Filth Totem', scope: 'team', cost: 6,
@@ -46,6 +61,20 @@ export const RELIC_DEFS: Record<string, RelicDef> = {
   },
   'gore-cleaver': {
     id: 'gore-cleaver', name: 'Gore-Cleaver', scope: 'unit', cost: 5,
-    desc: 'overkill carries to the next foe', cleaveOverkill: true,
+    desc: 'overkill spills to next foe', cleaveOverkill: true,
+  },
+  'marrow-snap': {
+    id: 'marrow-snap', name: 'Marrow-Snap', scope: 'unit', cost: 5,
+    desc: 'kills a foe its own hit drops below half health', executeThreshold: 0.5,
+  },
+  // Easter egg (issue #24): the name is the whole point — someone else's
+  // gear, left behind on an earlier ride, still has a little use left in it.
+  // Team-scope heal distributed per-unit to prevent unbounded scaling with
+  // board size (#75). Total team heal pool per tick is 1, divided among all
+  // horde units (so 1 unit gets 1/tick, 2 units get 0.5/tick each, etc).
+  // Bounded per compounding law: each unit's heal is clamped to maxHealth - health.
+  'forgotten-backpack': {
+    id: 'forgotten-backpack', name: 'The Forgotten Backpack', scope: 'team', cost: 12,
+    desc: 'whole horde heals 1/clash (split)', healPerTick: 1,
   },
 };

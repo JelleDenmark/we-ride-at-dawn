@@ -9,6 +9,16 @@ export interface Rng {
  * xorshift128 seeded via splitmix32 so a single 32-bit seed fills the
  * 128-bit state. All sim/gauntlet randomness must come from here —
  * never Math.random or wall-clock.
+ *
+ * Why this matters beyond "tests should pass": every client must derive the
+ * *exact same* Gauntlet and Battle outcomes from the same seed with zero
+ * server round-trip — that's what makes a fixed weekly Gauntlet and a
+ * client-computed leaderboard score possible at all. `determinism.test.ts`'s
+ * golden-log hashes exist to catch any change (intentional or not) to this
+ * output. If a golden-log test fails after a code change, treat it as a
+ * signal to verify the new behavior is actually correct before regenerating
+ * the snapshot — a snapshot update is how a real balance/logic regression
+ * would silently become "expected."
  */
 export function xorshift128(seed: number): Rng {
   const mix = splitmix32(seed);

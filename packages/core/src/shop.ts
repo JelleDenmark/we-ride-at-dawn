@@ -1,11 +1,11 @@
 import { fnv1a } from './seed';
 import { xorshift128 } from './prng';
-import { UNIT_DEFS, type Lineup } from './data/units';
+import { UNIT_DEFS, type Lineup, type UnitDef, tierAttackMultiplier, tierHealthMultiplier } from './data/units';
 import { RELIC_DEFS } from './data/relics';
-import { BOARD_CAP } from './sim';
+import { BOARD_CAP, COMBAT_CAP_BONUS } from './sim';
 
 export const DAILY_SCRAP = 24;
-export const REROLL_COST = 1;
+export const REROLL_COST = 2;
 export const SHOP_UNIT_SLOTS = 4;
 export const SHOP_RELIC_SLOTS = 2;
 export const MAX_TIER = 3;
@@ -15,21 +15,132 @@ export const SEASON_DAYS = 7;
  * counter-tech, not a second board. */
 export const BENCH_SIZE = 3;
 
-// Idle economy: the horde skirmishes hourly, earning SCRAP_PER_DEPTH per wave
-// cleared. Interest (TFT-style, 5% of the bank, capped) is paid once per DAY
-// at dawn, not per hour — the daily cadence + cap keep the bank from
-// snowballing over the hundreds of hours in an expedition.
+// Idle economy: the horde skirmishes hourly, earning scrap per wave cleared.
+// Interest (TFT-style, 5% of the bank, capped) is paid once per DAY at dawn,
+// not per hour — the daily cadence + cap keep the bank from snowballing over
+// the hundreds of hours in an expedition.
 export const SCRAP_PER_DEPTH = 1;
 export const INTEREST_RATE = 0.05;
 export const INTEREST_CAP = 5;
+
+// Income decoupling (issue #90). Income used to be a flat `depth *
+// SCRAP_PER_DEPTH` — every extra wave cleared paid the same, so ANY change
+// that let players push deeper (roster acceleration #91, enemy softening #92)
+// inflated the bank in lockstep, snowballing the economy #70 just tuned. So
+// income is now DIMINISHING in depth: the first `SCRAP_FULL_DEPTH` waves pay
+// full rate, and every wave beyond pays the reduced `SCRAP_DEEP_RATE`. This
+// keeps the LEADERBOARD chase from snowballing the bank (a depth-30 run is
+// still mostly paid at the 0.4 deep rate) while leaving score itself raw,
+// undiminished depth — depth is the prestige metric.
+//
+// full=8 is a DELIBERATE mild surplus, not income-neutral: with #91's deeper
+// median it lands week income ~1140 (~+12% over the pre-#90 ~1020 baseline,
+// see snowball §5/§7). The neutral value was 7; Jesper chose 8 (2026-07-11) so
+// a merge-fishing player has scrap to actually chase a T3 unit — a rewarding
+// payoff — rather than banking an unspendable surplus against a too-tight
+// economy. Income is NOT the real T3 gate (fishing RNG is), so this is a small
+// generosity lever to validate with live feedback next season, not a fix.
+export const SCRAP_FULL_DEPTH = 8;
+export const SCRAP_DEEP_RATE = 0.4;
+
+/**
+ * Scrap earned for clearing `depth` waves in one ride — the single source of
+ * truth for idle income (issue #90), so app, balance scripts, and any future
+ * server re-sim agree. Diminishing past `SCRAP_FULL_DEPTH`; floored to keep
+ * the economy integer (scrap is spent in whole units everywhere). NOTE: this
+ * is INCOME only — leaderboard score / max-depth is still raw `depth`.
+ */
+export function scrapForDepth(depth: number): number {
+  const full = Math.min(depth, SCRAP_FULL_DEPTH);
+  const deep = Math.max(0, depth - SCRAP_FULL_DEPTH);
+  return Math.floor(full * SCRAP_PER_DEPTH + deep * SCRAP_DEEP_RATE);
+}
 
 export function interestFor(scrap: number): number {
   return Math.min(INTEREST_CAP, Math.floor(scrap * INTEREST_RATE));
 }
 
-/** Buildable board size grows over the expedition: 5,5,6,6,7,7,8 (day 1–7). */
+/** Starting/day-1 board size floor. The board opens at 5 seats on day 1 and
+ * grows for free over the week (see `BOARD_GROWTH`). */
+export const BOARD_FLOOR = 5;
+
+/**
+ * Free board growth by expedition day (issue #91). `BOARD_GROWTH[day-1]` is
+ * the number of seats the horde gets for free on that day, no purchase
+ * required: 5,6,6,7,7,7,7 — the 6th seat opens on day 2, the 7th by day 4,
+ * then it holds.
+ *
+ * WHY THIS EXISTS / #70 TENSION: issue #70 froze the board at a flat 5 all
+ * week and made every seat beyond it a steep buy (`SLOT_PRICES`). That made
+ * the top slots feel "earned", but it was ALSO the single biggest throttle on
+ * progression: the median player never expands past 5 units, so against a
+ * season-fixed 45-wave gauntlet their depth goes flat after ~day 4 (measured:
+ * snowball §7 plateaued at ~7.9 days 5-7). #91 restores free growth to 7 to
+ * give the median horde room to actually get deeper day-to-day, while keeping
+ * the 8th (final) seat purchase-only (`SLOT_PRICES[0]`) so #70's "earned top
+ * slot" survives in spirit — it's now ONE deliberate late purchase, not three.
+ * The curve is FRONT-LOADED (6th seat on day 2, not day 3): day 1 is a
+ * build-only freeze, so day 2 is the first real grind day and the one players
+ * quit on — opening a visible new seat there is the "don't give up day 2" hook.
+ */
+export const BOARD_GROWTH: readonly number[] = [5, 6, 6, 7, 7, 7, 7];
+
+/** Buildable board size for a given expedition day (1..7): the free-growth
+ * seats for that day (`BOARD_GROWTH`), before any purchased slots stack on
+ * top (see `effectiveBoardCap`). Days outside 1..7 clamp to the ends. */
 export function boardCapForDay(day: number): number {
-  return Math.min(BOARD_CAP, 4 + Math.ceil(day / 2));
+  const idx = Math.min(BOARD_GROWTH.length, Math.max(1, day)) - 1;
+  return BOARD_GROWTH[idx];
+}
+
+/**
+ * Buy extra board seats beyond the day's free-growth cap (`BOARD_GROWTH`), up
+ * to the hard `BOARD_CAP = 8` ceiling. Purchased slots persist for the rest of
+ * the expedition (carried by `advanceAfterDawn`, reset to 0 on a fresh season
+ * by `newBuild`) and stack additively ON TOP of free growth:
+ * `effectiveBoardCap = min(BOARD_CAP, boardCapForDay(day) + purchasedSlots)`.
+ *
+ * HISTORY / #70 → #91: issue #70 removed all free growth (flat 5 all week) and
+ * made SLOT_PRICES = [60,120,220] the only path from 5 to 8. That over-gated
+ * progression (see `BOARD_GROWTH`), so #91 restored free growth to 7. With
+ * free growth back, the price index (`SLOT_PRICES[purchasedSlots]`) now buys:
+ *   - for the PATIENT player (free growth already gave them 7 by day 5): a
+ *     single purchase to reach the 8th and final seat, at SLOT_PRICES[0] = 60
+ *     — a steep-but-reachable "earned top slot" (60 > 2× the DAILY_SCRAP
+ *     stipend), preserving #70's intent for that last seat;
+ *   - for the IMPATIENT player who wants seats ahead of free growth (e.g. an
+ *     8-wide board on day 1-2 before growth catches up): the full 60/120/220
+ *     ladder for those 2-3 early seats — a genuine multi-day sink, a deliberate
+ *     "pay to rush" premium over just waiting for the free seats.
+ * `scripts/slot-value.ts` models each seat's weekly scrap-equivalent value.
+ */
+export const SLOT_PRICES: readonly number[] = [60, 120, 220];
+
+/** How many rats the board may hold given the day's natural cap plus any
+ * board slots this build has purchased, hard-capped at `BOARD_CAP`. */
+export function effectiveBoardCap(state: Pick<BuildState, 'day' | 'purchasedSlots'>): number {
+  return Math.min(BOARD_CAP, boardCapForDay(state.day) + (state.purchasedSlots ?? 0));
+}
+
+/**
+ * Combat headroom for a specific build (issue #69): however many rats are
+ * actually deployed on the board right now, plus `COMBAT_CAP_BONUS` summon
+ * headroom. Deliberately dynamic rather than board-cap-derived — a summoner
+ * always gets exactly 2 extra slots over whatever's really fielded, so it's
+ * always useful (a thin board still gets headroom) but never a runaway
+ * ceiling (a full board doesn't bank extra slots beyond +2 just because the
+ * day's board cap or purchased slots are large). Recruiting itself is
+ * unaffected — that's still gated by `effectiveBoardCap`.
+ */
+export function combatCapForBuild(state: Pick<BuildState, 'board'>): number {
+  return state.board.length + COMBAT_CAP_BONUS;
+}
+
+/** Scrap cost of the next board slot this build could buy, or `undefined` if
+ * it's already at (or the natural cap already reached) `BOARD_CAP`. */
+export function nextSlotPrice(state: Pick<BuildState, 'day' | 'purchasedSlots'>): number | undefined {
+  if (effectiveBoardCap(state) >= BOARD_CAP) return undefined;
+  return SLOT_PRICES[state.purchasedSlots ?? 0];
 }
 
 // Synchronized seasons: a week runs Monday→Sunday, so the expedition day
@@ -68,6 +179,10 @@ export interface BuildState {
   /** Rats held out of the fight — never enter `simulate`. See BENCH_SIZE. */
   bench: BoardUnit[];
   teamRelicIds: string[];
+  /** Extra board slots bought this expedition beyond the day's natural
+   * `boardCapForDay` (see `SLOT_PRICES`/`buyBoardSlot`). 0..SLOT_PRICES.length,
+   * carried across days by `advanceAfterDawn`, reset by `newBuild`. */
+  purchasedSlots: number;
   shop: {
     slots: ShopSlot[];
     frozen: boolean[];
@@ -77,28 +192,52 @@ export interface BuildState {
 
 export type ActionResult = { ok: true; state: BuildState } | { ok: false; reason: string };
 
-const SHOP_UNIT_POOL = Object.values(UNIT_DEFS).filter((u) => u.id !== 'pup');
+// 'warren-warden' is excluded seasonally, not permanently: MD Rattyfock
+// (issue #23) is a same-stats reskin of it, added as a tribute to last
+// season's winner, and having both in rotation at once is redundant. Its
+// UNIT_DEFS entry stays intact (existing tests/golden logs/replays still
+// reference it directly) — only its presence in the purchasable pool is
+// gone. A future season could drop this filter to bring it back.
+const SHOP_UNIT_POOL = Object.values(UNIT_DEFS).filter(
+  (u) => u.id !== 'pup' && u.id !== 'warren-warden'
+);
 const SHOP_RELIC_POOL = Object.values(RELIC_DEFS);
 
 /**
- * Offerings are deterministic for a given (date, roll #, owned team relics).
- * A team relic the horde already carries can never be bought again, so it's
- * filtered out of the pool rather than rolled as a dead, unbuyable stall.
- * With no owned team relics the pool is the full set, so callers that omit the
- * argument (and the golden path) are byte-identical to before.
+ * Day-gated shop pool (issue #12: Dawn-Runt/Dusk-Runt), same mechanism as
+ * `boardCapForDay` — a pure function of the day number, no new per-account
+ * state. Units with no `unlockDay` are available from day 1, exactly as
+ * before this feature existed. Preserves `SHOP_UNIT_POOL`'s insertion order,
+ * so for any day before the earliest `unlockDay` in play, this filters down
+ * to byte-identical output to the old unconditional pool — existing golden
+ * shop rolls for those days are unaffected.
+ */
+function shopUnitPoolForDay(day: number): UnitDef[] {
+  return SHOP_UNIT_POOL.filter((u) => u.unlockDay === undefined || day >= u.unlockDay);
+}
+
+/**
+ * Offerings are deterministic for a given (date, roll #, owned team relics,
+ * day). A team relic the horde already carries can never be bought again, so
+ * it's filtered out of the pool rather than rolled as a dead, unbuyable
+ * stall. `day` defaults to 1 (the pre-#12 pool, minus Dawn-Runt/Dusk-Runt),
+ * so callers that omit every optional argument (and the golden path) are
+ * byte-identical to before.
  */
 export function rollOfferings(
   date: string,
   roll: number,
-  ownedTeamRelics: readonly string[] = []
+  ownedTeamRelics: readonly string[] = [],
+  day = 1
 ): ShopSlot[] {
   const rng = xorshift128(fnv1a(`${date}#shop#${roll}`));
+  const unitPool = shopUnitPoolForDay(day);
   const relicPool = SHOP_RELIC_POOL.filter(
     (r) => !(r.scope === 'team' && ownedTeamRelics.includes(r.id))
   );
   const slots: ShopSlot[] = [];
   for (let i = 0; i < SHOP_UNIT_SLOTS; i++) {
-    slots.push({ kind: 'unit', defId: SHOP_UNIT_POOL[rng.int(SHOP_UNIT_POOL.length)].id });
+    slots.push({ kind: 'unit', defId: unitPool[rng.int(unitPool.length)].id });
   }
   for (let i = 0; i < SHOP_RELIC_SLOTS; i++) {
     slots.push({ kind: 'relic', relicId: relicPool[rng.int(relicPool.length)].id });
@@ -107,7 +246,7 @@ export function rollOfferings(
 }
 
 export function newBuild(date: string, day = 1, ownedTeamRelics: readonly string[] = []): BuildState {
-  const slots = rollOfferings(date, 0, ownedTeamRelics);
+  const slots = rollOfferings(date, 0, ownedTeamRelics, day);
   return {
     date,
     seasonId: seasonIdFor(date),
@@ -116,6 +255,7 @@ export function newBuild(date: string, day = 1, ownedTeamRelics: readonly string
     board: [],
     bench: [],
     teamRelicIds: [],
+    purchasedSlots: 0,
     shop: { slots, frozen: slots.map(() => false), rolls: 0 },
   };
 }
@@ -131,6 +271,10 @@ export function advanceAfterDawn(build: BuildState, nextDate: string): BuildStat
   next.board = build.board.map((u) => ({ ...u, relicIds: [...u.relicIds] }));
   next.bench = (build.bench ?? []).map((u) => ({ ...u, relicIds: [...u.relicIds] }));
   next.teamRelicIds = [...build.teamRelicIds];
+  // Purchased board slots are an expedition-scoped upgrade, same lifetime as
+  // the roster/relics they were bought to support — reset by newBuild only
+  // when the season itself ends (the `build.day >= SEASON_DAYS` branch above).
+  next.purchasedSlots = build.purchasedSlots ?? 0;
   // Scrap is accumulated idle income — it carries across days, not reset.
   next.scrap = build.scrap;
   return next;
@@ -139,6 +283,17 @@ export function advanceAfterDawn(build: BuildState, nextDate: string): BuildStat
 const clone = (state: BuildState): BuildState => JSON.parse(JSON.stringify(state));
 
 const fail = (reason: string): ActionResult => ({ ok: false, reason });
+
+/**
+ * Refund for a single relic lost outside of a direct sale (a merge-dedup
+ * discard, or a relic pinned to a unit that's sold): half its cost, rounded
+ * down, floored at 1 — matching the unit sell rate so neither path lets a
+ * player launder power for free.
+ */
+function relicRefund(relicId: string): number {
+  const cost = RELIC_DEFS[relicId]?.cost;
+  return cost === undefined ? 0 : Math.max(1, Math.floor(cost / 2));
+}
 
 /**
  * Three copies of the same unit at the same tier merge into one, a tier up.
@@ -178,8 +333,7 @@ function combineAll(state: BuildState): void {
       for (const id of allRelics) counts.set(id, (counts.get(id) ?? 0) + 1);
       let refund = 0;
       for (const [id, count] of counts) {
-        const cost = RELIC_DEFS[id]?.cost;
-        if (count > 1 && cost !== undefined) refund += (count - 1) * Math.max(1, Math.floor(cost / 2));
+        if (count > 1) refund += (count - 1) * relicRefund(id);
       }
       state.scrap += refund;
       first.u.relicIds = [...new Set(allRelics)];
@@ -201,7 +355,7 @@ export function buyUnit(state: BuildState, slotIndex: number): ActionResult {
   const def = UNIT_DEFS[slot.defId];
   if (state.scrap < def.cost) return fail('not enough scrap');
   const s = clone(state);
-  const cap = boardCapForDay(s.day);
+  const cap = effectiveBoardCap(s);
   const fresh: BoardUnit = { defId: def.id, tier: 1, relicIds: [] };
   // Place-then-merge-then-check: put the fresh copy down first so combineAll
   // gets a chance to resolve a completing trio (which nets fewer units and
@@ -227,6 +381,19 @@ export function buyUnit(state: BuildState, slotIndex: number): ActionResult {
 /** Would recruiting this slot succeed (afford + fits or completes a combine)? */
 export function canRecruit(state: BuildState, slotIndex: number): boolean {
   return buyUnit(state, slotIndex).ok;
+}
+
+/**
+ * Whether at least one board rat could still receive this unit-scoped relic
+ * (i.e. lacks it already). Team-scoped relics aren't pinned to a rat, so this
+ * only makes sense for `scope: 'unit'` relics — used to gate the buy button
+ * (and avoid arming "pick a rat to carry it") before every possible target
+ * would be rejected by `buyRelic`'s per-rat 'that rat already carries one'
+ * check. Also covers the degenerate case of an empty board (nothing to pin
+ * to at all), which would otherwise soft-lock the same way.
+ */
+export function hasValidRelicTarget(state: BuildState, relicId: string): boolean {
+  return state.board.some((u) => !u.relicIds.includes(relicId));
 }
 
 export function buyRelic(state: BuildState, slotIndex: number, targetIndex?: number): ActionResult {
@@ -273,6 +440,9 @@ export function sellUnit(state: BuildState, boardIndex: number): ActionResult {
   const s = clone(state);
   s.board.splice(boardIndex, 1);
   s.scrap += sellRefund(unit);
+  // Any relics pinned to the sold unit would otherwise vanish for free —
+  // refund each at the same half-cost rate as the merge-dedup discard path.
+  for (const relicId of unit.relicIds) s.scrap += relicRefund(relicId);
   return { ok: true, state: s };
 }
 
@@ -282,12 +452,20 @@ export function sellBenchUnit(state: BuildState, benchIndex: number): ActionResu
   const s = clone(state);
   s.bench.splice(benchIndex, 1);
   s.scrap += sellRefund(unit);
+  for (const relicId of unit.relicIds) s.scrap += relicRefund(relicId);
   return { ok: true, state: s };
 }
 
+/**
+ * Half the unit's base cost, scaled by `tier²` (issue #21). Reaching tier N
+ * via merges costs `N²` base copies (3 tier-k copies merge into 1 tier-(k+1),
+ * so a tier-3 unit represents 9 base copies), so a linear-in-tier refund
+ * significantly undervalued merged units relative to the scrap actually
+ * spent building them. Quadratic scaling matches that merge-cost economics.
+ */
 export function sellRefund(unit: BoardUnit): number {
   const cost = UNIT_DEFS[unit.defId].cost;
-  return Math.max(1, Math.floor(cost / 2)) * unit.tier;
+  return Math.max(1, Math.floor(cost / 2)) * unit.tier * unit.tier;
 }
 
 export function rerollShop(state: BuildState): ActionResult {
@@ -295,7 +473,29 @@ export function rerollShop(state: BuildState): ActionResult {
   const s = clone(state);
   s.scrap -= REROLL_COST;
   s.shop.rolls += 1;
-  const fresh = rollOfferings(s.date, s.shop.rolls, s.teamRelicIds);
+  const fresh = rollOfferings(s.date, s.shop.rolls, s.teamRelicIds, s.day);
+  s.shop.slots = s.shop.slots.map((old, i) =>
+    s.shop.frozen[i] && old.kind !== 'empty' ? old : fresh[i]
+  );
+  return { ok: true, state: s };
+}
+
+/** Check if all shop slots are empty (every stall has been bought). */
+export function isShopDead(state: BuildState): boolean {
+  return state.shop.slots.every((slot) => slot.kind === 'empty');
+}
+
+/** Auto-reroll the shop for free when all stalls are bought. This does NOT
+ * consume scrap — the only thing that distinguishes this from `rerollShop`.
+ * `shop.rolls` is purely an internal seed counter for `rollOfferings` (never
+ * shown to the player or used for cost scaling), so it must still advance
+ * here — otherwise the next manual reroll would reuse the same roll number
+ * and hand back an identical shop, silently wasting the player's scrap. */
+export function autoRerollShop(state: BuildState): ActionResult {
+  if (!isShopDead(state)) return { ok: false, reason: 'shop is not dead' };
+  const s = clone(state);
+  s.shop.rolls += 1;
+  const fresh = rollOfferings(s.date, s.shop.rolls, s.teamRelicIds, s.day);
   s.shop.slots = s.shop.slots.map((old, i) =>
     s.shop.frozen[i] && old.kind !== 'empty' ? old : fresh[i]
   );
@@ -338,7 +538,7 @@ export function benchUnit(state: BuildState, boardIndex: number): ActionResult {
 export function deployUnit(state: BuildState, benchIndex: number, toBoardIndex?: number): ActionResult {
   const unit = state.bench[benchIndex];
   if (!unit) return fail('nothing to deploy');
-  if (state.board.length >= boardCapForDay(state.day)) return fail('the warren is full');
+  if (state.board.length >= effectiveBoardCap(state)) return fail('the warren is full');
   const s = clone(state);
   const [moved] = s.bench.splice(benchIndex, 1);
   const insertAt =
@@ -370,10 +570,31 @@ export function lineupFromBuild(state: BuildState): Lineup {
   return {
     units: state.board.map((u) => ({ defId: u.defId, tier: u.tier, relicIds: u.relicIds })),
     teamRelicIds: state.teamRelicIds,
+    combatCap: combatCapForBuild(state),
   };
+}
+
+/**
+ * Buy the next board slot beyond the day's natural cap (see `SLOT_PRICES`).
+ * Fails once the build's effective board cap already reached `BOARD_CAP` —
+ * either because all purchasable slots are bought, or because the day's own
+ * `boardCapForDay` growth reached the hard cap on its own (day 7).
+ */
+export function buyBoardSlot(state: BuildState): ActionResult {
+  if (effectiveBoardCap(state) >= BOARD_CAP) return fail('the warren is already at its hard cap');
+  const price = SLOT_PRICES[state.purchasedSlots ?? 0];
+  if (price === undefined) return fail('no more slots to buy');
+  if (state.scrap < price) return fail('not enough scrap');
+  const s = clone(state);
+  s.scrap -= price;
+  s.purchasedSlots = (s.purchasedSlots ?? 0) + 1;
+  return { ok: true, state: s };
 }
 
 export function unitStats(unit: BoardUnit): { attack: number; health: number } {
   const def = UNIT_DEFS[unit.defId];
-  return { attack: def.attack * unit.tier, health: def.health * unit.tier };
+  return {
+    attack: def.attack * tierAttackMultiplier(unit.tier),
+    health: def.health * tierHealthMultiplier(unit.tier),
+  };
 }

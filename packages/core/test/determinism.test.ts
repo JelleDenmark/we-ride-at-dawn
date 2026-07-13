@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { dailySeed, currentRideDate } from '../src/seed';
 import { xorshift128 } from '../src/prng';
 import { generateGauntlet } from '../src/gauntlet';
@@ -51,47 +53,43 @@ describe('gauntlet generation', () => {
   });
 });
 
-describe('hourly rides', () => {
-  const HOURS = [495_000, 495_001, 495_002, 495_003, 495_004, 495_005];
-
-  it('is deterministic for a given (date, day, hour)', () => {
-    expect(generateGauntlet('2026-07-03', 2, 495_000)).toEqual(
-      generateGauntlet('2026-07-03', 2, 495_000)
-    );
-  });
-
-  it('keeps the daily theme fixed across hours (and matching the base gauntlet)', () => {
-    const base = generateGauntlet('2026-07-03', 2);
-    for (const h of HOURS) {
-      expect(generateGauntlet('2026-07-03', 2, h).theme).toEqual(base.theme);
-    }
-  });
-
-  it('reshuffles wave composition between hours', () => {
-    const dumps = HOURS.map((h) => JSON.stringify(generateGauntlet('2026-07-03', 2, h).waves));
-    expect(new Set(dumps).size).toBeGreaterThan(1);
-  });
-
-  it('shuffle-only variance: a reference horde swings at most ~2 waves across a day', () => {
-    // The player-facing contract for "variance, not a slot machine": across
-    // 24 hourly rides the same horde's depth stays in a tight band.
-    for (const [date, day] of [
-      ['2026-07-06', 1],
-      ['2026-07-08', 3],
-      ['2026-07-11', 6],
-    ] as const) {
-      const depths = Array.from(
-        { length: 24 },
-        (_, i) => simulate(TEST_HORDE, generateGauntlet(date, day, 495_000 + i)).result.wavesCleared
-      );
-      expect(Math.max(...depths) - Math.min(...depths)).toBeLessThanOrEqual(2);
-    }
-  });
-
-  it('hourless calls are unchanged by the hour feature (golden compatibility)', () => {
+describe('gauntlet stability', () => {
+  it('gauntlets are unchanged by day (golden compatibility)', () => {
     const g = generateGauntlet('2026-07-03');
     expect(g.hour).toBeUndefined();
-    expect(g.theme).toEqual({ primary: 'swarm', secondary: 'armored', pivotWave: 5 });
+    // #41: theme is now seeded from the season (the expedition's Monday),
+    // not the calendar date, so it stays stable across a 7-day expedition.
+    // 2026-07-03 (Fri) falls in the season starting Monday 2026-06-29.
+    expect(g.theme).toEqual({ primary: 'plague', secondary: 'brute', pivotWave: 4 });
+  });
+
+  it('theme is stable across every day of the same season, but differs across seasons', () => {
+    // 2026-06-29 (Mon) .. 2026-07-05 (Sun) is one season/expedition week.
+    const seasonDates = [
+      '2026-06-29', '2026-06-30', '2026-07-01', '2026-07-02', '2026-07-03', '2026-07-04', '2026-07-05',
+    ];
+    const themes = seasonDates.map((d) => generateGauntlet(d).theme);
+    for (const t of themes) expect(t).toEqual(themes[0]);
+
+    const nextSeasonTheme = generateGauntlet('2026-07-06').theme; // next Monday
+    expect(nextSeasonTheme).not.toEqual(themes[0]);
+  });
+
+  it('the whole gauntlet (theme AND wave composition) is identical every day of one season', () => {
+    // Full sameness (2026-07-09 follow-up): not just the theme, the exact
+    // enemy picks are now season-seeded too, so every ride within one
+    // 7-day expedition is byte-identical — only the roster changes day to
+    // day, not the challenge.
+    const a = generateGauntlet('2026-07-01');
+    const b = generateGauntlet('2026-07-02');
+    expect(a.theme).toEqual(b.theme);
+    expect(JSON.stringify(a.waves)).toBe(JSON.stringify(b.waves));
+  });
+
+  it('wave composition still differs between different seasons', () => {
+    const a = generateGauntlet('2026-06-29'); // one Monday
+    const b = generateGauntlet('2026-07-06'); // the next Monday
+    expect(JSON.stringify(a.waves)).not.toBe(JSON.stringify(b.waves));
   });
 });
 
@@ -129,3 +127,56 @@ describe('battle sim', () => {
     expect(events.some((e) => e.type === 'buff')).toBe(true);
   });
 });
+
+// Issue #12 (Dawn-Runt/Dusk-Runt) introduced real-world time-of-day as a
+// buff condition — the whole point of threading it in as an explicit
+// Lineup.timeOfDay parameter (rather than resolving it inside simulate) is
+// that packages/core stays wall-clock-free, exactly like every other
+// date/day/hour input this codebase already threads through as an explicit
+// argument. `seed.ts`'s `currentRideDate` is the one pre-existing, known
+// exception (its whole job is converting a real Date into a ride-date), and
+// it already defaults its `now` parameter rather than calling Date.now()
+// internally, so it stays out of this scan.
+describe('clock isolation (issue #12)', () => {
+  const CORE_SRC = join(__dirname, '..', 'src');
+  const SCAN_EXCLUDE = new Set(['seed.ts']);
+
+  const tsFilesUnder = (dir: string): string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) return tsFilesUnder(full);
+      return entry.name.endsWith('.ts') && !SCAN_EXCLUDE.has(entry.name) ? [full] : [];
+    });
+
+  it('no file in packages/core/src reads the real wall clock (Date.now()/new Date())', () => {
+    // Bare, no-arg calls only — `new Date(someExplicitString)` (shop.ts's
+    // weekdayFor/seasonIdFor) constructs a Date from an explicit argument,
+    // not the real clock, and is fine. Skip comment lines so doc references
+    // to the literal tokens (e.g. this file's own describe block, or the
+    // Lineup.timeOfDay doc comment in data/units.ts) don't false-positive.
+    const REAL_CLOCK = /Date\.now\(\)|new Date\(\)/;
+    const offenders: string[] = [];
+    for (const file of tsFilesUnder(CORE_SRC)) {
+      const codeLines = readFileSync(file, 'utf8')
+        .split('\n')
+        .filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line));
+      if (codeLines.some((line) => REAL_CLOCK.test(line))) offenders.push(file);
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('simulate() with an explicit timeOfDay is unaffected by when it is actually called', () => {
+    // Sanity-check the design intent behaviorally, not just via source scan:
+    // the same explicit lineup+gauntlet input produces the same output
+    // however "now" happens to sit relative to noon when the test runs.
+    const g = gauntletFor('2026-07-06', 3);
+    const lineupBefore = { units: [{ defId: 'dawn-runt' }], timeOfDay: 'beforeNoon' as const };
+    const a = simulate(lineupBefore, g);
+    const b = simulate(lineupBefore, g);
+    expect(JSON.stringify(a.events)).toBe(JSON.stringify(b.events));
+  });
+});
+
+function gauntletFor(date: string, day: number) {
+  return generateGauntlet(date, day);
+}

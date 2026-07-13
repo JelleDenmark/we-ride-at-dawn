@@ -5,3 +5,10 @@ dist/
 .env.*
 !.env.example
 supabase/.temp/
+
+# Working exploit PoCs against the live prod backend — never commit to the
+# public repo, even after the underlying issue is fixed.
+White_hat_Stealthrat.zip
+
+# Claude Code personal local settings
+.claude/settings.local.json

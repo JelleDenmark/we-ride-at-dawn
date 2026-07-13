@@ -1,0 +1,12 @@
+{
+  "embeds": [
+    {
+      "title": "v0.6.5 — the drains run deeper (2/2)",
+      "description": "**Exploit, fixed**\n• A repeatable battle-start buff was quietly re-firing every wave instead of once — a board of maxed Warren-Wardens rode that all the way to clearing the gauntlet. Dead now: those buffs land once per rat, like everyone assumed they already did.\n\n**Economy**\n• Your warren grows as the week rides on — from a 5-rat board up to a 7-rat horde by mid-week — with the 8th and final seat still a steep scrap buy. Room to build into a real board by Sunday.\n• Deeper runs still pay, but less: past the first stretch of waves each extra depth earns a little less scrap. Depth is still your score on the board — the bank just doesn't balloon when you push deep.\n• Summon headroom now tracks your actual deployed horde (+2 spare slots), so pups and revives stop getting silently swallowed by a full board.\n• Reroll costs 2 scrap now (was 1).\n• Sell price scales properly with star tier — merging up is finally worth what you paid for it.\n• Relics pinned to a sold or merged-away rat refund half their cost instead of vanishing.\n• Shop auto-rerolls for free once every stall's bought out.\n• Relic stalls now grey out instead of soft-locking your shop when no rat on your board can carry them.\n• Day 1: rides don't start earning until 10:00 CET. Build your board first — the first haul lands then.\n• One gauntlet per day, locked for the whole week by the season — no more depth swinging wildly hour to hour.\n\n**Relics**\n• Marrow-Snap — pure execute: a blow that knocks a foe below half its own health snaps it outright. The killing stroke has to do the work — rot-softened foes don’t count.\n\n**Quality of life**\n• Shop and board cards show a compact tag instead of the full ability text now — tap a card for the full read.\n• Mobile shop overflow fixed.\n• Replay: the whole horde fits on stage now, and health readouts stop at 0.\n• Installable — add We Ride at Dawn to your home screen and it runs like an app.\n• Scout report is gone; the shop panel just shows your live scrap count instead.\n\nnot everything that rode in with this season is written here.",
+      "color": 5793266,
+      "footer": {
+        "text": "we ride at dawn · season resets Monday 06:00 CET"
+      }
+    }
+  ]
+}
