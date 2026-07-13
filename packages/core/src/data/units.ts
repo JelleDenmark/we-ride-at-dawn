@@ -476,6 +476,21 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     ability: { trigger: 'startOfBattle', effect: { kind: 'buffAdjacentByTribe', attack: 1, health: 1 } },
     tribe: 'runt',
   },
+  // Issue #86: Slink-Rat — first consumer of the `backlineDamage` primitive
+  // (#85). Attack 3 / health 1 / cost 6 are the design doc's rough starting
+  // point, NOT final — flagged for Jesper's balance sign-off. 1 HP is
+  // deliberate: worthless (dies to almost anything) if it ever reaches the
+  // front, rewarding a durable front wall built to protect it.
+  'slink-rat': {
+    id: 'slink-rat', name: 'Slink-Rat', attack: 3, health: 1, cost: 6,
+    desc: 'fights from the dark: each wave, adds its own attack to the clash against the front foe, from any slot — but 1 HP means it dies to almost anything if it ever reaches the front (scales ★)',
+    // startOfWave, via `backlineDamage` (see that Effect's doc comment for
+    // the full compounding-law note and the four resolved interaction
+    // decisions against Marrow-Snap/Ward-Weaver/Gore-Cleaver). Fixed
+    // per-wave damage equal to this unit's own (tier-scaled) attack — no
+    // accumulation; multiple Slink-Rats stack additively, bounded by board size.
+    ability: { trigger: 'startOfWave', effect: { kind: 'backlineDamage' } },
+  },
 };
 
 /** Hardcoded showcase lineup until the shop lands (milestone 4). Index 0 = front. */

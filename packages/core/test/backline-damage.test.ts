@@ -319,20 +319,22 @@ describe('backline damage primitive (issue #85)', () => {
     });
   });
 
-  describe('no player-facing unit added (issue #85 scope)', () => {
-    it('no shipped unit is wired to backlineDamage — infrastructure only', () => {
+  describe('shipped consumers (issue #85 scope)', () => {
+    it('exactly Slink-Rat is wired to backlineDamage — the only shipped consumer', () => {
       // `UNIT_DEFS` is mutated at the top of this file to register the
       // test-only `sniper`/`zeroAttackTank` fixtures (horde units are
       // looked up by defId from that record in sim.ts, unlike gauntlet
       // enemies) — so this check excludes exactly those test-injected ids
       // and looks at everything else, which is the actual shipped roster
-      // from data/units.ts. Issue #85 is the primitive only; Slink-Rat (the
-      // first real consumer) is a separate, still-blocked issue.
+      // from data/units.ts. Issue #85 shipped as the primitive only, with
+      // no consumer; Slink-Rat (issue #86) is now the first (and, as of
+      // this test, only) real one — see slink-rat.test.ts for its own
+      // dedicated coverage.
       const testFixtureIds = new Set([sniper.id, zeroAttackTank.id]);
       const shippedCarriers = Object.values(UNIT_DEFS).filter(
         (u) => !testFixtureIds.has(u.id) && u.ability?.effect.kind === 'backlineDamage'
       );
-      expect(shippedCarriers).toHaveLength(0);
+      expect(shippedCarriers.map((u) => u.id)).toEqual(['slink-rat']);
     });
   });
 });
