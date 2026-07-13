@@ -113,6 +113,24 @@ export type Effect =
    * fire-once reasoning as `buffBehind`.
    */
   | { kind: 'buffAdjacent'; attack: number; health: number }
+  /**
+   * Pack-Caller (issue #88). Same shape as `buffAdjacent` — both board
+   * neighbors (whichever exist), middle placement hits both — but the
+   * magnitude is not a fixed number: it's `attack`/`health` (pre tier-scale,
+   * same as every other effect here) MULTIPLIED by a live count of how many
+   * OTHER rats currently on the board share the source's own `tribe` tag
+   * (see `UnitDef.tribe`). Counted at apply time in sim.ts, not stored on
+   * the effect — the count depends on the board, which isn't known until
+   * the battle actually starts.
+   *
+   * Compounding-law note: `startOfBattle`-gated exactly like `buffAdjacent`
+   * (see `fireEntryTriggers`) — fires once per unit instance, ever, never
+   * re-fires on a later wave. The count itself is also bounded: it can
+   * never exceed `BOARD_CAP - 1` (every other slot, at most), so a maxed
+   * board with every rat sharing a tribe is the ceiling, not an unbounded
+   * multiplier. Safe under the same reasoning as `buffAdjacent`.
+   */
+  | { kind: 'buffAdjacentByTribe'; attack: number; health: number }
   | { kind: 'poisonFrontEnemy'; stacks: number }
   | { kind: 'poisonTarget'; stacks: number }
   /**
@@ -238,6 +256,17 @@ export interface UnitDef {
    * every later day too — this is not a day-exclusive appearance.
    */
   unlockDay?: number;
+  /**
+   * Build-around tag (issue #88: Pack-Caller). Purely descriptive on every
+   * unit except Pack-Caller — it's the count Pack-Caller's
+   * `buffAdjacentByTribe` scans the board for. Optional and freeform-ish
+   * (kept to a small fixed vocabulary in practice: "runt", "plague",
+   * "brute", "swarm"); a unit with no obvious kinship gets no tag rather
+   * than a forced one. Tagging is a subjective flavor/mechanics read — see
+   * the tagging rationale next to `UNIT_DEFS` below and the PR description
+   * for issue #88.
+   */
+  tribe?: string;
 }
 
 export interface LineupUnit {
@@ -271,37 +300,65 @@ export interface Lineup {
   timeOfDay?: TimeOfDay;
 }
 
-/** Full spec §5.4 roster. Archetypes: Breed/Swarm, Plague, Sacrifice, Bruiser/Anchor. */
+/**
+ * Full spec §5.4 roster. Archetypes: Breed/Swarm, Plague, Sacrifice, Bruiser/Anchor.
+ *
+ * `tribe` tagging rationale (issue #88, Pack-Caller) — a subjective read of
+ * each unit's flavor/mechanics, called out here since it's a judgment call:
+ *   - "runt": small, cheap, or literally-named-Runt bodies — Pup, Gutter
+ *     Runt, Dawn-Runt, Dusk-Runt. Gnawer joins this tribe too: fragile
+ *     (1 health) glass-cannon chaff, thematically a scrappy little biter
+ *     rather than a brute or plague unit. Pack-Caller itself is tagged
+ *     "runt" — it's a rallying caller for the horde's little guys, and this
+ *     tribe already has the deepest bench (5 other units), which makes an
+ *     all-runt board a genuinely buildable theme rather than a trap with no
+ *     support.
+ *   - "swarm": breeding/summon-focused units — Rat-Piper (pipes in pups
+ *     every wave) and Brood-Mother (births pups on faint).
+ *   - "plague": poison-dealing units — Plague-Bearer and Blight-Witch.
+ *   - "brute": big, tanky anchors — Warren-Warden, Dire-Rat (armored),
+ *     MD Rattyfock (Warren-Warden's kit, reskinned).
+ *   - Left untagged: Corpse-Glutton, Bone-Priest, Press-Kin, Ward-Weaver.
+ *     None of these read as belonging to an obvious kinship group — forcing
+ *     a tag on a unit with no real thematic tribe would just be noise (the
+ *     issue explicitly says use judgment, not "tag everything").
+ */
 export const UNIT_DEFS: Record<string, UnitDef> = {
-  pup: { id: 'pup', name: 'Pup', attack: 1, health: 1, cost: 0 },
+  pup: { id: 'pup', name: 'Pup', attack: 1, health: 1, cost: 0, tribe: 'runt' },
   'gutter-runt': {
     id: 'gutter-runt', name: 'Gutter Runt', attack: 1, health: 1, cost: 2,
     desc: 'cheap body',
+    tribe: 'runt',
   },
   'rat-piper': {
     id: 'rat-piper', name: 'Rat-Piper', attack: 1, health: 2, cost: 4,
     desc: 'each wave: pipes in a pup',
     ability: { trigger: 'startOfWave', effect: { kind: 'summon', unitId: 'pup', count: 1 } },
+    tribe: 'swarm',
   },
   'brood-mother': {
     id: 'brood-mother', name: 'Brood-Mother', attack: 2, health: 3, cost: 6,
     desc: 'faint: births 2 pups',
     ability: { trigger: 'faint', effect: { kind: 'summon', unitId: 'pup', count: 2 } },
+    tribe: 'swarm',
   },
   'plague-bearer': {
     id: 'plague-bearer', name: 'Plague-Bearer', attack: 2, health: 2, cost: 4,
     desc: 'each wave: poisons front foe',
     ability: { trigger: 'startOfWave', effect: { kind: 'poisonFrontEnemy', stacks: 1 } },
+    tribe: 'plague',
   },
   'blight-witch': {
     id: 'blight-witch', name: 'Blight-Witch', attack: 3, health: 3, cost: 8,
     desc: 'each wave: poisons the whole enemy line (scales ★)',
     ability: { trigger: 'startOfWave', effect: { kind: 'poisonAllEnemies' } },
+    tribe: 'plague',
   },
   gnawer: {
     id: 'gnawer', name: 'Gnawer', attack: 3, health: 1, cost: 4,
     desc: 'faint: buffs the rat behind (scales ★)',
     ability: { trigger: 'faint', effect: { kind: 'buffBehind', attack: 2, health: 0 } },
+    tribe: 'runt',
   },
   'corpse-glutton': {
     id: 'corpse-glutton', name: 'Corpse-Glutton', attack: 3, health: 2, cost: 6,
@@ -317,6 +374,7 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     id: 'warren-warden', name: 'Warren-Warden', attack: 2, health: 6, cost: 6,
     desc: 'battle: buffs all rats behind it (scales ★)',
     ability: { trigger: 'startOfBattle', effect: { kind: 'buffBehind', attack: 1, health: 1, all: true } },
+    tribe: 'brute',
   },
   'dire-rat': {
     id: 'dire-rat', name: 'Dire-Rat', attack: 4, health: 5, cost: 8,
@@ -330,12 +388,14 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     // board is unaffected, and the balance scripts build lineups directly so
     // they don't see this gate.
     unlockDay: 2,
+    tribe: 'brute',
   },
   'md-rattyfock': {
     id: 'md-rattyfock', name: 'MD Rattyfock', attack: 2, health: 6, cost: 6,
     desc: 'Season 1 survivor, patched and returned; battle: buffs all rats behind it (scales ★)',
     ability: { trigger: 'startOfBattle', effect: { kind: 'buffBehind', attack: 1, health: 1, all: true } },
     unlockDay: 2, // day-1 shop kept plain — see Dire-Rat's note.
+    tribe: 'brute',
   },
   'press-kin': {
     id: 'press-kin', name: 'Press-Kin', attack: 2, health: 4, cost: 5,
@@ -363,6 +423,7 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
       condition: { timeOfDay: 'beforeNoon' },
     },
     unlockDay: 3,
+    tribe: 'runt',
   },
   'dusk-runt': {
     id: 'dusk-runt', name: 'Dusk-Runt', attack: 1, health: 2, cost: 4,
@@ -373,6 +434,24 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
       condition: { timeOfDay: 'afterNoon' },
     },
     unlockDay: 3,
+    tribe: 'runt',
+  },
+  // Issue #88: Pack-Caller — the build-around unit for the new `tribe` tag.
+  // Stats (attack 2 / health 3 / cost 5) are the design doc's rough starting
+  // point, NOT final — flagged for Jesper's balance sign-off, same as every
+  // other tentative stat line in this file. Tagged "runt" itself (see the
+  // tagging-rationale comment above `UNIT_DEFS`): it's a rallying caller for
+  // the horde's little guys, and "runt" already has the deepest bench, which
+  // makes an all-runt board an actually-buildable theme.
+  'pack-caller': {
+    id: 'pack-caller', name: 'Pack-Caller', attack: 2, health: 3, cost: 5,
+    desc: 'battle: buffs the rats beside it +1/+1 for each other same-tribe rat on the board (scales ★)',
+    // startOfBattle: fires once per unit instance, ever (see `fireEntryTriggers`
+    // and the compounding-law note on `buffAdjacentByTribe` above) — bounded
+    // by board size (at most BOARD_CAP-1 other rats to count), and cannot
+    // re-fire on a later wave to re-stack. Safe under the compounding law.
+    ability: { trigger: 'startOfBattle', effect: { kind: 'buffAdjacentByTribe', attack: 1, health: 1 } },
+    tribe: 'runt',
   },
 };
 
