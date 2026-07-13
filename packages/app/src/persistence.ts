@@ -152,19 +152,23 @@ export interface RideLogEntry {
 
 export const RIDE_LOG_MAX = 24;
 
-/** Completed hourly rides, newest first, capped at RIDE_LOG_MAX. */
-export function saveRideLog(log: RideLogEntry[]): void {
+/** Completed hourly rides, newest first, capped at RIDE_LOG_MAX. Scoped by
+ * season so the log resets when a new season starts (including mid-season
+ * re-issues like the 2026-07-13.2 restart token). */
+export function saveRideLog(seasonId: string, log: RideLogEntry[]): void {
   try {
-    localStorage.setItem(`${NS}:ridelog`, JSON.stringify(log.slice(0, RIDE_LOG_MAX)));
+    localStorage.setItem(`${NS}:ridelog`, JSON.stringify({ seasonId, log: log.slice(0, RIDE_LOG_MAX) }));
   } catch {
     // Non-fatal.
   }
 }
 
-export function loadRideLog(): RideLogEntry[] {
+export function loadRideLog(seasonId: string): RideLogEntry[] {
   try {
     const raw = localStorage.getItem(`${NS}:ridelog`);
-    return raw ? (JSON.parse(raw) as RideLogEntry[]) : [];
+    if (!raw) return [];
+    const v = JSON.parse(raw) as { seasonId: string; log: RideLogEntry[] };
+    return v.seasonId === seasonId ? v.log : [];
   } catch {
     return [];
   }
