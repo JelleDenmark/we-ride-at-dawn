@@ -27,11 +27,11 @@ export const INTEREST_CAP = 5;
 // SCRAP_PER_DEPTH` — every extra wave cleared paid the same, so ANY change
 // that let players push deeper (roster acceleration #91, enemy softening #92)
 // inflated the bank in lockstep, snowballing the economy #70 just tuned. So
-// income is now DIMINISHING in depth: the first `SCRAP_FULL_DEPTH` waves pay
-// full rate, and every wave beyond pays the reduced `SCRAP_DEEP_RATE`. This
-// keeps the LEADERBOARD chase from snowballing the bank (a depth-30 run is
-// still mostly paid at the 0.4 deep rate) while leaving score itself raw,
-// undiminished depth — depth is the prestige metric.
+// income is now DIMINISHING in depth, in three tiers: full rate through
+// `SCRAP_FULL_DEPTH`, then `SCRAP_DEEP_RATE` through `SCRAP_MID_DEPTH`, then
+// `SCRAP_FAR_RATE` beyond. This keeps the LEADERBOARD chase from snowballing
+// the bank while leaving score itself raw, undiminished depth — depth is the
+// prestige metric.
 //
 // full=8 is a DELIBERATE mild surplus, not income-neutral: with #91's deeper
 // median it lands week income ~1140 (~+12% over the pre-#90 ~1020 baseline,
@@ -40,8 +40,22 @@ export const INTEREST_CAP = 5;
 // payoff — rather than banking an unspendable surplus against a too-tight
 // economy. Income is NOT the real T3 gate (fishing RNG is), so this is a small
 // generosity lever to validate with live feedback next season, not a fix.
+//
+// deep=0.5 (was 0.4, 2026-07-14): the flooring at 0.4 created a 3-depth dead
+// zone (e.g. depth 8/9/10 all paid identically) that read as "no reward for
+// progressing." 0.5 halves the worst-case dead zone to 2 depths — feel over
+// precision, per Jesper. This alone would also push a typical week's income
+// to ~1332 (+17% over the 1140 baseline) for players who mostly live in the
+// 8-16 band, which was accepted as a deliberate tradeoff for the improved
+// feel. To keep that from ALSO inflating the elite/leaderboard tail (depth
+// 20-43 runs), `SCRAP_FAR_RATE`=0.34 kicks in past `SCRAP_MID_DEPTH`=16 and
+// pulls deep-run income back to within ~1 scrap of the old flat-0.4 curve
+// (e.g. depth 43: 22 old vs 21 new) — so the generosity lands on the typical
+// player's mid-game, not on runaway leaderboard-depth income.
 export const SCRAP_FULL_DEPTH = 8;
-export const SCRAP_DEEP_RATE = 0.4;
+export const SCRAP_DEEP_RATE = 0.5;
+export const SCRAP_MID_DEPTH = 16;
+export const SCRAP_FAR_RATE = 0.34;
 
 /**
  * Scrap earned for clearing `depth` waves in one ride — the single source of
@@ -52,8 +66,9 @@ export const SCRAP_DEEP_RATE = 0.4;
  */
 export function scrapForDepth(depth: number): number {
   const full = Math.min(depth, SCRAP_FULL_DEPTH);
-  const deep = Math.max(0, depth - SCRAP_FULL_DEPTH);
-  return Math.floor(full * SCRAP_PER_DEPTH + deep * SCRAP_DEEP_RATE);
+  const mid = Math.max(0, Math.min(depth, SCRAP_MID_DEPTH) - SCRAP_FULL_DEPTH);
+  const far = Math.max(0, depth - SCRAP_MID_DEPTH);
+  return Math.floor(full * SCRAP_PER_DEPTH + mid * SCRAP_DEEP_RATE + far * SCRAP_FAR_RATE);
 }
 
 export function interestFor(scrap: number): number {
