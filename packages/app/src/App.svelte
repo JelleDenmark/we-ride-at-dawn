@@ -310,15 +310,36 @@
   // including exactly how much it scales per star. Numbers come from the same
   // core tables the sim uses (never hand-copied), so they can't drift.
 
-  /** "+2/+2 (★2 +6/+6 · ★3 +18/+18)" for the 3x-per-star buff curve. */
-  function buffScale(attack: number, health: number): string {
+  // Shared per-star blurb builder: `mult(t)` is the per-tier stat multiplier,
+  // which differs by effect (the 3x `tierAttackMultiplier` curve for fire-once
+  // buffs vs. the shallow linear curve gainStats uses — see the two wrappers
+  // below). Numbers come from the same core tables the sim uses, never
+  // hand-copied, so display can't drift from the mechanic.
+  function buffScaleWith(attack: number, health: number, mult: (t: number) => number): string {
     const at = (t: number) =>
       health > 0 && attack > 0
-        ? `+${attack * tierAttackMultiplier(t)}/+${health * tierHealthMultiplier(t)}`
+        ? `+${attack * mult(t)}/+${health * mult(t)}`
         : attack > 0
-          ? `+${attack * tierAttackMultiplier(t)} attack`
-          : `+${health * tierHealthMultiplier(t)} health`;
+          ? `+${attack * mult(t)} attack`
+          : `+${health * mult(t)} health`;
     return `${at(1)} (★2 ${at(2)} · ★3 ${at(3)})`;
+  }
+
+  /** "+2/+2 (★2 +6/+6 · ★3 +18/+18)" for the 3x-per-star buff curve. */
+  function buffScale(attack: number, health: number): string {
+    return buffScaleWith(attack, health, tierAttackMultiplier);
+  }
+
+  /**
+   * "+1/+1 (★2 +2/+2 · ★3 +3/+3)" for the SHALLOW linear (1/2/3) per-star
+   * curve. gainStats is the sole buff sim.ts scales by a flat `* tier` rather
+   * than `tierAttackMultiplier` (1/3/9): its `allyFaint` trigger repeats every
+   * wave, so the shallow curve is deliberate to keep the compounding bounded
+   * (see compounding-law.test.ts's allyFaint canary). Using `buffScale` here
+   * would over-promise +9/+9 at ★3 when the sim actually grants +3/+3.
+   */
+  function gainStatsScale(attack: number, health: number): string {
+    return buffScaleWith(attack, health, (t) => t);
   }
 
   function abilitySentence(defId: string): string {
@@ -360,7 +381,7 @@
         what = `applies ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) to whatever it just struck`;
         break;
       case 'gainStats':
-        what = `gains ${buffScale(e.attack, e.health)}`;
+        what = `gains ${gainStatsScale(e.attack, e.health)}`;
         break;
       case 'revive':
         what = `revives your first fallen rat at ${reviveHpForTier(1)} health (★2 ${reviveHpForTier(2)} · ★3 ${reviveHpForTier(3)}), never above the rat's own max; each fallen rat can only be raised once`;
