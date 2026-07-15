@@ -413,6 +413,67 @@ describe('time-of-day abilities (issue #12: Dawn-Runt/Dusk-Runt)', () => {
   });
 });
 
+describe('Twilight-Runt (issue #110: Dawn/Dusk-Runt fusion, teamBuffByTime)', () => {
+  it('grants the placeholder +3 team attack before noon (magnitudes pending sign-off)', () => {
+    const { events } = simulate(
+      { units: [{ defId: 'twilight-runt' }, { defId: 'gutter-runt' }], timeOfDay: 'beforeNoon' },
+      gauntletOf([dummy(0, 100)])
+    );
+    const buffs = ofType(events, 'buff');
+    // Whole team, including the caster itself — same shape as teamBuff.
+    expect(buffs.length).toBe(2);
+    expect(buffs.every((b) => b.attack === 3 && b.health === 0)).toBe(true);
+  });
+
+  it('grants the placeholder +2 team health after noon (magnitudes pending sign-off)', () => {
+    const { events } = simulate(
+      { units: [{ defId: 'twilight-runt' }, { defId: 'gutter-runt' }], timeOfDay: 'afterNoon' },
+      gauntletOf([dummy(0, 100)])
+    );
+    const buffs = ofType(events, 'buff');
+    expect(buffs.length).toBe(2);
+    expect(buffs.every((b) => b.attack === 0 && b.health === 2)).toBe(true);
+  });
+
+  it('no-ops when the lineup has no timeOfDay (pre-#12 lineups are unaffected, unlike condition-gated Dawn/Dusk-Runt this is enforced inside the effect, not the ability)', () => {
+    const { events } = simulate(
+      { units: [{ defId: 'twilight-runt' }, { defId: 'gutter-runt' }] },
+      gauntletOf([dummy(0, 100)])
+    );
+    expect(ofType(events, 'buff')).toHaveLength(0);
+  });
+
+  it('scales the before-noon attack half with tier, like every other teamBuff-family magnitude', () => {
+    const { events } = simulate(
+      { units: [{ defId: 'twilight-runt', tier: 2 }, { defId: 'gutter-runt', tier: 2 }], timeOfDay: 'beforeNoon' },
+      gauntletOf([dummy(0, 500)])
+    );
+    const buffs = ofType(events, 'buff');
+    expect(buffs.length).toBe(2);
+    // tierAttackMultiplier(2) === 3, so +3 base -> +9 at tier 2.
+    expect(buffs.every((b) => b.attack === 9 && b.health === 0)).toBe(true);
+  });
+
+  it('scales the after-noon health half with tier, like every other teamBuff-family magnitude', () => {
+    const { events } = simulate(
+      { units: [{ defId: 'twilight-runt', tier: 3 }, { defId: 'gutter-runt', tier: 3 }], timeOfDay: 'afterNoon' },
+      gauntletOf([dummy(0, 500)])
+    );
+    const buffs = ofType(events, 'buff');
+    expect(buffs.length).toBe(2);
+    // tierHealthMultiplier(3) === 9, so +2 base -> +18 at tier 3.
+    expect(buffs.every((b) => b.attack === 0 && b.health === 18)).toBe(true);
+  });
+
+  it('fires once per battle, not once per wave (compounding-law check)', () => {
+    const { events } = simulate(
+      { units: [{ defId: 'twilight-runt' }, { defId: 'gutter-runt' }], timeOfDay: 'beforeNoon' },
+      gauntletOf([dummy(0, 1)], [dummy(0, 1)], [dummy(0, 1)])
+    );
+    expect(ofType(events, 'buff')).toHaveLength(2); // once per horde unit, not once per wave
+  });
+});
+
 describe('wave carry-over', () => {
   it('survivors keep their damage between waves', () => {
     const { result } = simulate(
