@@ -26,10 +26,30 @@ const ofType = <T extends BattleEvent['type']>(events: BattleEvent[], type: T) =
   events.filter((e): e is Extract<BattleEvent, { type: T }> => e.type === type);
 
 describe('unit abilities', () => {
-  it('Plague-Bearer poisons the frontmost enemy at start of battle', () => {
+  it('Plague-Bearer poisons the (only) enemy in a single-enemy wave', () => {
+    // Degenerate case (issue #112): last === front when there's only one
+    // enemy on board, so `poisonLastEnemy` behaves exactly like the old
+    // `poisonFrontEnemy` did here.
     const { events } = simulate(lineup({ defId: 'plague-bearer' }), gauntletOf([dummy(0, 5)]));
     expect(ofType(events, 'poisonApplied').length).toBeGreaterThan(0);
     expect(ofType(events, 'poisonTick').length).toBeGreaterThan(0);
+  });
+
+  it('Plague-Bearer poisons the LAST enemy in a multi-enemy wave, not the front (issue #112)', () => {
+    const front: UnitDef = { id: 'front-dummy', name: 'Front', attack: 0, health: 50, cost: 0 };
+    const mid: UnitDef = { id: 'mid-dummy', name: 'Mid', attack: 0, health: 50, cost: 0 };
+    const back: UnitDef = { id: 'back-dummy', name: 'Back', attack: 0, health: 50, cost: 0 };
+    const { events } = simulate(lineup({ defId: 'plague-bearer' }), gauntletOf([front, mid, back]));
+
+    const waveStart = events.find((e) => e.type === 'waveStart');
+    if (waveStart?.type !== 'waveStart') throw new Error('expected a waveStart event');
+    const frontId = waveStart.enemies[0].instanceId;
+    const backId = waveStart.enemies[waveStart.enemies.length - 1].instanceId;
+
+    const applied = ofType(events, 'poisonApplied');
+    expect(applied.length).toBeGreaterThan(0);
+    expect(applied[0].targetId).toBe(backId);
+    expect(applied[0].targetId).not.toBe(frontId);
   });
 
   it('Gnawer gives the rat behind it +2 attack on faint', () => {

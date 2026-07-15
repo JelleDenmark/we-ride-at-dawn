@@ -350,6 +350,9 @@
       case 'poisonFrontEnemy':
         what = `applies ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) to the frontmost enemy — poison bites for its full count every clash and clears when the wave falls`;
         break;
+      case 'poisonLastEnemy':
+        what = `applies ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) to the enemy at the back of the line — poison bites for its full count every clash and clears when the wave falls`;
+        break;
       case 'poisonTarget':
         what = `applies ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) to whatever it just struck`;
         break;
@@ -403,6 +406,7 @@
           return `${icon} buff`;
         }
         case 'poisonFrontEnemy':
+        case 'poisonLastEnemy':
         case 'poisonTarget':
         case 'poisonAllEnemies':
           return '☠ poison';
