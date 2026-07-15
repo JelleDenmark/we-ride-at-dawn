@@ -1,0 +1,44 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <!-- Draughtsman Moe: Blight-Witch reskinned as the Season 2 champion's tribute
+       (issue #115, honours RatMoe). Same kit (poison the whole enemy line), same
+       body/pose as blight-witch.svg, re-costumed from ragged plague-hag into an
+       "architect of rot" — the "draught" pun: a draughtsman draws plans (architect),
+       a ship's draught is how deep it sits (his boat in Svendborg), a draught is an
+       archaic dose of poison (the kit). Kept the plague read so the kit is legible
+       (green draught-phial, purple poison eye), swapped the hood for a slate
+       drafting-coat + a rolled blueprint slung on the back + a brass compass, and
+       gave him RatMoe's ponytail. Palette stays muted/grimy per house style; the
+       ink-blue blueprint and tarnished brass are the only "prestige" richness. -->
+  <!-- tail -->
+  <path d="M17 51 Q5 50 7 37 Q7 31 12 30" fill="none" stroke="#4a3a45" stroke-width="2.6" stroke-linecap="round"/>
+  <!-- body (Blight-Witch geometry, muted plague grey) -->
+  <path d="M17 51 C13 42 17 32 28 30 C36 29 42 33 45 39 L54 44 C55.3 45 54.4 46.4 53 46.4 L46 46.5 C43 51 35 54 27 54 C20 54 18.5 53.5 17 51 Z" fill="#6a5560" stroke="#201209" stroke-width="1.5" stroke-linejoin="round"/>
+  <!-- architect's drafting-coat draped over the back, split hem (replaces the hood) -->
+  <path d="M16 48 C13 41 17 32 27 30 C33 29.5 38 32 41 36 L40 44 C36 49 28 51.5 21 51 C18.5 50.7 17 49.8 16 48 Z" fill="#3b4a5c" stroke="#1c2530" stroke-width="1.2" stroke-linejoin="round"/>
+  <path d="M28 31 L27 50 M34 33 L33 49" stroke="#2c3a49" stroke-width="1"/>
+  <!-- rolled blueprint slung diagonally across the back: ink-blue tube, grid hint, rolled end -->
+  <path d="M16 45 L30 27" fill="none" stroke="#2f4a63" stroke-width="5" stroke-linecap="round"/>
+  <path d="M17.5 44 L29 29.5 M18.7 45.6 L30.2 31" fill="none" stroke="#5b7f9e" stroke-width="0.7"/>
+  <ellipse cx="30" cy="27.5" rx="2.4" ry="1.6" transform="rotate(-52 30 27.5)" fill="#3a5a76" stroke="#1c2530" stroke-width="0.8"/>
+  <!-- head -->
+  <circle cx="40" cy="35" r="4.4" fill="#6a5560" stroke="#201209" stroke-width="1.5"/>
+  <circle cx="40" cy="35" r="1.9" fill="#87707c"/>
+  <!-- purple poison eye + snout drip point, the surviving Blight-Witch signature -->
+  <circle cx="45" cy="40" r="1.8" fill="#9a5fb0"/>
+  <circle cx="52.6" cy="45" r="1.1" fill="#9a5fb0"/>
+  <!-- RatMoe's ponytail: bound tuft sprouting from the crown, trailing up-left -->
+  <path d="M38.5 30.5 C36 24 33 20.5 29.5 18.5 C31.5 22 32.5 26.5 36.5 31.5 Z" fill="#2b2230" stroke="#160e1a" stroke-width="0.8" stroke-linejoin="round"/>
+  <rect x="34.7" y="28" width="3.4" height="2.1" rx="0.7" transform="rotate(-34 34.7 28)" fill="#8a6d3b"/>
+  <!-- brass drafting compass, opened, held low at the front like a scalpel of the trade -->
+  <path d="M43 49.5 L40.5 58 M43 49.5 L45.8 58" fill="none" stroke="#c9b06a" stroke-width="1.5" stroke-linecap="round"/>
+  <circle cx="43" cy="49.5" r="1.4" fill="#8a6d3b"/>
+  <!-- the draught: a corked phial of green rot at the rear claw (poison-as-dose) -->
+  <rect x="20.4" y="51" width="4.2" height="7" rx="1.6" fill="#6fae3a" stroke="#201209" stroke-width="1"/>
+  <rect x="21.1" y="49.4" width="2.8" height="2" rx="0.6" fill="#4a3a45"/>
+  <path d="M21 55 L24 55" stroke="#a7d67a" stroke-width="0.8"/>
+  <!-- a bead of the draught dripping free -->
+  <path d="M31 53 Q31 56.4 33 58 Q35 56.4 35 53" fill="#6fae3a"/>
+  <!-- legs -->
+  <rect x="27" y="52" width="4.6" height="6.5" rx="2" fill="#4a3a45"/>
+  <rect x="49" y="47" width="4.6" height="6.5" rx="2" fill="#4a3a45"/>
+</svg>
