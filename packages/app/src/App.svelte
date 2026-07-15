@@ -347,6 +347,9 @@
       case 'buffBehind':
         what = `grants ${buffScale(e.attack, e.health)} to ${e.all ? 'every rat behind it' : 'the rat behind it'}`;
         break;
+      case 'bequeathAttack':
+        what = `passes its OWN current attack to the rat behind it, plus a bonus for how deep into the ride it fell (capped at ${e.waveBonusCapMultiplier}× its own attack) — the rat right behind it inherits everything; the last slot has nobody to pass it to`;
+        break;
       case 'poisonFrontEnemy':
         what = `applies ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) to the frontmost enemy — poison bites for its full count every clash and clears when the wave falls`;
         break;
@@ -400,6 +403,7 @@
         case 'buffBehind':
         case 'buffAdjacent':
         case 'gainStats':
+        case 'bequeathAttack':
           return '▲ buff';
         case 'teamBuff': {
           const icon = ability.condition ? (TIME_OF_DAY_ICON[ability.condition.timeOfDay] ?? '▲') : '▲';

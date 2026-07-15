@@ -52,15 +52,84 @@ describe('unit abilities', () => {
     expect(applied[0].targetId).not.toBe(frontId);
   });
 
-  it('Gnawer gives the rat behind it +2 attack on faint', () => {
+  // Issue #111 rework: Gnawer's faint payout is no longer a flat literal —
+  // the rat behind inherits Gnawer's OWN current attack (tier-scaled,
+  // relic-buffed) plus a bonus for the wave it died on, capped at
+  // `waveBonusCapMultiplier * ownAttack` (2x, per the def in units.ts).
+  // `filler(n)` builds n zero-health "auto-clear" waves so a test can pin
+  // down the EXACT wave Gnawer dies on: a 0-health enemy is already dead at
+  // wave start (resolveDeaths runs before the tick loop), so the wave
+  // clears for free with no damage dealt, letting the next wave's killer
+  // enemy land on a precisely chosen wave number.
+  const filler = (n: number): UnitDef[][] => Array.from({ length: n }, () => [dummy(0, 0)]);
+
+  it('Gnawer bequeaths its own current attack (tier-scaled, relic-buffed), not a flat literal', () => {
+    // t1 Gnawer with Rusted Nail (+2 attack): ownAttack = 3 + 2 = 5. Dies on
+    // wave 1, so the wave bonus is min(1, cap=2*5=10) = 1. Inherited = 6.
     const { events } = simulate(
-      lineup({ defId: 'gnawer' }, { defId: 'gutter-runt' }),
-      gauntletOf([dummy(1, 50)])
+      lineup({ defId: 'gnawer', relicIds: ['rusted-nail'] }, { defId: 'gutter-runt' }),
+      gauntletOf([dummy(50, 1)])
     );
     const buffs = ofType(events, 'buff');
     expect(buffs.length).toBe(1);
-    expect(buffs[0].attack).toBe(2);
-    expect(buffs[0].newAttack).toBe(3);
+    expect(buffs[0].attack).toBe(6);
+    expect(buffs[0].newAttack).toBe(1 + 6);
+    expect(buffs[0].health).toBe(0);
+  });
+
+  it('Gnawer\'s inherited attack scales with tier via tierAttackMultiplier', () => {
+    // t2 Gnawer: ownAttack = 3 * 3 = 9. Dies wave 1: bonus = min(1, 2*9=18) = 1.
+    // Inherited = 10.
+    const { events } = simulate(
+      lineup({ defId: 'gnawer', tier: 2 }, { defId: 'gutter-runt' }),
+      gauntletOf([dummy(50, 9)])
+    );
+    const buffs = ofType(events, 'buff');
+    expect(buffs.length).toBe(1);
+    expect(buffs[0].attack).toBe(10);
+  });
+
+  it('the wave-died-on bonus grows the later Gnawer falls', () => {
+    // t1 Gnawer, ownAttack = 3, cap = 2*3 = 6 (not yet reached). 4 filler
+    // waves auto-clear for free, so Gnawer dies exactly on wave 5:
+    // bonus = min(5, 6) = 5, inherited = 3 + 5 = 8 — strictly more than the
+    // wave-1 payout (4) a lone early death would grant.
+    const { events } = simulate(
+      lineup({ defId: 'gnawer' }, { defId: 'gutter-runt' }),
+      gauntletOf(...filler(4), [dummy(50, 1)])
+    );
+    const buffs = ofType(events, 'buff');
+    expect(buffs.length).toBe(1);
+    expect(buffs[0].attack).toBe(8);
+    expect(buffs[0].newAttack).toBe(1 + 8);
+  });
+
+  it('the wave bonus is capped at waveBonusCapMultiplier * ownAttack, however late Gnawer falls', () => {
+    // t1 Gnawer, ownAttack = 3, cap = 2*3 = 6. 9 filler waves auto-clear for
+    // free so Gnawer dies exactly on wave 10 — well past the cap. Uncapped,
+    // the bonus would be 10 (inherited 13); capped, it tops out at 6
+    // (inherited 9).
+    const { events } = simulate(
+      lineup({ defId: 'gnawer' }, { defId: 'gutter-runt' }),
+      gauntletOf(...filler(9), [dummy(50, 1)])
+    );
+    const buffs = ofType(events, 'buff');
+    expect(buffs.length).toBe(1);
+    expect(buffs[0].attack).toBe(9);
+    expect(buffs[0].attack).toBeLessThan(3 + 10);
+  });
+
+  it('Gnawer in the last slot has nobody behind it — the payout evaporates, no crash', () => {
+    // Enemy health kept well above Gnawer's own attack (3) so only Gnawer
+    // dies this tick — isolates the "no target" case from an incidental
+    // double-kill.
+    const { events, result } = simulate(
+      lineup({ defId: 'gnawer' }),
+      gauntletOf([dummy(50, 100)])
+    );
+    expect(ofType(events, 'buff').length).toBe(0);
+    expect(ofType(events, 'death').length).toBe(1);
+    expect(result.survivors.length).toBe(0);
   });
 
   it('Corpse-Glutton grows +1/+1 whenever an ally faints', () => {
