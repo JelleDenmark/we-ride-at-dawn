@@ -86,6 +86,32 @@ export function poisonStacksForTier(tier: number): number {
   return table[tier - 1] ?? table[table.length - 1];
 }
 
+/**
+ * Hard ceiling on total attack Cellar-Coil's `chargeWhileBenched` may ever
+ * bank onto a single instance, over the WHOLE Ride (all `WAVE_COUNT` = 45
+ * Waves), by tier (issue #106). Same shape as `reviveHpForTier`/
+ * `blockHitsForTier` above — a small explicit table, NOT a multiplier of a
+ * base value — but unlike either of those, this table exists specifically
+ * because ADR-0003 (`docs/adr/0003-compounding-law-for-repeating-triggers.md`)
+ * requires one: `chargeWhileBenched` is a *permanent* stat gain on the
+ * repeating `startOfWave` Trigger, which is exactly the shape that already
+ * shipped once as the Warren-Warden incident (a `startOfBattle` buff
+ * mistakenly re-firing every Wave). It is only safe here because the cap is
+ * a hard `Math.min` clamp baked into the effect's application (see the
+ * `chargeWhileBenched` case in sim.ts's `applyEffect`), not a tunable
+ * suggestion — this function is the one and only source of truth for that
+ * ceiling, and nothing may bank past it no matter how many of the 45 Waves
+ * the unit spends off the front slot.
+ *
+ * Placeholder table `[6, 12, 18]` per issue #106 / `docs/design/future-minions.md`'s
+ * Cellar-Coil writeup — tune the numbers during the balance pass, but the
+ * existence of a hard cap here is not up for debate.
+ */
+export function cellarCoilChargeCapForTier(tier: number): number {
+  const table = [6, 12, 18];
+  return table[tier - 1] ?? table[table.length - 1];
+}
+
 export type Effect =
   | { kind: 'summon'; unitId: string; count: number }
   /**
@@ -156,6 +182,52 @@ export type Effect =
    */
   | { kind: 'poisonAllEnemies' }
   | { kind: 'gainStats'; attack: number; health: number }
+  /**
+   * Cellar-Coil (issue #106; "positional patience" in
+   * `docs/design/future-minions.md`). Sibling to `gainStats` above, but
+   * deliberately NOT the same shape: `gainStats` is uncapped and only ever
+   * safe today because its one wired-up trigger (`allyFaint`) is implicitly
+   * bounded by how many allies can faint in a battle. This effect is wired
+   * to `startOfWave` — a repeating Trigger — gated by the new
+   * `Ability.condition.notFront` (fires only on Waves the unit survives
+   * while NOT at board index 0), which is exactly the shape ADR-0003 (see
+   * `docs/adr/0003-compounding-law-for-repeating-triggers.md`) flags as
+   * needing an explicit hard cap: the same permanent-per-wave-gain shape
+   * that shipped as the Warren-Warden incident. It is only safe here
+   * because the grant is HARD-CAPPED by construction, not a suggestion:
+   *
+   *   - Per-wave grant is `effect.attackPerWave * tier` — deliberately
+   *     LINEAR tier scaling (1/2/3), not `tierAttackMultiplier`'s
+   *     exponential `3^(tier-1)` — same rationale as `blockHitsForTier`'s
+   *     doc comment: an accumulating per-wave effect must not also get an
+   *     exponential per-tier multiplier, or the cap becomes meaningless at
+   *     tier 3.
+   *   - The grant is clamped in sim.ts's `applyEffect` (`chargeWhileBenched`
+   *     case) to `Math.min(effect.attackPerWave * tier, cap - source.chargeStacks)`,
+   *     where `cap` comes from `cellarCoilChargeCapForTier(tier)` — see that
+   *     function's doc comment for the full sign-off. Once `chargeStacks`
+   *     reaches the cap the ability is a silent no-op every subsequent Wave,
+   *     not an error — there is no code path that lets it exceed the cap.
+   *   - `chargeStacks` lives on `BattleUnit` (see its declaration in sim.ts,
+   *     next to `raised`/`startOfBattleFired`) and persists across every
+   *     Wave of the whole Ride the same way those fields do, so the cap is a
+   *     true ceiling on total attack ever banked over all `WAVE_COUNT` (45)
+   *     Waves, not just one Wave or one Battle.
+   *
+   * No health is granted by this effect — only attack accumulates, matching
+   * the design bank's text; the unit's base `health` is its only durability
+   * lever while it waits to bank charge.
+   *
+   * Enemy-side note (ADR-0004): the same effect is technically available to
+   * an Enemy for free, but degenerates to near-harmless there — Enemies are
+   * re-instantiated fresh every Wave and `fireEntryTriggers` only runs once
+   * per Wave, so an Enemy copy could bank at most one grant before the Wave
+   * ends and it ceases to exist; it can never reach anywhere near the cap.
+   * This is intentional, not an oversight — see ADR-0004
+   * (`docs/adr/0004-enemies-share-the-unit-engine.md`) — nobody should "fix"
+   * this into carrying Enemy state across Waves.
+   */
+  | { kind: 'chargeWhileBenched'; attackPerWave: number }
   /**
    * HP is NOT carried on the effect — it's looked up per-tier via
    * `reviveHpForTier` at apply time (issue #53), then capped at the
@@ -250,8 +322,17 @@ export interface Ability {
    * sim.ts) — a `startOfBattle` ability still only ever gets its one shot per
    * unit instance, it just no-ops that shot when the condition doesn't match,
    * rather than retrying on a later wave.
+   *
+   * `notFront` (issue #106: Cellar-Coil) gates firing on the unit's own board
+   * position that Wave: true only on Waves where the unit is present but NOT
+   * at index 0 (the clashing slot). Evaluated in `fireEntryTriggers`
+   * alongside `timeOfDay`, using the same `index` that function already
+   * computes before calling `applyEffect` — a `startOfWave` ability still
+   * fires every Wave the unit survives, it just no-ops on any Wave the unit
+   * is currently front. Siblings, not mutually exclusive in the type, but no
+   * current unit combines both.
    */
-  condition?: { timeOfDay: TimeOfDay };
+  condition?: { timeOfDay?: TimeOfDay; notFront?: boolean };
 }
 
 export interface UnitDef {
@@ -490,6 +571,30 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     // per-wave damage equal to this unit's own (tier-scaled) attack — no
     // accumulation; multiple Slink-Rats stack additively, bounded by board size.
     ability: { trigger: 'startOfWave', effect: { kind: 'backlineDamage' } },
+  },
+  // Issue #106: Cellar-Coil — "positional patience" (docs/design/future-minions.md
+  // concept 2). Attack 2 / health 4 / cost 5 are the design doc's rough
+  // starting point, NOT final — flagged for Jesper's balance sign-off.
+  // Squishy on purpose: 4 HP is little enough that benching it for the 6+
+  // Waves it takes to fill the cap is a real risk, not a free stat stick.
+  'cellar-coil': {
+    id: 'cellar-coil', name: 'Cellar-Coil', attack: 2, health: 4, cost: 5,
+    desc: 'each wave it survives off the front, permanently banks +attack (hard-capped) — cashes in once the line finally breaks to it (scales ★)',
+    // startOfWave + `condition.notFront` (see both doc comments above): fires
+    // every Wave the unit survives while NOT at board index 0, and is a
+    // no-op the Wave it's front (or the Wave it doesn't survive). The
+    // `chargeWhileBenched` effect is HARD-CAPPED via
+    // `cellarCoilChargeCapForTier` — see that function's and the effect's
+    // doc comments in this file, and the `chargeWhileBenched` case in
+    // sim.ts's `applyEffect`, for the full ADR-0003 compounding-law sign-off.
+    // `attackPerWave: 1` here is the PRE-tier-scale literal — the case in
+    // sim.ts multiplies by `tier` (linear, 1/2/3), matching
+    // `cellarCoilChargeCapForTier`'s own linear-not-exponential rationale.
+    ability: {
+      trigger: 'startOfWave',
+      effect: { kind: 'chargeWhileBenched', attackPerWave: 1 },
+      condition: { notFront: true },
+    },
   },
 };
 
