@@ -58,8 +58,9 @@ export function blockHitsForTier(tier: number): number {
 }
 
 /**
- * Poison stacks applied by Plague-Bearer's `poisonFrontEnemy` (`startOfWave`)
- * and Blight-Witch's `poisonAllEnemies` (`startOfWave`), by tier (issue #62,
+ * Poison stacks applied by Plague-Bearer's `poisonLastEnemy` (`startOfWave`,
+ * reworked from `poisonFrontEnemy` in issue #112) and Blight-Witch's
+ * `poisonAllEnemies` (`startOfWave`), by tier (issue #62,
  * folding in #59's table). Same shape as `reviveHpForTier`/`blockHitsForTier`
  * — a small explicit table, not a multiplier of a base value.
  *
@@ -114,6 +115,36 @@ export type Effect =
    */
   | { kind: 'buffAdjacent'; attack: number; health: number }
   | { kind: 'poisonFrontEnemy'; stacks: number }
+  /**
+   * Plague-Bearer (issue #112, reworked from `poisonFrontEnemy`). Poisons
+   * `enemies[enemies.length - 1]` — the back of the enemy line — instead of
+   * the front. Stack count is NOT carried on the effect — same as its
+   * siblings, it's looked up per-tier via `poisonStacksForTier` (1/3/5) at
+   * apply time; this rework only moves WHERE the stacks land, never how
+   * many. Always wired to `startOfWave` (unchanged): fires for every
+   * Plague-Bearer regardless of board slot, landing before the wave's
+   * been chipped by combat, same reasoning as Blight-Witch's
+   * `poisonAllEnemies`.
+   *
+   * Rationale (issue #112): Plague-Bearer was strictly dominated by
+   * Blight-Witch — same stack table, one enemy vs. the whole line, and the
+   * front enemy it poisoned was usually dying to the clash anyway. Reaching
+   * the back of the line instead pre-rots a protected backline threat
+   * before the front-to-back grind gets there, giving the plague tribe two
+   * distinct roles (Witch rots wide, Bearer reaches deep).
+   *
+   * Degenerate case: a single-enemy wave has last === front, so this
+   * behaves exactly like `poisonFrontEnemy` did — no special-casing needed.
+   *
+   * Compounding-law note: enemies are re-instantiated every wave and
+   * poison never carries across waves (`waveClear`'s antidote, plus
+   * enemies simply not existing yet next wave), so this cannot accumulate
+   * across the 45-wave battle. Multiple Plague-Bearers stack additively
+   * within a single wave (each re-applies `poisonStacksForTier(tier)` to
+   * the same last enemy) — bounded by fresh enemies next wave, not a
+   * persistent-horde compounding vector.
+   */
+  | { kind: 'poisonLastEnemy' }
   | { kind: 'poisonTarget'; stacks: number }
   /**
    * Blight-Witch (issue #62). Poisons every living enemy currently on the
@@ -290,8 +321,8 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   },
   'plague-bearer': {
     id: 'plague-bearer', name: 'Plague-Bearer', attack: 2, health: 2, cost: 4,
-    desc: 'each wave: poisons front foe',
-    ability: { trigger: 'startOfWave', effect: { kind: 'poisonFrontEnemy', stacks: 1 } },
+    desc: 'each wave: poisons the back foe (scales ★)',
+    ability: { trigger: 'startOfWave', effect: { kind: 'poisonLastEnemy' } },
   },
   'blight-witch': {
     id: 'blight-witch', name: 'Blight-Witch', attack: 3, health: 3, cost: 8,

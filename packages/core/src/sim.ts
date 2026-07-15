@@ -309,13 +309,35 @@ export function simulate(
         break;
       }
       case 'poisonFrontEnemy': {
-        // Plague-Bearer (issue #62): stack count now comes from
-        // `poisonStacksForTier` (1/3/5) instead of a flat `effect.stacks *
-        // tier` (1/2/3), same table Blight-Witch's `poisonAllEnemies` uses.
-        // Deliberately stays single-front-target — this is what keeps
-        // Plague-Bearer (cheap, focused front poison) differentiated from
-        // Blight-Witch (pricier whole-wave rot).
+        // Plague-Doctor (data/enemies.ts), the only remaining user after
+        // issue #112 moved Plague-Bearer to `poisonLastEnemy` below. Stack
+        // count still comes from `poisonStacksForTier` (1/3/5) instead of a
+        // flat `effect.stacks * tier`, same table Blight-Witch's
+        // `poisonAllEnemies` and Plague-Bearer's `poisonLastEnemy` use —
+        // unchanged from before #112, just no longer Plague-Bearer's case.
         const target = opposing(source.side)[0];
+        if (target) applyPoisonStacks(target, poisonStacksForTier(tier));
+        break;
+      }
+      case 'poisonLastEnemy': {
+        // Plague-Bearer (issue #112, reworked from `poisonFrontEnemy`).
+        // Stack count comes from `poisonStacksForTier` (1/3/5), same table
+        // Blight-Witch's `poisonAllEnemies` uses — this rework only moves
+        // WHERE the stacks land, never how many. Targets the back of the
+        // enemy line (`enemies[enemies.length - 1]`) instead of the front,
+        // pre-rotting a protected backline threat before the front-to-back
+        // grind reaches it. Single-enemy waves degenerate to last === front,
+        // so this behaves exactly like the old `poisonFrontEnemy` did there.
+        //
+        // Compounding-law check: enemies are re-instantiated every wave and
+        // poison never carries across waves (`waveClear`'s antidote, plus
+        // enemies simply not existing yet next wave), so this cannot
+        // accumulate across the 45-wave battle. Multiple Plague-Bearers
+        // stack additively within a single wave (each re-applies
+        // `poisonStacksForTier(tier)` to the same last enemy) — bounded by
+        // fresh enemies next wave, not a persistent-horde compounding vector.
+        const foes = opposing(source.side);
+        const target = foes[foes.length - 1];
         if (target) applyPoisonStacks(target, poisonStacksForTier(tier));
         break;
       }
