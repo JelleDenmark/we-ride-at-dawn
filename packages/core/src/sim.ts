@@ -1,5 +1,5 @@
 import type { Side, UnitDef, Ability, Lineup } from './data/units';
-import { UNIT_DEFS, tierAttackMultiplier, tierHealthMultiplier, reviveHpForTier, blockHitsForTier, poisonStacksForTier } from './data/units';
+import { UNIT_DEFS, tierAttackMultiplier, tierHealthMultiplier, reviveHpForTier, blockHitsForTier, poisonStacksForTier, cellarCoilChargeCapForTier } from './data/units';
 import { ENEMY_POOL } from './data/enemies';
 import { RELIC_DEFS, type RelicDef } from './data/relics';
 import type { Gauntlet } from './gauntlet';
@@ -110,6 +110,19 @@ interface BattleUnit {
   startOfBattleFired: boolean;
   /** A corpse may be raised once per battle. Guards the two-reviver loop. */
   raised: boolean;
+  /**
+   * Cellar-Coil's `chargeWhileBenched` (issue #106). How much of this
+   * instance's `cellarCoilChargeCapForTier(tier)` ceiling has already been
+   * banked. Persists across every Wave of the whole Ride the same way
+   * `raised`/`startOfBattleFired` do (this is a per-instance field on the
+   * live `BattleUnit`, never reset mid-Ride) — that persistence is exactly
+   * what lets the cap be a true ceiling on total attack banked over all
+   * `WAVE_COUNT` (45) Waves, not just one Wave. See `cellarCoilChargeCapForTier`
+   * and the `chargeWhileBenched` Effect's doc comments in data/units.ts for
+   * the full ADR-0003 compounding-law sign-off. Init 0 for every unit, not
+   * just Cellar-Coil — harmless dead weight on units without the effect.
+   */
+  chargeStacks: number;
 }
 
 /** A hit reduced by armor still lands for at least this much. */
@@ -191,6 +204,7 @@ export function simulate(
       damageReduction: (def.damageReduction ?? 0) * tier,
       startOfBattleFired: false,
       raised: false,
+      chargeStacks: 0,
     };
   };
 
@@ -387,6 +401,27 @@ export function simulate(
         buff(source, effect.attack * tier, effect.health * tier);
         break;
       }
+      case 'chargeWhileBenched': {
+        // Cellar-Coil (issue #106). See this Effect's doc comment in
+        // data/units.ts and `cellarCoilChargeCapForTier`'s doc comment for
+        // the full ADR-0003 compounding-law sign-off — this is the one and
+        // only place the grant is actually applied, and it is a hard
+        // `Math.min` clamp, not a suggestion. `fireEntryTriggers` already
+        // gated this call on `condition.notFront` (the unit is not at board
+        // index 0 this Wave), so nothing here re-checks board position.
+        //
+        // Linear tier scaling (`attackPerWave * tier`, i.e. 1/2/3), NOT
+        // `tierAttackMultiplier`'s exponential `3^(tier-1)` — see the effect
+        // doc comment for why an accumulating per-wave grant must not also
+        // get an exponential per-tier multiplier.
+        const cap = cellarCoilChargeCapForTier(tier);
+        const remaining = cap - source.chargeStacks;
+        if (remaining <= 0) break; // Cap already reached — hard stop, no-op forever after.
+        const grant = Math.min(effect.attackPerWave * tier, remaining);
+        source.chargeStacks += grant;
+        buff(source, grant, 0);
+        break;
+      }
       case 'teamBuff': {
         // Compounding-law check: this effect is only ever wired to a
         // startOfBattle ability (see the Effect doc comment in
@@ -546,9 +581,14 @@ export function simulate(
       // just means that one shot is a no-op, it does not retry on a later
       // wave once the real-world half-day flips mid-battle.
       const condition = unit.ability?.condition;
-      if (condition && condition.timeOfDay !== timeOfDay) continue;
+      if (condition?.timeOfDay !== undefined && condition.timeOfDay !== timeOfDay) continue;
       const index = board.findIndex((u) => u.instanceId === unit.instanceId);
       if (index === -1) continue;
+      // notFront-conditional abilities (Cellar-Coil, issue #106): only fire
+      // on Waves the unit is present for but NOT at board index 0 — the
+      // clashing slot. A `startOfWave` ability still fires every Wave the
+      // unit survives, it just no-ops the Wave it's currently front.
+      if (condition?.notFront && index === 0) continue;
       applyEffect(unit, index, false);
     }
   };
