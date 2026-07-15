@@ -373,6 +373,32 @@ export function simulate(
         for (const target of board) buff(target, effect.attack * tierAttackMultiplier(tier), effect.health * tierHealthMultiplier(tier));
         break;
       }
+      case 'teamBuffByTime': {
+        // Twilight-Runt (issue #110). Unlike `teamBuff`, this effect carries
+        // NO `condition` on its ability — the startOfBattle trigger always
+        // fires (once per unit instance, same fire-once rule as every other
+        // startOfBattle buff below/above), and the half applied is picked
+        // right here from the closure's `timeOfDay` (Lineup.timeOfDay, never
+        // the wall clock — see its declaration near the top of `simulate`).
+        // `timeOfDay` absent (pre-#12 lineups, every existing golden log)
+        // matches neither branch, so this is a no-op — same
+        // golden-log-preserving guarantee as `condition.timeOfDay` mismatching
+        // on Dawn-Runt/Dusk-Runt, just enforced here instead of in
+        // `fireEntryTriggers`.
+        //
+        // Compounding-law check: identical reasoning to `teamBuff` above —
+        // `startOfBattle` fires once per unit instance, ever, so this cannot
+        // re-fire on a later wave and accumulate across the 45-wave battle,
+        // regardless of which half (or neither) ends up applying.
+        const half =
+          timeOfDay === 'beforeNoon' ? effect.beforeNoon :
+          timeOfDay === 'afterNoon' ? effect.afterNoon :
+          undefined;
+        if (half) {
+          for (const target of board) buff(target, half.attack * tierAttackMultiplier(tier), half.health * tierHealthMultiplier(tier));
+        }
+        break;
+      }
       case 'revive': {
         // Raise the oldest fallen ally — never the caster, and never a corpse
         // that has already been raised once.

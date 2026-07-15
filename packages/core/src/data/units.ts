@@ -166,7 +166,42 @@ export type Effect =
    * `buffAdjacent` above. See the `condition` field on `Ability` for how
    * this pairs with a time-of-day gate.
    */
-  | { kind: 'teamBuff'; attack: number; health: number };
+  | { kind: 'teamBuff'; attack: number; health: number }
+  /**
+   * Twilight-Runt (issue #110) — single-unit fusion of Dawn-Runt/Dusk-Runt,
+   * replacing the pair's "dead half of the day" problem: instead of two
+   * units that each rely on `teamBuff` + `Ability.condition.timeOfDay` (so
+   * one of them is a complete no-op every battle), this bakes BOTH halves
+   * onto one `startOfBattle` ability with NO `condition` at all. The
+   * ability always fires (once per unit instance, same fire-once rule as
+   * every other `startOfBattle` buff), and picks which half's magnitudes to
+   * apply from `Lineup.timeOfDay` at apply time — see the `teamBuffByTime`
+   * case in sim.ts's `applyEffect` for exactly where that branch happens.
+   * `timeOfDay` omitted (pre-#12 lineups, every existing golden log) hits
+   * neither `beforeNoon` nor `afterNoon`, so it no-ops exactly like the
+   * `condition` mechanism does when the gate doesn't match — same
+   * golden-log-preserving guarantee, different mechanism.
+   *
+   * Magnitudes scale via `tierAttackMultiplier`/`tierHealthMultiplier`,
+   * identical to plain `teamBuff` above, and this effect is `startOfBattle`
+   * -only — the fire-once compounding-law argument for `teamBuff` applies
+   * here unchanged (see that doc comment).
+   *
+   * PLACEHOLDER MAGNITUDES, PENDING JESPER SIGN-OFF (issue #110's required
+   * balance gate — do not treat these as final): Twilight-Runt currently
+   * ships +3 attack (beforeNoon) vs +2 health (afterNoon), DELIBERATELY
+   * asymmetric rather than a flat 2-for-2 split. Jesper (2026-07-15): health
+   * generally outvalues attack in this sim, so a symmetric split would
+   * leave the morning half strictly worse and no one would ever ride before
+   * noon — exactly the "dead half" problem this unit exists to fix, just
+   * moved from unit-choice to timing-choice. `scripts/twilight-runt-probe.ts`
+   * measures the two halves separately (the blended 50/50 view in
+   * `all-unit-value.ts` cannot distinguish "both halves fine" from "one
+   * dead half propped up by a strong other half"); every number here is a
+   * first guess awaiting that probe and explicit sign-off, per every other
+   * stat line in this repo.
+   */
+  | { kind: 'teamBuffByTime'; beforeNoon: { attack: number; health: number }; afterNoon: { attack: number; health: number } };
 
 /**
  * Real-world half-day bucket, Copenhagen local time (issue #12) — matches the
@@ -371,6 +406,26 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
       trigger: 'startOfBattle',
       effect: { kind: 'teamBuff', attack: 0, health: 2 },
       condition: { timeOfDay: 'afterNoon' },
+    },
+    unlockDay: 3,
+  },
+  // Issue #110: single-unit fusion of the Dawn-Runt/Dusk-Runt pair above —
+  // ADDED alongside them, not a replacement. Retiring Dawn/Dusk-Runt from
+  // the shop pool is issue #109's job, not this one; doing it here would
+  // conflict with that issue's own SHOP_UNIT_POOL edit. Every ride now has
+  // a unit that's never a dead card regardless of which half of the day it
+  // fires in — see `teamBuffByTime`'s doc comment above for the mechanism
+  // and the placeholder-magnitude flag.
+  'twilight-runt': {
+    id: 'twilight-runt', name: 'Twilight-Runt', attack: 1, health: 2, cost: 4,
+    desc: 'fused of dawn and dusk, never idle: battle (before noon) buffs the horde’s attack, battle (after noon) buffs its health (scales ★; magnitudes pending balance sign-off, issue #110)',
+    ability: {
+      trigger: 'startOfBattle',
+      effect: {
+        kind: 'teamBuffByTime',
+        beforeNoon: { attack: 3, health: 0 },
+        afterNoon: { attack: 0, health: 2 },
+      },
     },
     unlockDay: 3,
   },
