@@ -758,12 +758,17 @@ describe('tiers in battle', () => {
     expect(start.type === 'battleStart' && start.horde[0].attack).toBe(9);
     expect(start.type === 'battleStart' && start.horde[0].health).toBe(3);
     expect(start.type === 'battleStart' && start.horde[0].tier).toBe(2);
-    // Ability magnitude now scales via tierAttackMultiplier too (issue #58),
-    // not a flat `* tier` — Gnawer's buffBehind fires once per instance
-    // (`faint`), so the steeper curve can't compound across the 45-wave
-    // battle. base attack 2 * tierAttackMultiplier(2)=3 => 6.
+    // Issue #111 rework: Gnawer's payout is no longer a flat literal scaled
+    // by tierAttackMultiplier — it's a live read of its OWN current attack
+    // (which is already tier-scaled at instantiation, per the assertion
+    // above: tier-2 attack = 9) plus a capped bonus for the wave it died on.
+    // This enemy (attack 1, health 50) chips tier-2 Gnawer's 3 health down
+    // over 3 ticks, so it dies during wave 1: waveBonus = min(1, cap=2*9=18)
+    // = 1, inherited = 9 + 1 = 10. Tiering up still steepens the payout
+    // (a t1 Gnawer here would only bequeath 3 + 1 = 4), just via its own
+    // stat curve rather than a separate ability-magnitude multiplier.
     const buffEvent = events.find((e) => e.type === 'buff')!;
-    expect(buffEvent.type === 'buff' && buffEvent.attack).toBe(6);
+    expect(buffEvent.type === 'buff' && buffEvent.attack).toBe(10);
   });
 
   it('unitStats (shop preview) matches the sim: attack and health both x3^(tier-1)', () => {

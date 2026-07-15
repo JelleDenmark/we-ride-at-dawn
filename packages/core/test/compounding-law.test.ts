@@ -145,3 +145,91 @@ describe('compounding-law: allyFaint stat-farming stays capped by the combat hea
     expect(result.wavesCleared).toBeLessThan(45);
   });
 });
+
+describe('compounding-law: Gnawer bequeathAttack + Bone-Priest revive is a bounded double, not a loop (issue #111)', () => {
+  // The exact scenario the issue flags: `faint` fires on EVERY death, not
+  // just the first, so a Bone-Priest-revived Gnawer that dies a SECOND time
+  // fires `bequeathAttack` again. That's fine IFF it's bounded — `revive` is
+  // capped to once per corpse (the `raised` flag), so at most 2 payouts per
+  // Gnawer copy, ever, each individually capped by `waveBonusCapMultiplier`.
+  // This probe pins down BOTH bounds with a hand-timed gauntlet: a 0/0
+  // "filler" wave is already dead at wave start (resolveDeaths runs before
+  // any tick), so it auto-clears for free and lets the wave number be
+  // walked forward precisely without spending any damage, while a 50/1
+  // "killer" wave kills whoever is currently front outright.
+  //
+  // Board: [Gnawer, Gutter-Runt, Bone-Priest, Dire-Rat]. Timeline:
+  //   waves 1-4  filler   -> nothing happens, Gnawer stays front.
+  //   wave 5     killer   -> Gnawer dies (payout #1, wave bonus 5, uncapped).
+  //   wave 6     killer   -> Gutter-Runt (now front) dies, no ability.
+  //   waves 7-10 filler   -> Bone-Priest (now front) survives untouched.
+  //   wave 11    killer   -> Bone-Priest dies, revives Gnawer's corpse (the
+  //                          oldest unraised fallen ally) back onto the
+  //                          board directly in front of Dire-Rat.
+  //   wave 12    killer   -> revived Gnawer dies AGAIN (payout #2, wave
+  //                          bonus 12 -> capped at 2*ownAttack).
+  const filler: UnitDef = { id: 'filler', name: 'Filler', attack: 0, health: 0, cost: 0 };
+  const killer: UnitDef = { id: 'killer', name: 'Killer', attack: 50, health: 1, cost: 0 };
+  const timedGauntlet: Gauntlet = {
+    date: 'test',
+    seed: 0,
+    waves: [
+      filler, filler, filler, filler, // waves 1-4
+      killer,                         // wave 5: Gnawer dies
+      killer,                         // wave 6: Gutter-Runt dies
+      filler, filler, filler, filler, // waves 7-10
+      killer,                         // wave 11: Bone-Priest dies, revives Gnawer
+      killer,                         // wave 12: revived Gnawer dies again
+    ].map((u) => ({ units: [u] })),
+  };
+
+  it('pays out at most twice, each payout individually capped', () => {
+    const { events } = simulate(
+      {
+        units: [
+          { defId: 'gnawer', tier: 1 },
+          { defId: 'gutter-runt', tier: 1 },
+          { defId: 'bone-priest', tier: 1 },
+          { defId: 'dire-rat', tier: 1 },
+        ],
+      },
+      timedGauntlet
+    );
+
+    // Bounded, not a loop: Bone-Priest's revive fires exactly once (it only
+    // dies once), never an infinite reviver ring.
+    expect(ofType(events, 'revive').length).toBe(1);
+    expect(ofType(events, 'revive')[0].unit.defId).toBe('gnawer');
+
+    // Gnawer's own attack (tier 1, no relics) is 3 the whole battle — revive
+    // resets health/poison, never attack — so both payouts share the same
+    // ownAttack and the same cap: waveBonusCapMultiplier(2) * 3 = 6.
+    const ownAttack = 3;
+    const capMultiplier = 2;
+    const maxSinglePayout = ownAttack + capMultiplier * ownAttack; // 9
+
+    const buffs = ofType(events, 'buff');
+    // Exactly two bequeathAttack payouts landed (Gutter-Runt's wave-6 death
+    // has no ability and contributes no buff event) — the bounded DOUBLE the
+    // issue calls out, not a runaway loop.
+    expect(buffs.length).toBe(2);
+
+    for (const b of buffs) {
+      expect(b.attack).toBeGreaterThan(0);
+      expect(b.attack).toBeLessThanOrEqual(maxSinglePayout);
+      expect(b.health).toBe(0);
+    }
+
+    // Payout #1 (wave 5, bonus 5 < cap 6): inherited = 3 + 5 = 8.
+    expect(buffs[0].attack).toBe(8);
+    // Payout #2 (wave 12, bonus would be 12 uncapped -> clamped to 6):
+    // inherited = 3 + 6 = 9 = maxSinglePayout, confirming the cap actually
+    // engaged rather than merely never being tested.
+    expect(buffs[1].attack).toBe(9);
+    expect(buffs[1].attack).toBe(maxSinglePayout);
+
+    // The combined double payout is bounded by 2x the single-payout cap —
+    // explicitly NOT unbounded growth from repeated faints.
+    expect(buffs[0].attack + buffs[1].attack).toBeLessThanOrEqual(2 * maxSinglePayout);
+  });
+});

@@ -102,6 +102,45 @@ export type Effect =
    */
   | { kind: 'buffBehind'; attack: number; health: number; all?: boolean }
   /**
+   * Gnawer's rework (issue #111). Unlike `buffBehind`'s flat `effect.attack`
+   * literal, this effect carries NO magnitude of its own — the payout is a
+   * LIVE reference to the caster's own `attack` stat at the instant it
+   * faints (already tier-scaled via `tierAttackMultiplier` and inflated by
+   * any attack relics/team-buffs — whatever it actually had when it fell,
+   * read straight off `BattleUnit.attack` in sim.ts), plus a bonus for the
+   * wave number it died on. Old Gnawer's flat `+2` never aged past wave 1;
+   * this makes both "how strong was this body" and "how late did it die"
+   * matter, which is the point of the rework (see the issue's "placement
+   * puzzle": front slot dies early for a small bonus but has everyone
+   * behind it to benefit, deep slot dies late for a big bonus but only
+   * helps the one rat behind it, and the last slot has nobody behind at
+   * all — the payout simply evaporates).
+   *
+   * `waveBonusCapMultiplier` caps the WAVE-DIED-ON bonus at
+   * `waveBonusCapMultiplier * ownAttack` (proposed 2x — Jesper 2026-07-15,
+   * open for tuning) so a t1 chaff Gnawer can't out-scale its own body just
+   * by surviving deep into a 45-wave grind. This cap lives HERE, in the
+   * def/effect data, not as a loose comment or a hand-picked literal at the
+   * call site — see docs/design/future-minions.md's Cellar-Coil writeup for
+   * why an uncapped "reward for surviving/waiting" magnitude is exactly the
+   * shape of an instant exploit, and `blockHitsForTier`/`poisonStacksForTier`
+   * above for the house style of keeping magnitude tables in data, not code.
+   *
+   * Compounding-law note: `faint` fires on EVERY death (see
+   * `resolveDeaths` in sim.ts), not just the first, so a Bone-Priest-revived
+   * Gnawer that dies a second time fires this a second time. That is still
+   * bounded, not a loop: `revive` is capped to once per corpse (the
+   * `raised` flag — see the `revive` case in sim.ts), so a single Gnawer
+   * copy can pay out at most twice per battle (the second payout later and
+   * therefore larger, since the wave-died-on bonus grows with wave number).
+   * The wave bonus itself never accumulates per-wave — it's read once, at
+   * the moment of death, capped by `WAVE_COUNT` (45) same as any other
+   * one-shot per-instance magnitude in this file (`reviveHpForTier`,
+   * `buffBehind`'s fire-once reasoning). See the targeted double-payout
+   * probe in compounding-law.test.ts.
+   */
+  | { kind: 'bequeathAttack'; waveBonusCapMultiplier: number }
+  /**
    * Buffs BOTH board neighbors (index-1 and index+1), whichever exist. At
    * the front only the "behind" neighbor exists; at the back only the
    * "front" neighbor exists; a middle placement hits both — the first
@@ -300,8 +339,12 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   },
   gnawer: {
     id: 'gnawer', name: 'Gnawer', attack: 3, health: 1, cost: 4,
-    desc: 'faint: buffs the rat behind (scales ★)',
-    ability: { trigger: 'faint', effect: { kind: 'buffBehind', attack: 2, health: 0 } },
+    desc: 'faint: the rat behind inherits its OWN attack, plus a bonus for the wave it died on (capped)',
+    // Issue #111 rework: was a flat `buffBehind` +2 that never aged. Now a
+    // `bequeathAttack` (own live attack + capped wave-died-on bonus) — see
+    // that effect kind's doc comment above for the full formula and the
+    // compounding-law/Cellar-Coil reasoning behind the cap living here.
+    ability: { trigger: 'faint', effect: { kind: 'bequeathAttack', waveBonusCapMultiplier: 2 } },
   },
   'corpse-glutton': {
     id: 'corpse-glutton', name: 'Corpse-Glutton', attack: 3, health: 2, cost: 6,

@@ -265,6 +265,19 @@ export function simulate(
   };
 
   /**
+   * 1-based wave number currently in progress, updated at the top of the
+   * outer wave loop below (`currentWave = w + 1`). Threaded in as a mutable
+   * closure variable rather than a parameter because `applyEffect` fires
+   * from several call sites at different points in a wave (entry triggers,
+   * `afterAttack`, death resolution) and all of them should see whatever
+   * wave is actually in progress at that instant — Gnawer's `bequeathAttack`
+   * (issue #111) is the first effect that needs "what wave is this" at
+   * apply time. Read once per `faint`, never accumulated — see that
+   * effect's doc comment in data/units.ts for the compounding-law reasoning.
+   */
+  let currentWave = 0;
+
+  /**
    * `index` is the source's current board index, or — when `removed` —
    * the index it occupied before dying, which is where "behind" now starts
    * and where summons/revives are inserted.
@@ -291,6 +304,24 @@ export function simulate(
         const start = removed ? index : index + 1;
         const targets = effect.all ? board.slice(start) : board.slice(start, start + 1);
         for (const target of targets) buff(target, effect.attack * tierAttackMultiplier(tier), effect.health * tierHealthMultiplier(tier));
+        break;
+      }
+      case 'bequeathAttack': {
+        // Gnawer rework (issue #111). See the effect's doc comment in
+        // data/units.ts for the full formula and compounding-law reasoning;
+        // this mirrors `buffBehind`'s single-target (`start`/`removed`)
+        // targeting logic but computes the magnitude from the caster's OWN
+        // live `attack` (already tier-scaled and relic-buffed) rather than a
+        // flat effect literal, plus a wave-died-on bonus capped in the def.
+        const start = removed ? index : index + 1;
+        const target = board[start];
+        // Last slot: nobody behind to inherit. Payout evaporates — no crash,
+        // no fallback target (this is the intended "wasted" placement case
+        // the issue's placement puzzle calls out).
+        if (!target) break;
+        const ownAttack = source.attack;
+        const waveBonus = Math.min(currentWave, effect.waveBonusCapMultiplier * ownAttack);
+        buff(target, ownAttack + waveBonus, 0);
         break;
       }
       case 'buffAdjacent': {
@@ -504,6 +535,11 @@ export function simulate(
   let blockCharges: Record<Side, number> = { horde: 0, gauntlet: 0 };
 
   for (let w = 0; w < gauntlet.waves.length && horde.length > 0; w++) {
+    // 1-based wave number, matching the `waveStart`/`waveClear` events below
+    // (`wave: w + 1`) — see `currentWave`'s declaration above `applyEffect`
+    // for why this is a mutable closure variable rather than threaded as a
+    // parameter through every call site.
+    currentWave = w + 1;
     enemies = gauntlet.waves[w].units.map((d) =>
       instantiate(d, 'gauntlet', [], 1, enemyAttackScale(w), enemyHealthScale(w))
     );
