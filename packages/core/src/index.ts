@@ -46,6 +46,7 @@ export {
   INTEREST_CAP,
   rollOfferings,
   upcomingUnlocks,
+  upcomingRetirements,
   buyUnit,
   canRecruit,
   buyRelic,

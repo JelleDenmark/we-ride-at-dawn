@@ -239,22 +239,39 @@ export type ActionResult = { ok: true; state: BuildState } | { ok: false; reason
 // UNIT_DEFS entry stays intact (existing tests/golden logs/replays still
 // reference it directly) — only its presence in the purchasable pool is
 // gone. A future season could drop this filter to bring it back.
+//
+// 'dawn-runt'/'dusk-runt' are excluded the same way (issue #109), but for a
+// different reason: they're being REPLACED by the Twilight fusion unit, not
+// aged out mid-week, so `retireDay` (a pure function of day, still mid-week
+// live) is the wrong tool — a half-day-gated unit already read as "a
+// schedule tax, not a decision" (a player who only rides evenings never
+// bought Dawn-Runt), and the fusion issue's design post-mortem lands on a
+// flat pool cut instead. Ship this at a season boundary only, so no
+// mid-expedition owner is stranded. Their UNIT_DEFS entries stay intact
+// (golden logs) — only the purchasable pool changes.
 const SHOP_UNIT_POOL = Object.values(UNIT_DEFS).filter(
-  (u) => u.id !== 'pup' && u.id !== 'warren-warden'
+  (u) => u.id !== 'pup' && u.id !== 'warren-warden' && u.id !== 'dawn-runt' && u.id !== 'dusk-runt'
 );
 const SHOP_RELIC_POOL = Object.values(RELIC_DEFS);
 
 /**
- * Day-gated shop pool (issue #12: Dawn-Runt/Dusk-Runt), same mechanism as
- * `boardCapForDay` — a pure function of the day number, no new per-account
- * state. Units with no `unlockDay` are available from day 1, exactly as
- * before this feature existed. Preserves `SHOP_UNIT_POOL`'s insertion order,
- * so for any day before the earliest `unlockDay` in play, this filters down
+ * Day-gated shop pool (issue #12: Dawn-Runt/Dusk-Runt originally; now also
+ * issue #108's `retireDay`), same mechanism as `boardCapForDay` — a pure
+ * function of the day number, no new per-account state. Units with no
+ * `unlockDay`/`retireDay` are available every day, exactly as before either
+ * feature existed. A unit is in the pool for `unlockDay <= day < retireDay`
+ * (both bounds optional/inclusive-exclusive as written). Preserves
+ * `SHOP_UNIT_POOL`'s insertion order, so for any day before the earliest
+ * `unlockDay` and before the earliest `retireDay` in play, this filters down
  * to byte-identical output to the old unconditional pool — existing golden
  * shop rolls for those days are unaffected.
  */
 function shopUnitPoolForDay(day: number): UnitDef[] {
-  return SHOP_UNIT_POOL.filter((u) => u.unlockDay === undefined || day >= u.unlockDay);
+  return SHOP_UNIT_POOL.filter(
+    (u) =>
+      (u.unlockDay === undefined || day >= u.unlockDay) &&
+      (u.retireDay === undefined || day < u.retireDay)
+  );
 }
 
 /**
@@ -267,6 +284,18 @@ function shopUnitPoolForDay(day: number): UnitDef[] {
 export function upcomingUnlocks(day: number): UnitDef[] {
   return SHOP_UNIT_POOL.filter((u) => u.unlockDay !== undefined && u.unlockDay > day).sort(
     (a, b) => (a.unlockDay ?? 0) - (b.unlockDay ?? 0)
+  );
+}
+
+/**
+ * Units still in the pool on `day` but leaving later this week, soonest
+ * first (issue #108) — mirrors `upcomingUnlocks` so the app can show a
+ * "leaving soon" hint before a unit quietly vanishes from the rolls. Pure
+ * function of `day`, same shape as `upcomingUnlocks`/`shopUnitPoolForDay`.
+ */
+export function upcomingRetirements(day: number): UnitDef[] {
+  return SHOP_UNIT_POOL.filter((u) => u.retireDay !== undefined && u.retireDay > day).sort(
+    (a, b) => (a.retireDay ?? 0) - (b.retireDay ?? 0)
   );
 }
 
@@ -493,7 +522,7 @@ export function sellUnit(state: BuildState, boardIndex: number): ActionResult {
   if (!unit) return fail('nothing to sell');
   const s = clone(state);
   s.board.splice(boardIndex, 1);
-  s.scrap += sellRefund(unit);
+  s.scrap += sellRefund(unit, state.day);
   // Any relics pinned to the sold unit would otherwise vanish for free —
   // refund each at the same half-cost rate as the merge-dedup discard path.
   for (const relicId of unit.relicIds) s.scrap += relicRefund(relicId);
@@ -505,7 +534,7 @@ export function sellBenchUnit(state: BuildState, benchIndex: number): ActionResu
   if (!unit) return fail('nothing to sell');
   const s = clone(state);
   s.bench.splice(benchIndex, 1);
-  s.scrap += sellRefund(unit);
+  s.scrap += sellRefund(unit, state.day);
   for (const relicId of unit.relicIds) s.scrap += relicRefund(relicId);
   return { ok: true, state: s };
 }
@@ -516,10 +545,24 @@ export function sellBenchUnit(state: BuildState, benchIndex: number): ActionResu
  * so a tier-3 unit represents 9 base copies), so a linear-in-tier refund
  * significantly undervalued merged units relative to the scrap actually
  * spent building them. Quadratic scaling matches that merge-cost economics.
+ *
+ * SEVERANCE (issue #108): once a unit's `retireDay` has passed — it needs
+ * `day` for that, hence this function's second parameter — the quadratic
+ * discount is replaced by a par buyback: `cost * 3^(tier-1)`, exactly the
+ * scrap spent reaching that tier (1/3/9 base copies per tier, same curve as
+ * `tierAttackMultiplier`). This is deliberately PAR, never above: a naive
+ * `cost * tier²` would pay 4x cost for a tier-2 that only cost 3x to build —
+ * a repeatable scrap printer via buy-3 -> merge -> sell (the compounding-law
+ * risk this feature is guarded against, see compounding-law.test.ts's
+ * canary). Non-retired units are completely untouched by this — same
+ * `Math.max(1, floor(cost/2)) * tier²` as before, byte-identical.
  */
-export function sellRefund(unit: BoardUnit): number {
-  const cost = UNIT_DEFS[unit.defId].cost;
-  return Math.max(1, Math.floor(cost / 2)) * unit.tier * unit.tier;
+export function sellRefund(unit: BoardUnit, day: number): number {
+  const def = UNIT_DEFS[unit.defId];
+  if (def.retireDay !== undefined && day >= def.retireDay) {
+    return def.cost * Math.pow(3, unit.tier - 1);
+  }
+  return Math.max(1, Math.floor(def.cost / 2)) * unit.tier * unit.tier;
 }
 
 export function rerollShop(state: BuildState): ActionResult {
