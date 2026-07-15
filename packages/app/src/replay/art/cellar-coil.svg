@@ -1,0 +1,30 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <!-- Cellar-Coil (issue #106): "positional patience" — bides in the back, the
+       tail wound into a tightening spiral (the longer it waits off the front,
+       the harder it lands when the line finally breaks to it). Untagged tribe,
+       so a muted cellar-shadow slate rather than a tribe colour. The amber
+       spark at the coil's centre is the banked charge — the +attack it stores
+       each wave it survives benched, cashed in when it rotates up. Spare per
+       house style: one signature (the coil) + one read (the charge). -->
+  <!-- the coil: tail wound into a tightening spiral, the whole identity -->
+  <path d="M20 52 C6 52 4 37 17 35 C25 34 25 47 15 47 C9 47 9.5 40 15 40 C18.5 40 18.5 44 15.5 43.6"
+        fill="none" stroke="#443a46" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- banked charge glowing at the coil's core -->
+  <circle cx="15.5" cy="42.4" r="2.1" fill="#d8a24a"/>
+  <circle cx="15.5" cy="42.4" r="0.9" fill="#f4d79a"/>
+  <!-- body: low and compact, crouched patient -->
+  <path d="M22 50 C18 43 23 34 34 33 C41 32.4 46 35 48 40 L55 44 C56.2 45 55.3 46.4 54 46.3 L47 46.2 C45 50 38 52.5 31 52 C25.5 51.6 23.5 51.4 22 50 Z"
+        fill="#4b4048" stroke="#201209" stroke-width="1.5" stroke-linejoin="round"/>
+  <!-- lighter underbelly, a sliver of cellar-pale -->
+  <path d="M26 50.5 C31 52 40 51 45 47 C40 49.2 31 49.6 26 48.4 Z" fill="#6a5c66"/>
+  <!-- head tucked forward, watchful -->
+  <circle cx="45" cy="37" r="4.3" fill="#4b4048" stroke="#201209" stroke-width="1.5"/>
+  <!-- ear pinned back (biding, not lunging) -->
+  <path d="M43 33.4 C41.5 29.5 44 27.5 47 28.5 C46 30.5 46 32 45.5 34 Z" fill="#4b4048" stroke="#201209" stroke-width="1.1" stroke-linejoin="round"/>
+  <!-- one narrowed eye + nose -->
+  <circle cx="47.2" cy="37.6" r="1.5" fill="#d8a24a"/>
+  <circle cx="49.4" cy="39" r="1.1" fill="#201209"/>
+  <!-- legs tucked under -->
+  <rect x="30" y="50" width="4.4" height="6.2" rx="2" fill="#332b34"/>
+  <rect x="42" y="49.5" width="4.4" height="6.2" rx="2" fill="#332b34"/>
+</svg>
