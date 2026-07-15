@@ -1381,7 +1381,7 @@
               <button disabled={ins.index === 0} onclick={() => moveFromCard(-1)}>front ▶</button>
               <button disabled={ins.index >= build.board.length - 1} onclick={() => moveFromCard(1)}>◀ back</button>
               <button disabled={benchFull} onclick={benchFromCard}>bench</button>
-              <button onclick={sellFromCard}>sell · +{sellRefund(unit)}</button>
+              <button onclick={sellFromCard}>sell · +{sellRefund(unit, build.day)}</button>
               <button onclick={() => (inspect = null)}>close</button>
             </div>
             {#if benchFull}<div class="card-warn">the bench is full</div>{/if}
@@ -1414,7 +1414,7 @@
               {:else}
                 <button class="primary" onclick={deployFromCard}>deploy</button>
               {/if}
-              <button onclick={sellBenchFromCard}>sell · +{sellRefund(unit)}</button>
+              <button onclick={sellBenchFromCard}>sell · +{sellRefund(unit, build.day)}</button>
               <button onclick={() => (inspect = null)}>close</button>
             </div>
           {/if}

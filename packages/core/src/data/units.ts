@@ -238,6 +238,20 @@ export interface UnitDef {
    * every later day too — this is not a day-exclusive appearance.
    */
   unlockDay?: number;
+  /**
+   * Day-gated shop retirement (issue #108/#109), mirror of `unlockDay` —
+   * same pure-function-of-day mechanism, no new per-account state. Absent =
+   * never retires (every pre-existing unit). Once `retireDay` is reached the
+   * unit leaves the *shop pool* for every later day too (`shopUnitPoolForDay`
+   * filters to `unlockDay <= day < retireDay`, both optional). This only
+   * gates shop ROLLS: the `UNIT_DEFS` entry stays intact forever (golden
+   * logs/replays/determinism tests reference ids directly) and any
+   * already-owned copy keeps fighting untouched. See `sellRefund` in
+   * shop.ts for the par-buyback severance that pairs with this — a unit sold
+   * after its `retireDay` has passed refunds exactly what was spent building
+   * it, never a premium, so greeding a unit early is never punished.
+   */
+  retireDay?: number;
 }
 
 export interface LineupUnit {
@@ -277,6 +291,16 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   'gutter-runt': {
     id: 'gutter-runt', name: 'Gutter Runt', attack: 1, health: 1, cost: 2,
     desc: 'cheap body',
+    // Season unit-churn (issue #109): an honest day-1/2 body and merge
+    // fodder, then leaves the shop rolls from day 3 onward — cheap filler
+    // was polluting late-week rolls (evidence: appeared once across two full
+    // seasons of leaderboard lineups). Day 3, not day 4 (Jesper, 2026-07-15),
+    // to keep the shop from diluting a day sooner. Par-buyback severance
+    // (`sellRefund` in shop.ts) applies once retired, so early greed is
+    // never punished. Watch-item for next season: if all-runt Pack-Caller
+    // boards (#88) want cheap runt bodies late-week, slide the day rather
+    // than pre-solving now.
+    retireDay: 3,
   },
   'rat-piper': {
     id: 'rat-piper', name: 'Rat-Piper', attack: 1, health: 2, cost: 4,

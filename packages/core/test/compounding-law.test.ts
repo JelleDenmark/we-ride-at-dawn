@@ -19,6 +19,7 @@ import { simulate, type BattleEvent } from '../src/sim';
 import type { Gauntlet } from '../src/gauntlet';
 import type { Lineup, UnitDef } from '../src/data/units';
 import { UNIT_DEFS } from '../src/data/units';
+import { sellRefund } from '../src/shop';
 
 const dummy = (attack: number, health: number): UnitDef => ({
   id: 'dummy', name: 'Dummy', attack, health, cost: 0,
@@ -143,5 +144,49 @@ describe('compounding-law: allyFaint stat-farming stays capped by the combat hea
       grinder(45)
     );
     expect(result.wavesCleared).toBeLessThan(45);
+  });
+});
+
+describe('compounding-law: retired-unit severance (issue #108) never pays above par', () => {
+  // Par-buyback exploit shape: a naive `cost * tier²` refund (instead of
+  // `cost * 3^(tier-1)`) would pay 4x cost for a tier-2 unit that only cost
+  // 3x to build — a repeatable scrap printer via buy-3 -> merge -> sell. This
+  // parametrizes over every unit with a `retireDay` (currently Gutter-Runt,
+  // issue #109) so any FUTURE retired unit is automatically covered too, no
+  // one has to remember to extend this test by hand.
+  const retiredUnits = Object.values(UNIT_DEFS).filter((u) => u.retireDay !== undefined);
+
+  it('covers at least one real unit (guards against a vacuous test suite)', () => {
+    expect(retiredUnits.length).toBeGreaterThan(0);
+  });
+
+  it.each(retiredUnits.map((u) => u.id))(
+    '%s: retired-sell refund never exceeds the scrap actually spent reaching that tier, for every tier',
+    (defId) => {
+      const def = UNIT_DEFS[defId];
+      for (const tier of [1, 2, 3]) {
+        // Ground truth, deliberately NOT derived from sellRefund's own
+        // formula: tier N is reached by merging 3^(N-1) base copies (see
+        // tierAttackMultiplier's doc comment in units.ts) — that IS the
+        // scrap actually spent, independent of however sellRefund computes
+        // its payout. If a future change regresses the payout formula (e.g.
+        // to a `tier²` curve), this catches it even though this test never
+        // imports that formula itself.
+        const totalScrapSpent = def.cost * Math.pow(3, tier - 1);
+        const refund = sellRefund({ defId, tier, relicIds: [] }, def.retireDay!);
+        expect(refund).toBeLessThanOrEqual(totalScrapSpent);
+        // Par, not just under it — the issue calls for refunding EXACTLY
+        // what was spent, no discount and no premium.
+        expect(refund).toBe(totalScrapSpent);
+      }
+    }
+  );
+
+  it('a unit sold before its own retireDay still gets the old (lower) quadratic discount, never the par buyback', () => {
+    const retiring = retiredUnits[0];
+    const beforeDay = retiring.retireDay! - 1;
+    const refund = sellRefund({ defId: retiring.id, tier: 2, relicIds: [] }, beforeDay);
+    const parRefund = retiring.cost * 3; // cost * 3^(2-1)
+    expect(refund).toBeLessThan(parRefund);
   });
 });

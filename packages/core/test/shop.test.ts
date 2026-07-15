@@ -33,6 +33,7 @@ import {
   BENCH_SIZE,
   unitStats,
   rollOfferings,
+  upcomingRetirements,
   type BuildState,
 } from '../src/shop';
 import { UNIT_DEFS } from '../src/data/units';
@@ -1423,7 +1424,7 @@ describe('buyable horde slots (issue #9)', () => {
   });
 });
 
-describe('day-gated shop unlocks (issue #12: Dawn-Runt/Dusk-Runt)', () => {
+describe('day-gated shop unlocks (issue #12)', () => {
   // Roll many offerings across many dates/roll numbers for a given day and
   // report whether either new unit ever appears — a much larger sample than
   // SHOP_UNIT_SLOTS so a true negative (never offered) is a real signal, not
@@ -1439,24 +1440,6 @@ describe('day-gated shop unlocks (issue #12: Dawn-Runt/Dusk-Runt)', () => {
     return false;
   };
 
-  it('Dawn-Runt never appears before day 3', () => {
-    expect(everAppears(1, 'dawn-runt')).toBe(false);
-    expect(everAppears(2, 'dawn-runt')).toBe(false);
-  });
-
-  it('Dawn-Runt can appear from day 3 onward, every later day too (not day-exclusive)', () => {
-    for (const day of [3, 4, 5, 6, 7]) expect(everAppears(day, 'dawn-runt')).toBe(true);
-  });
-
-  it('Dusk-Runt never appears before day 3', () => {
-    expect(everAppears(1, 'dusk-runt')).toBe(false);
-    expect(everAppears(2, 'dusk-runt')).toBe(false);
-  });
-
-  it('Dusk-Runt can appear from day 3 onward, every later day too (not day-exclusive), same as Dawn-Runt', () => {
-    for (const day of [3, 4, 5, 6, 7]) expect(everAppears(day, 'dusk-runt')).toBe(true);
-  });
-
   it('the three day-2 picks (Dire-Rat, MD Rattyfock, Ward-Weaver) never appear on day 1', () => {
     // Day-1 shop kept deliberately plain (2026-07-11): the armored tank, the
     // Season-1 anchor, and the front-shield hold back to day 2.
@@ -1471,30 +1454,11 @@ describe('day-gated shop unlocks (issue #12: Dawn-Runt/Dusk-Runt)', () => {
     }
   });
 
-  it('newBuild wires the shop day through to rollOfferings (day 1 build never offers either Runt)', () => {
-    for (let d = 0; d < 20; d++) {
-      const date = `2026-09-${String(d + 1).padStart(2, '0')}`;
-      const s = newBuild(date, 1);
-      expect(s.shop.slots.some((sl) => sl.kind === 'unit' && (sl.defId === 'dawn-runt' || sl.defId === 'dusk-runt'))).toBe(false);
-    }
-  });
-
-  it('days before any unlockDay in play roll byte-identical offerings to the pre-#12 pool (no regression)', () => {
-    // day-agnostic pool (no unlockDay units eligible yet) must match calling
-    // rollOfferings with its old implicit default in spirit: day 1 and day 2
-    // exclude both new units, so their rolls are unaffected by this feature.
-    for (const day of [1, 2]) {
-      const a = rollOfferings('2026-07-03', 0, [], day);
-      const b = rollOfferings('2026-07-03', 0, [], day);
-      expect(a).toEqual(b);
-      expect(a.some((s) => s.kind === 'unit' && (s.defId === 'dawn-runt' || s.defId === 'dusk-runt'))).toBe(false);
-    }
-  });
-
   it('rerollShop and autoRerollShop respect the build day, not just newBuild', () => {
-    // A day-4 build should be able to roll either Runt on reroll too, not
-    // just on the initial shop — this exercises the s.day plumbing through
-    // rerollShop/autoRerollShop, not just newBuild's initial rollOfferings.
+    // A day-4 build should be able to roll a day-2-unlocked pick on reroll
+    // too, not just on the initial shop — this exercises the s.day plumbing
+    // through rerollShop/autoRerollShop, not just newBuild's initial
+    // rollOfferings.
     let found = false;
     let s = newBuild('2026-07-04', 4);
     for (let i = 0; i < 40 && !found; i++) {
@@ -1502,10 +1466,212 @@ describe('day-gated shop unlocks (issue #12: Dawn-Runt/Dusk-Runt)', () => {
       const rolled = rerollShop(s);
       if (!rolled.ok) break;
       s = rolled.state;
-      if (s.shop.slots.some((sl) => sl.kind === 'unit' && (sl.defId === 'dawn-runt' || sl.defId === 'dusk-runt'))) {
+      if (s.shop.slots.some((sl) => sl.kind === 'unit' && sl.defId === 'ward-weaver')) {
         found = true;
       }
     }
     expect(found).toBe(true);
+  });
+});
+
+describe('day-gated shop retirement (issue #108: retireDay primitive)', () => {
+  const everAppears = (day: number, defId: string): boolean => {
+    for (let d = 0; d < 40; d++) {
+      const date = `2026-08-${String(d + 1).padStart(2, '0')}`;
+      for (let roll = 0; roll < 10; roll++) {
+        const slots = rollOfferings(date, roll, [], day);
+        if (slots.some((s) => s.kind === 'unit' && s.defId === defId)) return true;
+      }
+    }
+    return false;
+  };
+
+  it('Gutter-Runt (retireDay: 3, issue #109) appears on days 1-2', () => {
+    expect(everAppears(1, 'gutter-runt')).toBe(true);
+    expect(everAppears(2, 'gutter-runt')).toBe(true);
+  });
+
+  it('Gutter-Runt never appears from day 3 onward (retires, not day-exclusive in reverse — stays gone)', () => {
+    for (const day of [3, 4, 5, 6, 7]) expect(everAppears(day, 'gutter-runt')).toBe(false);
+  });
+
+  it('rerollShop and autoRerollShop respect retirement too, not just newBuild', () => {
+    // A day-3+ build should never roll Gutter-Runt even after many rerolls —
+    // exercises s.day plumbing through rerollShop/autoRerollShop for the
+    // retirement side, mirroring the unlock-side test above.
+    let s = newBuild('2026-07-04', 3);
+    for (let i = 0; i < 40; i++) {
+      s = { ...s, scrap: 50 };
+      const rolled = rerollShop(s);
+      if (!rolled.ok) break;
+      s = rolled.state;
+      expect(s.shop.slots.some((sl) => sl.kind === 'unit' && sl.defId === 'gutter-runt')).toBe(false);
+    }
+  });
+
+  it('upcomingRetirements lists Gutter-Runt while it is still in the pool, soonest first', () => {
+    expect(upcomingRetirements(1).map((u) => u.id)).toContain('gutter-runt');
+    expect(upcomingRetirements(2).map((u) => u.id)).toContain('gutter-runt');
+    // Sorted soonest-first: Gutter-Runt's retireDay (3) should sort before
+    // any later retirement, if/when one exists.
+    const days = upcomingRetirements(1).map((u) => u.retireDay ?? 0);
+    expect([...days]).toEqual([...days].sort((a, b) => a - b));
+  });
+
+  it('upcomingRetirements no longer lists Gutter-Runt once its retireDay has passed', () => {
+    for (const day of [3, 4, 5, 6, 7]) {
+      expect(upcomingRetirements(day).map((u) => u.id)).not.toContain('gutter-runt');
+    }
+  });
+});
+
+describe('full pool retirement (issue #109: Dawn-Runt/Dusk-Runt), Warren-Warden precedent', () => {
+  // Roll many offerings across many dates/roll numbers for a given day and
+  // report whether either retired unit ever appears — a much larger sample
+  // than SHOP_UNIT_SLOTS so a true negative is a real signal.
+  const everAppears = (day: number, defId: string): boolean => {
+    for (let d = 0; d < 40; d++) {
+      const date = `2026-08-${String(d + 1).padStart(2, '0')}`;
+      for (let roll = 0; roll < 10; roll++) {
+        const slots = rollOfferings(date, roll, [], day);
+        if (slots.some((s) => s.kind === 'unit' && s.defId === defId)) return true;
+      }
+    }
+    return false;
+  };
+
+  it('Dawn-Runt and Dusk-Runt never appear in the shop pool, on any day (replaced, not aged out)', () => {
+    for (const defId of ['dawn-runt', 'dusk-runt']) {
+      for (const day of [1, 2, 3, 4, 5, 6, 7]) expect(everAppears(day, defId)).toBe(false);
+    }
+  });
+
+  it('their UNIT_DEFS entries stay intact (golden logs/replays still reference them directly)', () => {
+    expect(UNIT_DEFS['dawn-runt']).toBeDefined();
+    expect(UNIT_DEFS['dusk-runt']).toBeDefined();
+  });
+
+  it('newBuild never offers either Runt on any day', () => {
+    for (let d = 0; d < 20; d++) {
+      const date = `2026-09-${String(d + 1).padStart(2, '0')}`;
+      for (const day of [1, 3, 7]) {
+        const s = newBuild(date, day);
+        expect(
+          s.shop.slots.some((sl) => sl.kind === 'unit' && (sl.defId === 'dawn-runt' || sl.defId === 'dusk-runt'))
+        ).toBe(false);
+      }
+    }
+  });
+
+  it('rerollShop and autoRerollShop never surface either Runt either', () => {
+    let s = newBuild('2026-07-04', 4);
+    for (let i = 0; i < 40; i++) {
+      s = { ...s, scrap: 50 };
+      const rolled = rerollShop(s);
+      if (!rolled.ok) break;
+      s = rolled.state;
+      expect(
+        s.shop.slots.some((sl) => sl.kind === 'unit' && (sl.defId === 'dawn-runt' || sl.defId === 'dusk-runt'))
+      ).toBe(false);
+    }
+  });
+
+  it('days before any unlockDay in play still roll deterministic offerings (no regression)', () => {
+    for (const day of [1, 2]) {
+      const a = rollOfferings('2026-07-03', 0, [], day);
+      const b = rollOfferings('2026-07-03', 0, [], day);
+      expect(a).toEqual(b);
+      expect(a.some((s) => s.kind === 'unit' && (s.defId === 'dawn-runt' || s.defId === 'dusk-runt'))).toBe(false);
+    }
+  });
+});
+
+describe('severance: par buyback for retired units (issue #108)', () => {
+  it('non-retired units refund byte-identically to before (half cost, tier²)', () => {
+    // Day 1: Gutter-Runt's retireDay (3) has not passed, so this must be the
+    // exact pre-existing quadratic formula, unchanged.
+    const s = {
+      ...newBuild('2026-07-03'), // day 1
+      board: [
+        { defId: 'dire-rat', tier: 1, relicIds: [] },
+        { defId: 'gutter-runt', tier: 2, relicIds: [] },
+        { defId: 'gutter-runt', tier: 3, relicIds: [] },
+      ],
+    };
+    expect(must(sellUnit(s, 0)).state.scrap).toBe(DAILY_SCRAP + 4); // dire-rat t1: floor(8/2)*1=4
+    expect(must(sellUnit(s, 1)).state.scrap).toBe(DAILY_SCRAP + 4); // gutter-runt t2: floor(2/2)*4=4
+    expect(must(sellUnit(s, 2)).state.scrap).toBe(DAILY_SCRAP + 9); // gutter-runt t3: floor(2/2)*9=9
+  });
+
+  it('a retired unit refunds exactly cost * 3^(tier-1), the par buyback', () => {
+    const gutterRuntCost = UNIT_DEFS['gutter-runt'].cost;
+    // Day 3: Gutter-Runt's retireDay has passed.
+    const s = {
+      ...newBuild('2026-07-04', 3),
+      scrap: 20,
+      board: [
+        { defId: 'gutter-runt', tier: 1, relicIds: [] },
+        { defId: 'gutter-runt', tier: 2, relicIds: [] },
+        { defId: 'gutter-runt', tier: 3, relicIds: [] },
+      ],
+    };
+    expect(must(sellUnit(s, 0)).state.scrap).toBe(20 + gutterRuntCost * 1); // 3^0
+    expect(must(sellUnit(s, 1)).state.scrap).toBe(20 + gutterRuntCost * 3); // 3^1
+    expect(must(sellUnit(s, 2)).state.scrap).toBe(20 + gutterRuntCost * 9); // 3^2
+  });
+
+  it('the par buyback also applies on the bench, and on the exact retireDay boundary', () => {
+    const gutterRuntCost = UNIT_DEFS['gutter-runt'].cost;
+    const s = {
+      ...newBuild('2026-07-04', 3), // exactly at retireDay (day >= retireDay)
+      scrap: 20,
+      bench: [{ defId: 'gutter-runt', tier: 2, relicIds: [] }],
+    };
+    expect(must(sellBenchUnit(s, 0)).state.scrap).toBe(20 + gutterRuntCost * 3);
+  });
+
+  it('the par buyback never exceeds par, i.e. it is strictly less than the old (undiscounted) tier² sell rate would be for tier >= 2', () => {
+    const gutterRuntCost = UNIT_DEFS['gutter-runt'].cost;
+    const s = { ...newBuild('2026-07-04', 3), scrap: 20, board: [{ defId: 'gutter-runt', tier: 3, relicIds: [] }] };
+    const parRefund = must(sellUnit(s, 0)).state.scrap - 20;
+    // The naive `cost * tier²` an exploit would want (issue #108's example):
+    // 4x cost for a t2 or 9x for... actually for t3 tier²=9 too — use the
+    // canonical exploit example instead: half-cost-quadratic sale on FULL
+    // (undiscounted) cost, i.e. cost * tier², would be strictly more than par
+    // for any tier >= 2 (3^(tier-1) < tier² once tier > 2... at tier=3,
+    // tier²=9 equals 3^(tier-1)=9, so use tier=2 where the gap is real).
+    const s2 = { ...newBuild('2026-07-04', 3), scrap: 20, board: [{ defId: 'gutter-runt', tier: 2, relicIds: [] }] };
+    const parRefundT2 = must(sellUnit(s2, 0)).state.scrap - 20;
+    const naiveExploitRefundT2 = gutterRuntCost * 2 * 2; // cost * tier², the rejected formula
+    expect(parRefundT2).toBeLessThan(naiveExploitRefundT2);
+    expect(parRefund).toBe(gutterRuntCost * 9);
+  });
+
+  it('buy-3-merge-sell nets exactly par, never a printer, even after the shop pool has retired the unit', () => {
+    // Already-owned copies (and the merges they build) are untouched by
+    // retirement — only shop ROLLS are gated (shopUnitPoolForDay). A shop
+    // slot can still be manually offering Gutter-Runt post-retirement here
+    // (mirrors how other tests hand-craft shop slots) to exercise the real
+    // buyUnit -> combineAll -> sellUnit pipeline end to end.
+    const gutterRuntCost = UNIT_DEFS['gutter-runt'].cost;
+    let s: BuildState = {
+      ...newBuild('2026-07-04', 3), // day 3: retireDay has passed
+      scrap: 3 * gutterRuntCost,
+      board: [],
+    };
+    for (let i = 0; i < 3; i++) {
+      s = {
+        ...s,
+        shop: { ...s.shop, slots: [{ kind: 'unit' as const, defId: 'gutter-runt' }, ...s.shop.slots.slice(1)] },
+      };
+      s = must(buyUnit(s, 0)).state;
+    }
+    expect(s.board).toHaveLength(1);
+    expect(s.board[0].tier).toBe(2);
+    expect(s.scrap).toBe(0); // spent exactly 3 * cost buying the trio
+    const afterSell = must(sellUnit(s, 0)).state;
+    // Par: the refund exactly equals what was spent, no profit and no loss —
+    // the exploit guard this whole feature exists for.
+    expect(afterSell.scrap).toBe(3 * gutterRuntCost);
   });
 });
