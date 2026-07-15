@@ -233,12 +233,16 @@ export interface BuildState {
 
 export type ActionResult = { ok: true; state: BuildState } | { ok: false; reason: string };
 
-// 'warren-warden' is excluded seasonally, not permanently: MD Rattyfock
-// (issue #23) is a same-stats reskin of it, added as a tribute to last
-// season's winner, and having both in rotation at once is redundant. Its
-// UNIT_DEFS entry stays intact (existing tests/golden logs/replays still
-// reference it directly) — only its presence in the purchasable pool is
-// gone. A future season could drop this filter to bring it back.
+// Season-3 reskin rotation (issue #115). The prestige tribute swaps every
+// season, so the reskin exclusions flip with it:
+//   - 'blight-witch' is excluded now: Draughtsman Moe (season-3 tribute to
+//     RatMoe) is a same-kit reskin of it, and having both in rotation is
+//     redundant (no-redundant-kits rule).
+//   - 'md-rattyfock' is excluded, and 'warren-warden' is BROUGHT BACK: last
+//     season Rattyfock reskinned Warren-Warden, but with Rattyfock retired the
+//     pair is no longer redundant, so Warren-Warden returns to the pool.
+// Every excluded def stays intact in UNIT_DEFS (tests/golden logs/replays
+// reference them directly) — only presence in the purchasable pool changes.
 //
 // 'dawn-runt'/'dusk-runt' are excluded the same way (issue #109), but for a
 // different reason: they're being REPLACED by the Twilight fusion unit, not
@@ -250,7 +254,12 @@ export type ActionResult = { ok: true; state: BuildState } | { ok: false; reason
 // mid-expedition owner is stranded. Their UNIT_DEFS entries stay intact
 // (golden logs) — only the purchasable pool changes.
 const SHOP_UNIT_POOL = Object.values(UNIT_DEFS).filter(
-  (u) => u.id !== 'pup' && u.id !== 'warren-warden' && u.id !== 'dawn-runt' && u.id !== 'dusk-runt'
+  (u) =>
+    u.id !== 'pup' &&
+    u.id !== 'blight-witch' &&
+    u.id !== 'md-rattyfock' &&
+    u.id !== 'dawn-runt' &&
+    u.id !== 'dusk-runt'
 );
 const SHOP_RELIC_POOL = Object.values(RELIC_DEFS);
 

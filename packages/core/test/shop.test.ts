@@ -1445,17 +1445,31 @@ describe('day-gated shop unlocks (issue #12)', () => {
     return false;
   };
 
-  it('the three day-2 picks (Dire-Rat, MD Rattyfock, Ward-Weaver) never appear on day 1', () => {
-    // Day-1 shop kept deliberately plain (2026-07-11): the armored tank, the
-    // Season-1 anchor, and the front-shield hold back to day 2.
-    for (const defId of ['dire-rat', 'md-rattyfock', 'ward-weaver']) {
+  it('the day-2 picks (Dire-Rat, Ward-Weaver) never appear on day 1', () => {
+    // Day-1 shop kept deliberately plain (2026-07-11): the armored tank and the
+    // front-shield hold back to day 2. (MD Rattyfock was the third day-2 pick
+    // until the season-3 swap retired it entirely — issue #115.)
+    for (const defId of ['dire-rat', 'ward-weaver']) {
       expect(everAppears(1, defId)).toBe(false);
     }
   });
 
-  it('the three day-2 picks appear from day 2 onward, every later day too', () => {
-    for (const defId of ['dire-rat', 'md-rattyfock', 'ward-weaver']) {
+  it('the day-2 picks appear from day 2 onward, every later day too', () => {
+    for (const defId of ['dire-rat', 'ward-weaver']) {
       for (const day of [2, 3, 4, 5, 6, 7]) expect(everAppears(day, defId)).toBe(true);
+    }
+  });
+
+  it('season-3 reskin swap (issue #115): retired reskins never roll; tribute + un-retired anchor do', () => {
+    // Draughtsman Moe reskins Blight-Witch and MD Rattyfock is retired, so
+    // neither base reskin is purchasable on any day; Warren-Warden returns to
+    // the pool and Draughtsman Moe joins it, both day-1 available (no unlockDay,
+    // matching the Blight-Witch kit Moe reskins).
+    for (const day of [1, 2, 3, 4, 5, 6, 7]) {
+      expect(everAppears(day, 'blight-witch')).toBe(false);
+      expect(everAppears(day, 'md-rattyfock')).toBe(false);
+      expect(everAppears(day, 'draughtsman-moe')).toBe(true);
+      expect(everAppears(day, 'warren-warden')).toBe(true);
     }
   });
 

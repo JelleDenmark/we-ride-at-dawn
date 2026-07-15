@@ -587,6 +587,22 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     ability: { trigger: 'startOfWave', effect: { kind: 'poisonAllEnemies' } },
     tribe: 'plague',
   },
+  // Season-3 prestige tribute (issue #115): Draughtsman Moe reskins
+  // Blight-Witch's exact kit/stats to honor RatMoe, the season-2 champion who
+  // maxed depth 45 on a 3× Blight-Witch poison-swarm. Same reskin precedent as
+  // MD Rattyfock (Warren-Warden) — the base `blight-witch` def stays in
+  // UNIT_DEFS for golden logs/replays, but is removed from the purchasable pool
+  // (see SHOP_UNIT_POOL in shop.ts) so the poison-all kit is only offered under
+  // the prestige name. Stays `plague`-tribe so it supports the archetype he
+  // pioneered and pairs with the reworked Plague-Bearer (#112, poisons the
+  // back): Moe rots wide, Bearer rots deep. Balance of the shared poison-all
+  // kit is tracked in #116 — tune the kit there, since Moe IS that kit.
+  'draughtsman-moe': {
+    id: 'draughtsman-moe', name: 'Draughtsman Moe', attack: 3, health: 3, cost: 8,
+    desc: "Season 2 champion; an architect who drafts the enemy's ruin from his Svendborg boat and doses the whole line by the draught; each wave: poisons the entire enemy line (scales ★)",
+    ability: { trigger: 'startOfWave', effect: { kind: 'poisonAllEnemies' } },
+    tribe: 'plague',
+  },
   gnawer: {
     id: 'gnawer', name: 'Gnawer', attack: 3, health: 1, cost: 4,
     desc: 'faint: the rat behind inherits its OWN attack, plus a bonus for the wave it died on (capped)',
