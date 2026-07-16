@@ -142,43 +142,61 @@ export function loadSeasonKills(seasonId: string): number {
 }
 
 /**
- * Daily Boss Trial (issue #107, Phase 1) once-per-day gate. "Day" here reuses
- * the exact same primitive the rest of this file keys off — `build.day`
- * (1..SEASON_DAYS, the ISO weekday within the current season/week, see
- * `BuildState.day` in `shop.ts`) — per the RFC's explicit instruction not to
- * invent a new day/rollover primitive. Paired with `seasonId` (as `best`/
- * `kills` above already are) so a stored record only ever matches one exact
- * calendar day within one exact season; a season rollover *or* a day
- * rollover both naturally fail the match below and re-open the trial —
- * no separate reset step is needed the way `seasonBest`/`seasonKills` need
- * one on season change (they're scoped to the season only, not the day).
+ * Daily Boss Trial (issue #107, Phase 1; fixed-hour + stored lineup per
+ * issue #120) once-per-day gate. "Day" here reuses the exact same primitive
+ * the rest of this file keys off — `build.day` (1..SEASON_DAYS, the ISO
+ * weekday within the current season/week, see `BuildState.day` in
+ * `shop.ts`) — per the RFC's explicit instruction not to invent a new
+ * day/rollover primitive. Paired with `seasonId` (as `best`/`kills` above
+ * already are) so a stored record only ever matches one exact calendar day
+ * within one exact season; a season rollover *or* a day rollover both
+ * naturally fail the match below and re-open the trial — no separate reset
+ * step is needed the way `seasonBest`/`seasonKills` need one on season
+ * change (they're scoped to the season only, not the day).
+ *
+ * Since #120 the trial fights automatically at a fixed hour against
+ * whatever's currently persisted, rather than on a player click, so the
+ * exact `lineup` that fought must be stored alongside the score — issue
+ * #118's replay re-derives the fight by re-simulating this stored lineup,
+ * and (per commit 3ba9b2d) `timeOfDay` is load-bearing *inside* that lineup,
+ * not a separate field.
  */
 export interface BossTrialToday {
   damage: number;
   phases: number;
+  lineup: Lineup;
 }
 
 /** Record today's Boss Trial result — the one-shot-per-day gate flips to
  * "used" until `seasonId`/`day` next changes. */
-export function saveBossTrialToday(seasonId: string, day: number, damage: number, phases: number): void {
+export function saveBossTrialToday(seasonId: string, day: number, result: BossTrialToday): void {
   try {
-    localStorage.setItem(`${NS}:bosstrial`, JSON.stringify({ seasonId, day, damage, phases }));
+    localStorage.setItem(`${NS}:bosstrial`, JSON.stringify({ seasonId, day, ...result }));
   } catch {
     // Non-fatal — worst case the trial looks available again this session,
-    // letting the player retry (harmless: the server RPC is still
-    // greatest()-monotonic, so a resubmit can't lower their score).
+    // letting it re-resolve automatically (harmless: the server RPC is still
+    // greatest()-monotonic, so a resubmit can't lower the stored score).
   }
 }
 
 /** Today's stored Boss Trial result, or null if today's trial hasn't been
- * run yet — covers "no record at all", "a different season", and "a
- * different day" identically, since all three mean the trial is available. */
+ * run yet — covers "no record at all", "a different season", "a different
+ * day", and "a pre-#120 record with no stored lineup" identically, since all
+ * of those mean the trial is available (the last case self-heals: it just
+ * re-resolves next time the fixed hour is checked). */
 export function loadBossTrialToday(seasonId: string, day: number): BossTrialToday | null {
   try {
     const raw = localStorage.getItem(`${NS}:bosstrial`);
     if (!raw) return null;
-    const v = JSON.parse(raw) as { seasonId: string; day: number; damage: number; phases: number };
-    return v.seasonId === seasonId && v.day === day ? { damage: v.damage, phases: v.phases } : null;
+    const v = JSON.parse(raw) as {
+      seasonId: string;
+      day: number;
+      damage: number;
+      phases: number;
+      lineup?: Lineup;
+    };
+    if (v.seasonId !== seasonId || v.day !== day || !v.lineup) return null;
+    return { damage: v.damage, phases: v.phases, lineup: v.lineup };
   } catch {
     return null;
   }

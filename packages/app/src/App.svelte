@@ -262,16 +262,41 @@
   }
 
   // Daily Boss Trial (issue #107, Phase 1 — a leaderboard number only, no
-  // rewards). `bossTrial` is today's stored result (persistence.ts, keyed by
-  // seasonId+day — the same primitive `build.day` already is elsewhere in
-  // this file); non-null means the once-per-day gate is used and the "run"
-  // button below stays disabled until the next day/season rollover reloads
-  // it back to null.
+  // rewards; issue #120 — fixed hour, no player trigger). `bossTrial` is
+  // today's stored result (persistence.ts, keyed by seasonId+day — the same
+  // primitive `build.day` already is elsewhere in this file); non-null means
+  // today's fight has already resolved and stays that way until the next
+  // day/season rollover reloads it back to null.
   let bossTrial = $state<BossTrialToday | null>(loadBossTrialToday(build.seasonId, build.day));
   let bossTrialBoard = $state<BossTrialRow[]>([]);
   let bossTrialRank = $state<number | null>(null);
   let bossTrialBoardBusy = $state(false);
-  let bossTrialRunning = $state(false);
+
+  // Fixed fight hour (issue #120): 20:00 CET, matching the established
+  // 06:00 CET dawn/season-boundary convention (`copenhagenSeconds`/
+  // `timeOfDayAt` above). Named rather than a literal per the issue.
+  const BOSS_TRIAL_HOUR = 20;
+  // BOSS_TRIAL_HOUR is always >= noon, so `timeOfDayAt`'s own cutoff
+  // (`copenhagenSeconds(now) < 12 * 3600 ? 'beforeNoon' : 'afterNoon'`)
+  // would resolve to 'afterNoon' for literally any date at that hour —
+  // derived from the constant (rather than hardcoding the string) so a
+  // future re-tune of the hour can't silently desync the two. This is what
+  // "the timeOfDay as of 20:00" means; no reverse-timezone Date needs to be
+  // constructed to get it (this codebase has no such helper, and hand-
+  // rolling one just to feed it back through the same branch is pointless).
+  const BOSS_TRIAL_TIME_OF_DAY: TimeOfDay = BOSS_TRIAL_HOUR >= 12 ? 'afterNoon' : 'beforeNoon';
+
+  /** Has BOSS_TRIAL_HOUR CET passed for ride-date `date`, as of `now`? Either
+   * the ride-day has already rolled past `date` (the dawn boundary is 06:00,
+   * well after 20:00, so any later ride-date guarantees the hour already
+   * passed), or we're still on `date` and the Copenhagen clock has reached
+   * it. String-compares ride dates (`YYYY-MM-DD`, lexicographic = chronological)
+   * so a build that's ahead of real time (dev fast-forward) is correctly
+   * left alone, mirroring the day-advance effect's own comment on that. */
+  function bossTrialDue(now: Date, date: string): boolean {
+    const today = currentRideDate(now);
+    return today > date || (today === date && copenhagenSeconds(now) >= BOSS_TRIAL_HOUR * 3600);
+  }
 
   // Reload the daily gate whenever the day or season changes (dawn advance,
   // week rollover, dev fast-forward) — loadBossTrialToday's seasonId+day
@@ -296,48 +321,60 @@
     }
   }
 
-  /** Run the live board through the trial once, bank the local daily-best
-   * gate immediately (so a dropped/slow submit can't reopen the button), and
-   * fire-and-forget the score to the board. Disabled by the template
-   * whenever `bossTrial` is already set or the board is empty. */
-  async function runBossTrial() {
-    if (bossTrial !== null || bossTrialRunning || build.board.length === 0) return;
-    bossTrialRunning = true;
-    try {
-      // Thread the wall clock in exactly like every ride does (see watchRide /
-      // the idle-accrual paths): `lineupFromBuild` does NOT set `timeOfDay`,
-      // and an omitted `timeOfDay` makes `teamBuffByTime` hit neither branch
-      // and silently no-op — so Twilight-Runt's whole kit was doing nothing in
-      // the one mode built to measure how hard a build hits. The trial is
-      // scored at the hour it's fought, same as a ride.
-      // ONE timed lineup, used for both the scored sim and the submitted
-      // payload — they must be the same object or the board stores a lineup
-      // that doesn't reproduce its own score. The trial is deterministic
-      // (fixed gauntlet, no date seed), so `timedLineup` alone re-derives this
-      // exact fight — that's what a replay of the "then" lineup and any future
-      // server-side re-simulation (#81) both rely on.
-      const timedLineup = { ...lineupFromBuild(build), timeOfDay: timeOfDayAt(new Date()) };
-      const result = simulateBossTrial(timedLineup);
-      const today: BossTrialToday = { damage: result.totalDamage, phases: result.phasesSurvived };
-      bossTrial = today;
-      saveBossTrialToday(build.seasonId, build.day, today.damage, today.phases);
-      // Same guard as submitBest: an unnamed device still gets the local
-      // gate/result, it just doesn't post to the shared board until named.
-      if (playerName) {
-        await submitBossTrialScore({
-          seasonId: build.seasonId,
-          name: playerName,
-          damage: today.damage,
-          phases: today.phases,
-          day: build.day,
-          lineup: timedLineup,
-        });
-      }
-      await refreshBossTrialBoard();
-    } finally {
-      bossTrialRunning = false;
+  /** Retroactive resolution (issue #120): the player never triggers the
+   * trial — it fights automatically the moment BOSS_TRIAL_HOUR CET has
+   * passed for the still-open day. Only the player mutates the board, so
+   * whatever's persisted RIGHT NOW is exactly the board as it stood at their
+   * last action before that hour — the same retroactive shape the offline
+   * ride-accrual loop below already relies on (≤24h/visit), just without
+   * needing any board history.
+   *
+   * Declared here (before the day-advance heartbeat further down) so that on
+   * a reload after being away, this runs against `build.date`/`build.day` as
+   * they stood BEFORE that heartbeat fast-forwards them across any elapsed
+   * dawns — checking AFTER the advance would ask "has today's 20:00 passed"
+   * about the wrong (brand new, and on a season rollover possibly emptied)
+   * day, silently losing a trial that was actually still resolvable.
+   *
+   * Empty board at the fixed hour: skip and leave the gate open (do not
+   * save/submit a 0-damage score) rather than permanently closing today's
+   * gate on an empty snapshot — if the player builds a horde later the same
+   * day, this effect re-runs (it depends on `build`) and resolves then.
+   */
+  $effect(() => {
+    void nowTick;
+    if (bossTrial !== null || build.board.length === 0) return;
+    if (!bossTrialDue(new Date(nowTick), build.date)) return;
+    // Same timedLineup pattern as every other scoring path in this file
+    // (see commit 3ba9b2d): `lineupFromBuild` does NOT set `timeOfDay`, and
+    // an omitted one makes `teamBuffByTime` silently no-op. ONE timed lineup
+    // feeds the sim, the local save, AND the submitted payload, so the
+    // stored/submitted lineup reproduces the exact score it earned (issue
+    // #118's replay, and any future server-side re-simulation for #81, both
+    // depend on that).
+    const timedLineup = { ...lineupFromBuild(build), timeOfDay: BOSS_TRIAL_TIME_OF_DAY };
+    const result = simulateBossTrial(timedLineup);
+    const today: BossTrialToday = {
+      damage: result.totalDamage,
+      phases: result.phasesSurvived,
+      lineup: timedLineup,
+    };
+    bossTrial = today;
+    saveBossTrialToday(build.seasonId, build.day, today);
+    // Same guard as submitBest: an unnamed device still gets the local
+    // gate/result, it just doesn't post to the shared board until named.
+    if (playerName) {
+      void submitBossTrialScore({
+        seasonId: build.seasonId,
+        name: playerName,
+        damage: today.damage,
+        phases: today.phases,
+        day: build.day,
+        lineup: timedLineup,
+      });
     }
-  }
+    void refreshBossTrialBoard();
+  });
 
   // Guard so an unchanged best/name/day doesn't re-POST on every rebuild.
   let lastSubmit = '';
@@ -1415,21 +1452,16 @@
       </button>
     </div>
     <p class="bt-blurb">
-      Once a day, your live horde faces a boss. Fell it to reach the next phase — every phase the next boss hits half again as hard, until the horde falls. Score is total damage dealt.
+      Every day at {BOSS_TRIAL_HOUR}:00 CET your horde automatically faces a boss — no trigger, no preview. Fell it to reach the next phase — every phase the next boss hits half again as hard, until the horde falls. Score is total damage dealt.
     </p>
     {#if bossTrial}
       <p class="bt-result">Today's damage: <strong>{bossTrial.damage}</strong> · felled {bossTrial.phases} {bossTrial.phases === 1 ? 'boss' : 'bosses'} · back tomorrow</p>
     {:else}
-      <button
-        class="watch bt-run"
-        onclick={() => void runBossTrial()}
-        disabled={bossTrialRunning || build.board.length === 0}
-      >
-        {bossTrialRunning ? 'Fighting…' : "Run today's Boss Trial"}
-      </button>
-      {#if build.board.length === 0}
-        <p class="bt-hint">recruit a horde first — the trial fights your live board</p>
-      {/if}
+      <p class="bt-hint">
+        {build.board.length === 0
+          ? `have a horde standing by before ${BOSS_TRIAL_HOUR}:00 CET — an empty board isn't scored`
+          : `fights automatically at ${BOSS_TRIAL_HOUR}:00 CET`}
+      </p>
     {/if}
     {#if bossTrialBoard.length === 0}
       <p class="lb-empty">{bossTrialBoardBusy ? 'reading the war-drums…' : 'no challengers yet this week — be the first'}</p>
@@ -2565,10 +2597,6 @@
     margin: 8px 0 10px;
     font-size: 12px;
     color: var(--ink-dim);
-  }
-
-  .bt-run {
-    margin: 0 0 4px;
   }
 
   .bt-result {
