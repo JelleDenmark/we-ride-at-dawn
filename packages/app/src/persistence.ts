@@ -141,6 +141,49 @@ export function loadSeasonKills(seasonId: string): number {
   }
 }
 
+/**
+ * Daily Boss Trial (issue #107, Phase 1) once-per-day gate. "Day" here reuses
+ * the exact same primitive the rest of this file keys off — `build.day`
+ * (1..SEASON_DAYS, the ISO weekday within the current season/week, see
+ * `BuildState.day` in `shop.ts`) — per the RFC's explicit instruction not to
+ * invent a new day/rollover primitive. Paired with `seasonId` (as `best`/
+ * `kills` above already are) so a stored record only ever matches one exact
+ * calendar day within one exact season; a season rollover *or* a day
+ * rollover both naturally fail the match below and re-open the trial —
+ * no separate reset step is needed the way `seasonBest`/`seasonKills` need
+ * one on season change (they're scoped to the season only, not the day).
+ */
+export interface BossTrialToday {
+  damage: number;
+  phases: number;
+}
+
+/** Record today's Boss Trial result — the one-shot-per-day gate flips to
+ * "used" until `seasonId`/`day` next changes. */
+export function saveBossTrialToday(seasonId: string, day: number, damage: number, phases: number): void {
+  try {
+    localStorage.setItem(`${NS}:bosstrial`, JSON.stringify({ seasonId, day, damage, phases }));
+  } catch {
+    // Non-fatal — worst case the trial looks available again this session,
+    // letting the player retry (harmless: the server RPC is still
+    // greatest()-monotonic, so a resubmit can't lower their score).
+  }
+}
+
+/** Today's stored Boss Trial result, or null if today's trial hasn't been
+ * run yet — covers "no record at all", "a different season", and "a
+ * different day" identically, since all three mean the trial is available. */
+export function loadBossTrialToday(seasonId: string, day: number): BossTrialToday | null {
+  try {
+    const raw = localStorage.getItem(`${NS}:bosstrial`);
+    if (!raw) return null;
+    const v = JSON.parse(raw) as { seasonId: string; day: number; damage: number; phases: number };
+    return v.seasonId === seasonId && v.day === day ? { damage: v.damage, phases: v.phases } : null;
+  } catch {
+    return null;
+  }
+}
+
 export interface RideLogEntry {
   /** Absolute hour bucket (Date.now() / 3_600_000, floored). */
   hour: number;

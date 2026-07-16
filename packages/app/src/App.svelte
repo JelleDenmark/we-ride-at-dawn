@@ -58,6 +58,7 @@
     tierHealthMultiplier,
     reviveHpForTier,
     poisonStacksForTier,
+    simulateBossTrial,
     type ActionResult,
     type BattleResult,
     type BuildState,
@@ -85,8 +86,11 @@
     RIDE_LOG_MAX,
     loadInstallNudgeDismissed,
     saveInstallNudgeDismissed,
+    saveBossTrialToday,
+    loadBossTrialToday,
     type RideLogEntry,
     type LastRide,
+    type BossTrialToday,
   } from './persistence';
   import {
     submitRun,
@@ -102,6 +106,12 @@
     isMe,
     type BoardRow,
   } from './leaderboard';
+  import {
+    submitBossTrialScore,
+    fetchBossTrialTop,
+    fetchBossTrialRank,
+    type BossTrialRow,
+  } from './boss-trial-board';
   import { startUpdateCheck } from './updateCheck';
   import { startPwaUpdate } from './pwaUpdate';
   import { startInstallPromptCapture, promptInstall, isIOS, isStandalone } from './pwaInstall';
@@ -248,6 +258,71 @@
       myRank = rank;
     } finally {
       boardBusy = false;
+    }
+  }
+
+  // Daily Boss Trial (issue #107, Phase 1 — a leaderboard number only, no
+  // rewards). `bossTrial` is today's stored result (persistence.ts, keyed by
+  // seasonId+day — the same primitive `build.day` already is elsewhere in
+  // this file); non-null means the once-per-day gate is used and the "run"
+  // button below stays disabled until the next day/season rollover reloads
+  // it back to null.
+  let bossTrial = $state<BossTrialToday | null>(loadBossTrialToday(build.seasonId, build.day));
+  let bossTrialBoard = $state<BossTrialRow[]>([]);
+  let bossTrialRank = $state<number | null>(null);
+  let bossTrialBoardBusy = $state(false);
+  let bossTrialRunning = $state(false);
+
+  // Reload the daily gate whenever the day or season changes (dawn advance,
+  // week rollover, dev fast-forward) — loadBossTrialToday's seasonId+day
+  // match already encodes "is today's trial available", so simply re-reading
+  // it here is the entire reset; no separate zeroing step like seasonBest
+  // needs on season change (that one isn't scoped to the day, this is).
+  $effect(() => {
+    bossTrial = loadBossTrialToday(build.seasonId, build.day);
+  });
+
+  async function refreshBossTrialBoard() {
+    bossTrialBoardBusy = true;
+    try {
+      const [rows, rank] = await Promise.all([
+        fetchBossTrialTop(build.seasonId, 20),
+        bossTrial ? fetchBossTrialRank(build.seasonId, bossTrial.damage, bossTrial.phases) : Promise.resolve(null),
+      ]);
+      bossTrialBoard = rows;
+      bossTrialRank = rank;
+    } finally {
+      bossTrialBoardBusy = false;
+    }
+  }
+
+  /** Run the live board through the trial once, bank the local daily-best
+   * gate immediately (so a dropped/slow submit can't reopen the button), and
+   * fire-and-forget the score to the board. Disabled by the template
+   * whenever `bossTrial` is already set or the board is empty. */
+  async function runBossTrial() {
+    if (bossTrial !== null || bossTrialRunning || build.board.length === 0) return;
+    bossTrialRunning = true;
+    try {
+      const result = simulateBossTrial(lineupFromBuild(build));
+      const today: BossTrialToday = { damage: result.totalDamage, phases: result.phasesSurvived };
+      bossTrial = today;
+      saveBossTrialToday(build.seasonId, build.day, today.damage, today.phases);
+      // Same guard as submitBest: an unnamed device still gets the local
+      // gate/result, it just doesn't post to the shared board until named.
+      if (playerName) {
+        await submitBossTrialScore({
+          seasonId: build.seasonId,
+          name: playerName,
+          damage: today.damage,
+          phases: today.phases,
+          day: build.day,
+          lineup: lineupFromBuild(build),
+        });
+      }
+      await refreshBossTrialBoard();
+    } finally {
+      bossTrialRunning = false;
     }
   }
 
@@ -528,6 +603,8 @@
     // Load the board now, then keep it loosely fresh while the tab is open.
     void refreshBoard();
     const boardId = setInterval(() => void refreshBoard(), 60_000);
+    void refreshBossTrialBoard();
+    const bossTrialBoardId = setInterval(() => void refreshBossTrialBoard(), 60_000);
     const stopUpdateCheck = startUpdateCheck(() => {
       updateDismissed = false;
       updateAvailable = true;
@@ -555,6 +632,7 @@
     return () => {
       clearInterval(id);
       clearInterval(boardId);
+      clearInterval(bossTrialBoardId);
       stopUpdateCheck();
       stopInstallCapture();
     };
@@ -673,6 +751,7 @@
       saveSeasonKills(build.seasonId, 0);
       saveRideLog(build.seasonId, []);
       void refreshBoard(); // new week → pull the fresh (empty) board
+      void refreshBossTrialBoard(); // and the boss-trial board alongside it
     }
     // Auto-submit the season-best on any improvement (guarded so an
     // unchanged score never re-POSTs).
@@ -1309,6 +1388,53 @@
       riding as <strong>{playerName || '—'}</strong>
       <button class="lb-rename" onclick={openRename}>rename</button>
     </p>
+  </div>
+
+  <!-- Daily Boss Trial (issue #107, Phase 1 — leaderboard number only, no
+       rewards yet). The trial fights the player's LIVE current board (no
+       snapshot), once per calendar day; `bossTrial` non-null means today's
+       shot is already spent (persistence.ts, keyed by seasonId+day). -->
+  <div class="boss-trial">
+    <div class="bt-head">
+      <span class="panel-label">Boss Trial · day {build.day}/{SEASON_DAYS}</span>
+      <button class="lb-refresh" onclick={() => void refreshBossTrialBoard()} disabled={bossTrialBoardBusy}>
+        {bossTrialBoardBusy ? '…' : '↻'}
+      </button>
+    </div>
+    <p class="bt-blurb">
+      Once a day, your live horde faces a boss with no health cap — its attack escalates every phase until the horde falls. Score is total damage dealt.
+    </p>
+    {#if bossTrial}
+      <p class="bt-result">Today's damage: <strong>{bossTrial.damage}</strong> · reached phase {bossTrial.phases} · back tomorrow</p>
+    {:else}
+      <button
+        class="watch bt-run"
+        onclick={() => void runBossTrial()}
+        disabled={bossTrialRunning || build.board.length === 0}
+      >
+        {bossTrialRunning ? 'Fighting…' : "Run today's Boss Trial"}
+      </button>
+      {#if build.board.length === 0}
+        <p class="bt-hint">recruit a horde first — the trial fights your live board</p>
+      {/if}
+    {/if}
+    {#if bossTrialBoard.length === 0}
+      <p class="lb-empty">{bossTrialBoardBusy ? 'reading the war-drums…' : 'no challengers yet this week — be the first'}</p>
+    {:else}
+      <ol class="bt-rows">
+        {#each bossTrialBoard as row, i}
+          <li class="bt-row" class:me={isMe(row)}>
+            <span class="bt-rank">{i + 1}</span>
+            <span class="bt-name">{row.name}{isMe(row) ? ' · you' : ''}</span>
+            <span class="bt-phases">phase {row.phases}</span>
+            <span class="bt-damage">{row.damage} dmg</span>
+          </li>
+        {/each}
+      </ol>
+    {/if}
+    {#if bossTrialRank !== null && bossTrialRank > bossTrialBoard.length}
+      <p class="bt-myrank">your rank: <strong>#{bossTrialRank}</strong> · {bossTrial?.damage ?? 0} dmg</p>
+    {/if}
   </div>
 
   {#if telemetryConfigured}
@@ -2402,6 +2528,112 @@
     cursor: pointer;
   }
 
+  /* Boss Trial panel (issue #107) — deliberately the same box/row shapes as
+     .leaderboard/.lb-* just above, with a bt- prefix so the two boards'
+     columns (damage/phase vs. depth/kills) stay easy to tell apart in the
+     markup despite looking identical on screen. */
+  .boss-trial {
+    max-width: 620px;
+    margin: 14px auto 0;
+    padding: 12px 14px 14px;
+    border: 1px solid #322820;
+    border-radius: 10px;
+    background: #14100c;
+    text-align: left;
+  }
+
+  .bt-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .bt-blurb {
+    margin: 8px 0 10px;
+    font-size: 12px;
+    color: var(--ink-dim);
+  }
+
+  .bt-run {
+    margin: 0 0 4px;
+  }
+
+  .bt-result {
+    margin: 4px 0 10px;
+    font-size: 14px;
+    color: #d4af37;
+  }
+
+  .bt-hint {
+    margin: 2px 0 10px;
+    font-size: 12px;
+    color: var(--ink-dim);
+  }
+
+  .bt-rows {
+    list-style: none;
+    margin: 10px 0 0;
+    padding: 0;
+  }
+
+  .bt-row {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 5px 8px;
+    border-radius: 6px;
+    font-size: 14px;
+  }
+
+  .bt-row:nth-child(odd) {
+    background: #1a140f;
+  }
+
+  .bt-row.me {
+    background: #2c2415;
+    color: #f0e6d2;
+  }
+
+  .bt-rank {
+    min-width: 24px;
+    color: var(--ink-dim);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .bt-row.me .bt-rank {
+    color: #d4af37;
+  }
+
+  .bt-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .bt-phases {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    font-size: 12px;
+    color: var(--ink-dim);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .bt-damage {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    color: #d4af37;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .bt-myrank {
+    margin: 8px 0 0;
+    padding-top: 8px;
+    border-top: 1px solid #2a221a;
+    font-size: 13px;
+    color: #c9b891;
+  }
+
   .name-sheet {
     align-self: center;
   }
@@ -2435,6 +2667,12 @@
       gap: 8px;
       padding: 2px 6px;
       font-size: 12px;
+    }
+
+    .bt-row {
+      gap: 6px;
+      padding: 4px 6px;
+      font-size: 13px;
     }
   }
 </style>
