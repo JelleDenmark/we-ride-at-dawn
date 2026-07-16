@@ -44,6 +44,7 @@
  */
 import type { Gauntlet } from './gauntlet';
 import type { Lineup, UnitDef } from './data/units';
+import type { BattleEvent } from './sim';
 import { simulate, enemyAttackScale, enemyHealthScale } from './sim';
 
 /**
@@ -117,4 +118,21 @@ export function simulateBossTrial(lineup: Lineup): BossTrialResult {
   }
 
   return { totalDamage, phasesSurvived: result.wavesCleared };
+}
+
+/**
+ * Re-derive the raw battle events for a Boss Trial fight without the score
+ * bookkeeping (issue #118's "watch the trial" replay). Since #120 the trial
+ * fights automatically against whatever's persisted at the fixed hour and
+ * only `{damage, phases, lineup}` is stored — no event stream — so watching
+ * it back means re-running the SAME deterministic fight: same fixed
+ * gauntlet, no date seed, so calling this with the exact `lineup` that was
+ * stored (per commit 3ba9b2d, `timeOfDay` lives INSIDE that lineup, not a
+ * separate field — an untimed or re-derived-from-"now" lineup reproduces a
+ * DIFFERENT fight than the one that was scored) reproduces the identical
+ * event stream byte-for-byte, the same guarantee `simulateBossTrial`'s own
+ * "is deterministic" test pins for the score.
+ */
+export function simulateBossTrialReplay(lineup: Lineup): BattleEvent[] {
+  return simulate(lineup, buildBossTrialGauntlet()).events;
 }
