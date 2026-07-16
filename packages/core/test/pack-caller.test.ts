@@ -23,8 +23,12 @@ const ofType = <T extends BattleEvent['type']>(events: BattleEvent[], type: T) =
   events.filter((e): e is Extract<BattleEvent, { type: T }> => e.type === type);
 
 // Pack-Caller (issue #88, reworked 2026-07-16): `faint`-triggered, gives away
-// its own base (tier-scaled) attack/health split evenly across every other
-// living teammate, remainder going one point each to the frontmost survivors.
+// its own CURRENT (tier-scaled, relic/buff-inflated) attack and max health,
+// split evenly across every other living teammate, remainder going one point
+// each to the frontmost survivors. With no relic or startOfBattle buff
+// applied, "current" and "base tier-scaled" are the same number, which is
+// what most of the tests below exercise; the dedicated relic test further
+// down is what actually proves the LIVE-stat behavior (see that test).
 // `pup` (attack 1 / health 1 / cost 0) has no ability of its own — clean
 // filler so its only `buff` events come from Pack-Caller's death payout.
 // Pack-Caller is placed at the front (index 0) against a `dummy(50, 1)`
@@ -32,7 +36,7 @@ const ofType = <T extends BattleEvent['type']>(events: BattleEvent[], type: T) =
 // Gnawer's `bequeathAttack` — so it faints deterministically on wave 1.
 
 describe('Pack-Caller (distributeStatsOnFaint, issue #88 rework)', () => {
-  it('splits its own base attack/health evenly, remainder to the frontmost survivor', () => {
+  it('splits its own current attack/health evenly, remainder to the frontmost survivor', () => {
     // t1 Pack-Caller: attack 2, health 3. Two pup survivors: 2/2=1r0 attack,
     // 3/2=1r1 health — the front pup (board index 0 after removal) gets the
     // spare health point, the back pup does not.
@@ -51,6 +55,25 @@ describe('Pack-Caller (distributeStatsOnFaint, issue #88 rework)', () => {
     const totalHealth = buffs.reduce((s, b) => s + b.health, 0);
     expect(totalAttack).toBe(2);
     expect(totalHealth).toBe(3);
+  });
+
+  it('gives away its LIVE (relic-buffed) stats, not its flat base line', () => {
+    // t1 Pack-Caller + Rusted Nail (+2 attack, no health): live attack =
+    // 2 + 2 = 4, live health unchanged at 3. Two pup survivors: 4/2=2r0
+    // attack, 3/2=1r1 health — proves the payout reads `source.attack`/
+    // `source.maxHealth` at time of death, not a fixed tier-scaled literal.
+    const { events } = simulate(
+      lineup({ defId: 'pack-caller', relicIds: ['rusted-nail'] }, { defId: 'pup' }, { defId: 'pup' }),
+      gauntletOf([dummy(50, 1)])
+    );
+    const buffs = ofType(events, 'buff');
+    expect(buffs.length).toBe(2);
+    expect(buffs[0].attack).toBe(2);
+    expect(buffs[0].health).toBe(2);
+    expect(buffs[1].attack).toBe(2);
+    expect(buffs[1].health).toBe(1);
+    expect(buffs.reduce((s, b) => s + b.attack, 0)).toBe(4);
+    expect(buffs.reduce((s, b) => s + b.health, 0)).toBe(3);
   });
 
   it('spreads a multi-point remainder across multiple frontmost survivors', () => {

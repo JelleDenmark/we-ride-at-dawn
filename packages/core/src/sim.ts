@@ -361,17 +361,21 @@ export function simulate(
         // manual filtering needed.
         const survivors = board;
         if (survivors.length === 0) break; // Last unit standing — no-op, no crash.
-        // Own BASE (tier-scaled) stats — deliberately `source.defId`'s
-        // UnitDef, NOT `source.attack`/`source.maxHealth` (which may already
-        // be inflated by whatever startOfBattle buffs this instance
-        // received — see the Effect's doc comment in data/units.ts for why
-        // that matters for the compounding-law bound). This duplicates
-        // `unitStats`'s formula (shop.ts) rather than importing it: shop.ts
-        // already imports BOARD_CAP/COMBAT_CAP_BONUS from this module, so
-        // the reverse import would cycle.
-        const baseDef = UNIT_DEFS[source.defId];
-        const totalAttack = baseDef.attack * tierAttackMultiplier(tier);
-        const totalHealth = baseDef.health * tierHealthMultiplier(tier);
+        // Own LIVE stats at the moment of death — `source.attack` (tier-
+        // scaled, relic-buffed, and inflated by any startOfBattle buff this
+        // instance received, e.g. Warren-Warden's buffBehind or the
+        // Forgotten Backpack relic) and `source.maxHealth` (same, but the
+        // buffed CEILING rather than however much current health remains —
+        // a unit whose max was raised gives away that raised max even if
+        // it's about to die at 1 HP). Same "own live stat, not a flat
+        // literal" pattern as Gnawer's `bequeathAttack` above, and safe for
+        // the same reason: every input that could have inflated these
+        // values (buffBehind, teamBuff, relics, ...) is itself already
+        // fire-once/bounded under ADR-0003, so a one-time snapshot at death
+        // is bounded too — just variable with board synergy, which is the
+        // point (the more you've invested in it, the bigger its send-off).
+        const totalAttack = source.attack;
+        const totalHealth = source.maxHealth;
         const n = survivors.length;
         const perUnitAttack = Math.floor(totalAttack / n);
         const perUnitHealth = Math.floor(totalHealth / n);

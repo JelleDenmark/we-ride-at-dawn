@@ -189,24 +189,33 @@ export type Effect =
    * winner was invisible board trivia, not a real player choice.
    *
    * This version drops the tribe dependency entirely and changes the shape:
-   * `faint`-triggered (not `startOfBattle`), it gives away its OWN base
-   * (tier-scaled) attack/health — exactly the numbers on its own tile —
-   * split EVENLY across every other living teammate, with any remainder
-   * (stat % survivor-count) going one point each to the FRONTMOST survivors
-   * first, so no stat point is ever lost to rounding. No parameters on the
-   * effect itself (unlike `buffBehind`/`teamBuff`'s literal `attack`/
-   * `health`): the payout is always exactly this unit's own stat line, never
-   * a separate tunable number, by design — see the sim.ts case for the
-   * "own BASE stats, not live/buffed stats" distinction and why it matters.
+   * `faint`-triggered (not `startOfBattle`), it gives away its OWN CURRENT
+   * attack and max health — tier-scaled, relic-buffed, and inflated by
+   * whatever startOfBattle buffs it happened to receive (Warren-Warden,
+   * the Forgotten Backpack relic, ...) — split EVENLY across every other
+   * living teammate, with any remainder (stat % survivor-count) going one
+   * point each to the FRONTMOST survivors first, so no stat point is ever
+   * lost to rounding. No parameters on the effect itself (unlike
+   * `buffBehind`/`teamBuff`'s literal `attack`/`health`): the payout is
+   * always exactly this unit's own live stat line at the moment it falls,
+   * never a separate tunable number — see the sim.ts case for exactly
+   * which fields that reads.
    *
    * Compounding-law note: `faint` fires once per unit instance, ever — a
    * unit only dies once, same fire-once bound `bequeathAttack`/`gainStats`
-   * (allyFaint) already rely on. The payout is a FIXED total (this
-   * instance's own base stats, deliberately NOT its live buffed value — see
-   * sim.ts), so it cannot be inflated by whatever buffs this Pack-Caller
-   * itself received first; multiple Pack-Callers on one board each pay out
-   * independently and the combined total can never exceed the sum of their
-   * own base stats, however they chain. Zero survivors (last unit standing)
+   * (allyFaint) already rely on, and the same "own live stat, not a flat
+   * literal" pattern `bequeathAttack` already uses for attack. Using the
+   * LIVE (buffed) value rather than a fixed base is safe for the same
+   * reason it's safe there: every effect that could have inflated this
+   * unit's stats first (buffBehind, teamBuff, relics, ...) is itself
+   * already fire-once/bounded under ADR-0003, so a one-time snapshot of
+   * their sum at death is bounded too — it just varies with board synergy,
+   * which is the intended payoff for building around it. A board with
+   * several Pack-Callers CAN chain — one's payout can inflate the live
+   * stats a later one gives away when it too falls — but the chain is
+   * still finite: each instance can only die and pay out once, so the
+   * longest possible chain is bounded by the board's own size (BOARD_CAP),
+   * not by wave count or ride length. Zero survivors (last unit standing)
    * is a no-op, not a crash.
    */
   | { kind: 'distributeStatsOnFaint' }
@@ -775,7 +784,7 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   // currently reads `tribe` mechanically now that this was its only reader.
   'pack-caller': {
     id: 'pack-caller', name: 'Pack-Caller', attack: 2, health: 3, cost: 5,
-    desc: 'faint: gives away its own attack/health, split evenly across the rest of the horde (scales ★)',
+    desc: 'faint: gives away its own current attack/health (whatever it has grown to) split evenly across the rest of the horde (scales ★)',
     // faint: fires once per unit instance, ever — a unit only dies once, so
     // this can't re-fire on a later wave. See `distributeStatsOnFaint`'s
     // doc comment above for the full compounding-law sign-off.

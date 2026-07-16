@@ -512,6 +512,17 @@
     if (e.kind === 'blockFrontHits') {
       return 'Each wave, blocks the front rat’s first incoming hit outright — whoever is front at the time. ★2 blocks the first 2 hits, ★3 the first 3. Charges reset every wave and never carry over.';
     }
+    if (e.kind === 'chargeWhileBenched') {
+      // Bespoke sentence (not the generic trigger/condition template below):
+      // this effect has TWO separate "nothing happens" cases — at the front,
+      // and once the cap is banked — that read as a confusing bolt-on
+      // ("hard-capped... after which it's a no-op... but only on waves...")
+      // when forced through the generic `${TRIGGER_WHEN} it ${what}${when}`
+      // shape. Leading with the condition, then the gain, then the cap
+      // framed as a ceiling reads as one plain sentence instead.
+      const cap = (t: number) => cellarCoilChargeCapForTier(t);
+      return `Each wave it survives anywhere but the front, it permanently gains +${e.attackPerWave} attack (★2 +${e.attackPerWave * 2} · ★3 +${e.attackPerWave * 3}) — up to ${cap(1)} total over the whole ride (★2 ${cap(2)} · ★3 ${cap(3)}). At the front, or once that cap is banked, the wave simply passes with no gain.`;
+    }
     let what = '';
     switch (e.kind) {
       case 'summon': {
@@ -550,7 +561,7 @@
         what = `rots every enemy in the wave with ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) — poison bites for its full count every clash, ignores armor, and clears when the wave falls`;
         break;
       case 'distributeStatsOnFaint':
-        what = `gives away its own ${buffScale(def.attack, def.health)}, split evenly across every other rat on the board — any point left over after the split goes to whichever of them is furthest forward, so nothing is wasted`;
+        what = `gives away its own current attack and health — the same numbers shown above, plus anything it's picked up mid-battle (Warren-Warden, the Forgotten Backpack, and the like) — split evenly across every other rat on the board; any point left over goes to whichever of them is furthest forward, so nothing is wasted`;
         break;
       case 'backlineDamage':
         what = `adds its own current attack straight into the clash against the frontmost enemy, from any slot behind the front — takes no retaliation, but this does nothing the wave it's actually the one at the front`;
@@ -558,17 +569,10 @@
       case 'teamBuffByTime':
         what = `grants ${buffScale(e.beforeNoon.attack, e.beforeNoon.health)} to the whole horde riding before noon, or ${buffScale(e.afterNoon.attack, e.afterNoon.health)} riding after noon — whichever half of the day it fights in`;
         break;
-      case 'chargeWhileBenched': {
-        const cap = (t: number) => cellarCoilChargeCapForTier(t);
-        what = `permanently banks +${e.attackPerWave} attack (★2 +${e.attackPerWave * 2} · ★3 +${e.attackPerWave * 3} per wave) — hard-capped at ${cap(1)} total (★2 ${cap(2)} · ★3 ${cap(3)}), after which it's a no-op for the rest of the ride`;
-        break;
-      }
     }
     const when = def.ability.condition?.timeOfDay
       ? `${TIME_OF_DAY_LABEL[def.ability.condition.timeOfDay] ?? ''}`
-      : def.ability.condition?.notFront
-        ? ' — but only on waves it survives NOT at the front'
-        : '';
+      : '';
     const abilityPart = `${TRIGGER_WHEN[def.ability.trigger]} it ${what}${when}.`;
     return armorSentence ? `${abilityPart} ${armorSentence}` : abilityPart;
   }
