@@ -357,86 +357,65 @@ export type Effect =
    */
   | { kind: 'teamBuff'; attack: number; health: number }
   /**
-   * Twilight-Runt (issue #110) — single-unit fusion of Dawn-Runt/Dusk-Runt,
-   * replacing the pair's "dead half of the day" problem: instead of two
-   * units that each rely on `teamBuff` + `Ability.condition.timeOfDay` (so
-   * one of them is a complete no-op every battle), this bakes BOTH halves
-   * onto one `startOfBattle` ability with NO `condition` at all. The
-   * ability always fires (once per unit instance, same fire-once rule as
-   * every other `startOfBattle` buff), and picks which half's magnitudes to
-   * apply from `Lineup.timeOfDay` at apply time — see the `teamBuffByTime`
-   * case in sim.ts's `applyEffect` for exactly where that branch happens.
-   * `timeOfDay` omitted (pre-#12 lineups, every existing golden log) hits
-   * neither `beforeNoon` nor `afterNoon`, so it no-ops exactly like the
-   * `condition` mechanism does when the gate doesn't match — same
-   * golden-log-preserving guarantee, different mechanism.
+   * Twilight-Runt (issue #110; wave-based rework, 2026-07-16) — single-unit
+   * fusion of Dawn-Runt/Dusk-Runt, replacing the pair's "dead half of the
+   * day" problem. The FIRST version of this fix (`teamBuffByTime`, removed)
+   * picked one of two magnitude sets from the real-world wall-clock half of
+   * the day the battle started in (`Lineup.timeOfDay`). That fixed the
+   * original "which unit do I bring" dead-card problem, but created two new
+   * ones: the split was invisible to the player (decided by the clock, not
+   * a choice they made), and it collided with Boss Trial's fixed 20:00 CET
+   * fight always resolving to the same half — a structural, permanent zero
+   * on one identity axis in that mode (see git history on this comment for
+   * the full "Option 1" floor-magnitude fight that bought back from that
+   * hard zero; superseded by this rework, not worth carrying forward).
    *
-   * Magnitudes scale via `tierAttackMultiplier`/`tierHealthMultiplier`,
-   * identical to plain `teamBuff` above, and this effect is `startOfBattle`
-   * -only — the fire-once compounding-law argument for `teamBuff` applies
-   * here unchanged (see that doc comment).
+   * This version drops the wall clock entirely and keys the split to the
+   * IN-BATTLE wave count instead — `startOfWave`-triggered (fires every
+   * wave, for every unit — see `fireEntryTriggers`), not `startOfBattle`.
+   * Two independent grants, each landing at most ONCE per unit instance,
+   * ever, gated by `BattleUnit.waveBuffPhase` (see its declaration in
+   * sim.ts): the `early` dose fires the first wave this unit is alive for,
+   * the `late` dose fires the first wave `currentWave >= switchWave` holds.
+   * ADDITIVE, not a swap — the early dose is never revoked, so a battle that
+   * reaches `switchWave` ends up with BOTH doses summed. This is
+   * deliberately simpler (and cheaper to prove safe) than a
+   * revoke-and-reapply swap: no bookkeeping of who currently holds which
+   * buff, no risk of clawing back a grant from a unit that never actually
+   * received it (e.g. a pup summoned after the early dose already fired).
    *
-   * PLACEHOLDER MAGNITUDES, PENDING JESPER SIGN-OFF (issue #110's required
-   * balance gate — do not treat these as final): Twilight-Runt ships +3
-   * attack / +1 health (beforeNoon) vs +1 attack / +2 health (afterNoon),
-   * DELIBERATELY asymmetric rather than a flat 2-for-2 split. Jesper
-   * (2026-07-15): health generally outvalues attack in this sim, so a
-   * symmetric split would leave the morning half strictly worse and no one
-   * would ever ride before noon — exactly the "dead half" problem this unit
-   * exists to fix, just moved from unit-choice to timing-choice.
-   * `scripts/twilight-runt-probe.ts` measures the two halves separately (the
-   * blended 50/50 view in `all-unit-value.ts` cannot distinguish "both
-   * halves fine" from "one dead half propped up by a strong other half").
+   * Compounding-law check: each of the two grants is gated by its own
+   * fire-once transition on `waveBuffPhase` ('none' -> 'early' -> 'both'),
+   * the same invariant class as `startOfBattleFired` elsewhere in this
+   * file — once a unit instance reaches 'both', neither branch in the
+   * `teamBuffByWave` case can ever fire again for it, so total granted
+   * power over the whole 45-wave battle is bounded by `early + late`,
+   * never more, no matter how many waves are left to run.
    *
-   * UPDATE (issue #110, 2026-07-16 follow-up — "Option 1", the fixed-hour
-   * Boss Trial fix): #120 moved the Boss Trial to a fixed 20:00 CET fight,
-   * which always resolves to `afterNoon`. Because the Trial scores raw
-   * damage and a pure health grant is a linear one-time HP cushion against
-   * the Trial's exponentially-escalating boss, the ORIGINAL `afterNoon:
-   * {attack: 0, health: 2}` measured as an exact, structural +0 Trial-score
-   * contribution on a maxed board (`4486 -> 4486`, `simulateBossTrial`) —
-   * not a small-numbers problem, a hard zero every single day, forever,
-   * because 20:00 never resolves to `beforeNoon`. `beforeNoon`'s `health: 0`
-   * has no equivalent live bug (the Trial never resolves to `beforeNoon`),
-   * but was floored too for the same "no hard zero in the other stat"
-   * symmetry, per Option 1's own framing.
+   * This also fixes the Boss Trial dead-axis bug at the root instead of
+   * patching around it: Trial reuses `simulate` unmodified with phase=wave
+   * (see boss-trial.ts), so `currentWave` is just as real there as on a
+   * normal ride — a Trial run that survives to phase `switchWave` gets the
+   * late dose exactly like a ride would, no fixed-hour blind spot possible.
+   * Weaker boards that die before `switchWave` simply never see the late
+   * dose in EITHER mode — an intentional "you have to survive to earn the
+   * survival buff" shape, not a bug.
    *
-   * The floor sizes were modeled, not guessed — `twilight-runt-probe.ts`'s
-   * "Option 1 candidate sweep" section ran 4 candidates (shipped baseline
-   * plus 3 floor magnitudes) through BOTH the existing ride/depth probe and
-   * `simulateBossTrial` on T1/T2/T3 representative boards:
-   *   - {atk:3,hp:0} / {atk:1,hp:2} (floor on afterNoon only): fixes the
-   *     Trial zero and keeps afterNoon's ride-depth win intact (even
-   *     widens it, T3 gap -5.11 -> -9.13), but erodes the OTHER identity
-   *     axis hard — afterNoon's ride damage-efficiency climbs to 86-89% of
-   *     beforeNoon's at T2/T3 (was 37%), i.e. afterNoon becomes almost as
-   *     good at damage while still dominating depth, collapsing the
-   *     "meaningful timing tradeoff" this unit exists for. Also leaves
-   *     beforeNoon's health at a literal 0, failing Option 1's own ask.
-   *   - {atk:3,hp:1} / {atk:2,hp:2} (bigger afterNoon floor): preserves the
-   *     ride-depth win margin best (T2/T3 gaps stay -3.27/-4.64, close to
-   *     baseline), but erodes the damage axis WORSE (84-95% parity at
-   *     T2/T3) — afterNoon becomes near-symmetric with beforeNoon on both
-   *     axes at T3. Rejected as the most eroding of the three.
-   *   - {atk:3,hp:1} / {atk:1,hp:2} — SHIPPED. Keeps beforeNoon's ride
-   *     damage-efficiency clearly ahead at every tier (49-59% ratio, not
-   *     eroded to near-parity like the two candidates above), afterNoon
-   *     keeps its ride-depth win at T3 (gap -2.26, same sign as baseline's
-   *     -5.11, smaller margin), and the Trial's afterNoon score goes from a
-   *     hard 0 to a real (if modest, by design — see the compounding-law
-   *     argument above for why it can't be huge) positive number on every
-   *     board size tested (T1 2->4, T2-mid 258->286, T3-maxed 1050->1095).
-   *     KNOWN COST, disclosed rather than hidden: giving beforeNoon a
-   *     health floor narrowly flips which half wins ride-depth-efficiency
-   *     at T2 specifically (beforeNoon 19.93 vs afterNoon 18.30, ~8% swing
-   *     — health's outsized value for depth/survival in this sim, per the
-   *     project's standing health->>attack rule, means ANY nonzero health
-   *     floor on the attack half has an outsized depth effect). T1 and T3
-   *     both keep their existing winner. This is a real, measured tradeoff,
-   *     not an oversight — see `twilight-runt-probe.ts`'s candidate-sweep
-   *     output for the full numbers before changing these magnitudes again.
+   * PLACEHOLDER MAGNITUDES, PENDING JESPER SIGN-OFF (same gate issue #110
+   * always required, not yet re-run for this rework): early
+   * {attack: 2, health: 1}, late {attack: 1, health: 1}, switchWave 15.
+   * Deliberately NOT a straight carryover of the old {3,1}/{1,2} halves —
+   * those summed to a single dose per battle; here both eventually land in
+   * the SAME battle, so each was cut down to keep total late-battle power
+   * in the same neighborhood as the old single-dose magnitude rather than
+   * roughly doubling it. Needs a fresh balance pass — `twilight-runt-probe.ts`
+   * was deleted as part of this rework, since its entire premise was
+   * separating an externally-random 50/50 blend, which no longer exists:
+   * every battle now deterministically experiences the same wave-keyed
+   * progression, so the standard `all-unit-value.ts` measurement is
+   * sufficient going forward, no bespoke unblending probe required.
    */
-  | { kind: 'teamBuffByTime'; beforeNoon: { attack: number; health: number }; afterNoon: { attack: number; health: number } };
+  | { kind: 'teamBuffByWave'; early: { attack: number; health: number }; late: { attack: number; health: number }; switchWave: number };
 
 /**
  * Real-world half-day bucket, Copenhagen local time (issue #12) — matches the
@@ -777,18 +756,20 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   // ADDED alongside them, not a replacement. Retiring Dawn/Dusk-Runt from
   // the shop pool is issue #109's job, not this one; doing it here would
   // conflict with that issue's own SHOP_UNIT_POOL edit. Every ride now has
-  // a unit that's never a dead card regardless of which half of the day it
-  // fires in — see `teamBuffByTime`'s doc comment above for the mechanism
-  // and the placeholder-magnitude flag.
+  // a unit that's never a dead card regardless of how deep the ride goes —
+  // see `teamBuffByWave`'s doc comment above for the wave-based mechanism
+  // (2026-07-16 rework, replacing the original wall-clock split) and the
+  // placeholder-magnitude flag.
   'twilight-runt': {
     id: 'twilight-runt', name: 'Twilight-Runt', attack: 1, health: 2, cost: 4,
-    desc: 'fused of dawn and dusk, never idle: battle (before noon) mostly buffs the horde’s attack, battle (after noon) mostly buffs its health — neither half is ever a dead stat (scales ★; magnitudes pending balance sign-off, issue #110)',
+    desc: 'fused of dawn and dusk, never idle: early waves mostly buff the horde’s attack, wave 15 onward it also buffs health — neither phase is ever a dead stat (scales ★; magnitudes pending balance sign-off, issue #110)',
     ability: {
-      trigger: 'startOfBattle',
+      trigger: 'startOfWave',
       effect: {
-        kind: 'teamBuffByTime',
-        beforeNoon: { attack: 3, health: 1 },
-        afterNoon: { attack: 1, health: 2 },
+        kind: 'teamBuffByWave',
+        early: { attack: 2, health: 1 },
+        late: { attack: 1, health: 1 },
+        switchWave: 15,
       },
     },
     unlockDay: 3,

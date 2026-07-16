@@ -544,64 +544,54 @@ describe('time-of-day abilities (issue #12: Dawn-Runt/Dusk-Runt)', () => {
   });
 });
 
-describe('Twilight-Runt (issue #110: Dawn/Dusk-Runt fusion, teamBuffByTime)', () => {
-  it('grants the placeholder +3 attack / +1 health team buff before noon (magnitudes pending sign-off)', () => {
+describe('Twilight-Runt (issue #110: Dawn/Dusk-Runt fusion; 2026-07-16 wave-based rework of teamBuffByTime)', () => {
+  it('grants the placeholder early dose (+2 attack/+1 health) starting wave 1 (magnitudes pending sign-off)', () => {
     const { events } = simulate(
-      { units: [{ defId: 'twilight-runt' }, { defId: 'gutter-runt' }], timeOfDay: 'beforeNoon' },
+      lineup({ defId: 'twilight-runt' }, { defId: 'gutter-runt' }),
       gauntletOf([dummy(0, 100)])
     );
     const buffs = ofType(events, 'buff');
     // Whole team, including the caster itself — same shape as teamBuff.
     expect(buffs.length).toBe(2);
-    expect(buffs.every((b) => b.attack === 3 && b.health === 1)).toBe(true);
+    expect(buffs.every((b) => b.attack === 2 && b.health === 1)).toBe(true);
   });
 
-  it('grants the placeholder +1 attack / +2 health team buff after noon (magnitudes pending sign-off, issue #110 Option 1 floor)', () => {
+  it('does not grant the late dose before wave 15 (switchWave gate)', () => {
     const { events } = simulate(
-      { units: [{ defId: 'twilight-runt' }, { defId: 'gutter-runt' }], timeOfDay: 'afterNoon' },
-      gauntletOf([dummy(0, 100)])
+      lineup({ defId: 'twilight-runt' }, { defId: 'gutter-runt' }),
+      gauntletOf(...Array.from({ length: 14 }, () => [dummy(0, 1)]))
     );
     const buffs = ofType(events, 'buff');
+    // Only the wave-1 early dose ever fires across all 14 waves.
     expect(buffs.length).toBe(2);
-    expect(buffs.every((b) => b.attack === 1 && b.health === 2)).toBe(true);
+    expect(buffs.every((b) => b.attack === 2 && b.health === 1)).toBe(true);
   });
 
-  it('no-ops when the lineup has no timeOfDay (pre-#12 lineups are unaffected, unlike condition-gated Dawn/Dusk-Runt this is enforced inside the effect, not the ability)', () => {
+  it('adds the placeholder late dose (+1 attack/+1 health) on top of the early dose once wave 15 is reached, and never fires a third time (compounding-law check)', () => {
     const { events } = simulate(
-      { units: [{ defId: 'twilight-runt' }, { defId: 'gutter-runt' }] },
-      gauntletOf([dummy(0, 100)])
-    );
-    expect(ofType(events, 'buff')).toHaveLength(0);
-  });
-
-  it('scales the before-noon half with tier, like every other teamBuff-family magnitude', () => {
-    const { events } = simulate(
-      { units: [{ defId: 'twilight-runt', tier: 2 }, { defId: 'gutter-runt', tier: 2 }], timeOfDay: 'beforeNoon' },
-      gauntletOf([dummy(0, 500)])
+      lineup({ defId: 'twilight-runt' }, { defId: 'gutter-runt' }),
+      gauntletOf(...Array.from({ length: 20 }, () => [dummy(0, 1)]))
     );
     const buffs = ofType(events, 'buff');
-    expect(buffs.length).toBe(2);
-    // tierAttackMultiplier/tierHealthMultiplier(2) === 3, so +3atk/+1hp base -> +9atk/+3hp at tier 2.
-    expect(buffs.every((b) => b.attack === 9 && b.health === 3)).toBe(true);
+    // Early dose fires once on wave 1 (2 buffs), late dose fires once more on
+    // wave 15 (2 more buffs) — additive, not a swap — and neither re-fires on
+    // any of waves 16-20 even though the ability runs (startOfWave) every wave.
+    expect(buffs.length).toBe(4);
+    expect(buffs.filter((b) => b.attack === 2 && b.health === 1)).toHaveLength(2);
+    expect(buffs.filter((b) => b.attack === 1 && b.health === 1)).toHaveLength(2);
   });
 
-  it('scales the after-noon half with tier, like every other teamBuff-family magnitude', () => {
+  it('scales both doses with tier, like every other teamBuff-family magnitude', () => {
     const { events } = simulate(
-      { units: [{ defId: 'twilight-runt', tier: 3 }, { defId: 'gutter-runt', tier: 3 }], timeOfDay: 'afterNoon' },
-      gauntletOf([dummy(0, 500)])
+      lineup({ defId: 'twilight-runt', tier: 2 }, { defId: 'gutter-runt', tier: 2 }),
+      gauntletOf(...Array.from({ length: 15 }, () => [dummy(0, 1)]))
     );
     const buffs = ofType(events, 'buff');
-    expect(buffs.length).toBe(2);
-    // tierAttackMultiplier/tierHealthMultiplier(3) === 9, so +1atk/+2hp base -> +9atk/+18hp at tier 3.
-    expect(buffs.every((b) => b.attack === 9 && b.health === 18)).toBe(true);
-  });
-
-  it('fires once per battle, not once per wave (compounding-law check)', () => {
-    const { events } = simulate(
-      { units: [{ defId: 'twilight-runt' }, { defId: 'gutter-runt' }], timeOfDay: 'beforeNoon' },
-      gauntletOf([dummy(0, 1)], [dummy(0, 1)], [dummy(0, 1)])
-    );
-    expect(ofType(events, 'buff')).toHaveLength(2); // once per horde unit, not once per wave
+    // tierAttackMultiplier/tierHealthMultiplier(2) === 3, so early +2atk/+1hp
+    // -> +6atk/+3hp, late +1atk/+1hp -> +3atk/+3hp, both tier-scaled.
+    expect(buffs.length).toBe(4);
+    expect(buffs.filter((b) => b.attack === 6 && b.health === 3)).toHaveLength(2);
+    expect(buffs.filter((b) => b.attack === 3 && b.health === 3)).toHaveLength(2);
   });
 });
 

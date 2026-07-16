@@ -370,8 +370,11 @@
     if (!bossTrialDue(now, build.date)) return;
     // Same timedLineup pattern as every other scoring path in this file
     // (see commit 3ba9b2d): `lineupFromBuild` does NOT set `timeOfDay`, and
-    // an omitted one makes `teamBuffByTime` silently no-op. ONE timed lineup
-    // feeds the sim, the local save, AND the submitted payload, so the
+    // an omitted one makes Dawn-Runt/Dusk-Runt's condition-gated `teamBuff`
+    // silently no-op (Twilight-Runt's wave-based `teamBuffByWave` no longer
+    // depends on this — 2026-07-16 rework — but the two retired-from-shop
+    // units still do). ONE timed lineup feeds the sim, the local save, AND
+    // the submitted payload, so the
     // stored/submitted lineup reproduces the exact score it earned (issue
     // #118's replay, and any future server-side re-simulation for #81, both
     // depend on that).
@@ -555,8 +558,8 @@
       case 'backlineDamage':
         what = `adds its own current attack straight into the clash against the frontmost enemy, from any slot behind the front — takes no retaliation, but this does nothing the wave it's actually the one at the front`;
         break;
-      case 'teamBuffByTime':
-        what = `grants ${buffScale(e.beforeNoon.attack, e.beforeNoon.health)} to the whole horde riding before noon, or ${buffScale(e.afterNoon.attack, e.afterNoon.health)} riding after noon — whichever half of the day it fights in`;
+      case 'teamBuffByWave':
+        what = `grants the whole horde ${buffScale(e.early.attack, e.early.health)} on its first wave, plus ${buffScale(e.late.attack, e.late.health)} more from wave ${e.switchWave} onward — both permanent for the rest of the battle`;
         break;
       case 'chargeWhileBenched': {
         const cap = (t: number) => cellarCoilChargeCapForTier(t);
@@ -597,17 +600,12 @@
         case 'gainStats':
         case 'bequeathAttack':
         case 'chargeWhileBenched':
+        case 'teamBuffByWave':
           return '▲ buff';
         case 'teamBuff': {
           const icon = ability.condition ? (TIME_OF_DAY_ICON[ability.condition.timeOfDay] ?? '▲') : '▲';
           return `${icon} buff`;
         }
-        case 'teamBuffByTime':
-          // Twilight-Runt (#110): buffs every battle, no condition gate — the
-          // time split lives inside the effect itself, not `ability.condition`
-          // like the old Dawn/Dusk-Runt `teamBuff` case above. Show both
-          // icons since it's genuinely both, not one-or-the-other.
-          return `${TIME_OF_DAY_ICON.beforeNoon}${TIME_OF_DAY_ICON.afterNoon} buff`;
         case 'poisonFrontEnemy':
         case 'poisonLastEnemy':
         case 'poisonTarget':
