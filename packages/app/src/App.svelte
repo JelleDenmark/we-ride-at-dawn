@@ -901,6 +901,37 @@
     notice = '';
   }
 
+  // Dev: repeated `simulateDawn`/`devSkipHours` use can push `build.date`
+  // arbitrarily far ahead of real time (each jump is unbounded, there's no
+  // ceiling tying it back to `currentRideDate()`). Once that happens,
+  // `bossTrialDue`'s dev-fast-forward guard (see its doc comment) correctly
+  // refuses to fire until real time independently catches up — which, for a
+  // date pushed weeks out, means the Boss Trial looks permanently broken on
+  // that device. `freshBuild` does NOT fix this (it deliberately preserves
+  // `build.date`/`build.day`, only clearing shop/board). This button re-anchors
+  // date/day/seasonId to what a genuinely fresh build would have right now,
+  // while keeping the roster/scrap/relics intact (unlike `freshBuild`, which
+  // wipes the board) — the same carry-forward `advanceAfterDawn` uses, just
+  // targeting today instead of build.date's "next day".
+  function resetTestDate() {
+    stopReplay();
+    const today = currentRideDate();
+    const rebuilt = newBuild(today, weekdayFor(today), build.teamRelicIds);
+    build = {
+      ...rebuilt,
+      scrap: build.scrap,
+      board: build.board,
+      bench: build.bench,
+      teamRelicIds: build.teamRelicIds,
+      purchasedSlots: build.purchasedSlots,
+    };
+    saveBuild(build);
+    inspect = null;
+    pendingRelic = null;
+    pendingSwap = null;
+    notice = '';
+  }
+
   function addScrap() {
     build = { ...build, scrap: build.scrap + 10 };
     saveBuild(build);
@@ -1255,6 +1286,7 @@
     <button onclick={() => devSkipHours(6)}>⏩ +6h income</button>
     <button onclick={simulateDawn}>⏭ next day</button>
     <button onclick={freshBuild}>fresh build</button>
+    <button onclick={resetTestDate}>↺ reset test date</button>
     <button onclick={addScrap}>+10 scrap</button>
     <span class="dev-theme">theme: {theme.primary} + {theme.secondary} @ wave {theme.pivotWave}</span>
     <span class="dev-sep">·</span>
