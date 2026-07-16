@@ -263,12 +263,15 @@
   }
 
   // Daily Boss Trial (issue #107, Phase 1 — a leaderboard number only, no
-  // rewards; issue #120 — fixed hour, no player trigger). `bossTrial` is
-  // today's stored result (persistence.ts, keyed by seasonId+day — the same
-  // primitive `build.day` already is elsewhere in this file); non-null means
-  // today's fight has already resolved and stays that way until the next
-  // day/season rollover reloads it back to null.
-  let bossTrial = $state<BossTrialToday | null>(loadBossTrialToday(build.seasonId, build.day));
+  // rewards; issue #120 — fixed hour, no player trigger). `bossTrial` is the
+  // MOST RECENT stored result (persistence.ts, keyed by seasonId — the exact
+  // day it belongs to travels on `bossTrial.day`, compared against
+  // `build.day` at each use site) rather than "today's" result specifically —
+  // this is what keeps a resolved fight (and its replay) watchable across a
+  // dawn rollover as "the previous fight" instead of vanishing the moment the
+  // calendar day turns over (see the resolve effect and template below). Only
+  // a NEW resolution (next BOSS_TRIAL_HOUR) or a season rollover replaces it.
+  let bossTrial = $state<BossTrialToday | null>(loadBossTrialToday(build.seasonId));
   let bossTrialBoard = $state<BossTrialRow[]>([]);
   let bossTrialRank = $state<number | null>(null);
   let bossTrialBoardBusy = $state(false);
@@ -299,13 +302,14 @@
     return today > date || (today === date && copenhagenSeconds(now) >= BOSS_TRIAL_HOUR * 3600);
   }
 
-  // Reload the daily gate whenever the day or season changes (dawn advance,
-  // week rollover, dev fast-forward) — loadBossTrialToday's seasonId+day
-  // match already encodes "is today's trial available", so simply re-reading
-  // it here is the entire reset; no separate zeroing step like seasonBest
-  // needs on season change (that one isn't scoped to the day, this is).
+  // Reload the stored fight when the season changes (week rollover, dev
+  // fast-forward) — matches seasonBest/seasonKills' own season-only reset.
+  // Deliberately does NOT reload on every day change: unlike those two, a
+  // resolved Boss Trial should stay visible (as "the previous fight", see
+  // the template below) across a dawn rollover, not disappear until a new
+  // one actually resolves.
   $effect(() => {
-    bossTrial = loadBossTrialToday(build.seasonId, build.day);
+    bossTrial = loadBossTrialToday(build.seasonId);
   });
 
   async function refreshBossTrialBoard() {
@@ -341,10 +345,16 @@
    * save/submit a 0-damage score) rather than permanently closing today's
    * gate on an empty snapshot — if the player builds a horde later the same
    * day, this effect re-runs (it depends on `build`) and resolves then.
+   *
+   * Gates on `bossTrial.day === build.day` rather than `bossTrial !== null`:
+   * `bossTrial` now persists across a dawn rollover as "the previous fight"
+   * (see the reload effect above and the template below), so a non-null
+   * leftover from yesterday must NOT block today's fight from resolving —
+   * only an actual record for *today* should.
    */
   $effect(() => {
     void nowTick;
-    if (bossTrial !== null || build.board.length === 0) return;
+    if ((bossTrial !== null && bossTrial.day === build.day) || build.board.length === 0) return;
     if (!bossTrialDue(new Date(nowTick), build.date)) return;
     // Same timedLineup pattern as every other scoring path in this file
     // (see commit 3ba9b2d): `lineupFromBuild` does NOT set `timeOfDay`, and
@@ -356,6 +366,7 @@
     const timedLineup = { ...lineupFromBuild(build), timeOfDay: BOSS_TRIAL_TIME_OF_DAY };
     const result = simulateBossTrial(timedLineup);
     const today: BossTrialToday = {
+      day: build.day,
       damage: result.totalDamage,
       phases: result.phasesSurvived,
       lineup: timedLineup,
@@ -1398,7 +1409,9 @@
 
     {#if phase !== 'idle'}
       {#if replayKind === 'trial'}
-        <p class="ride-caption">today's Boss Trial · the horde that fought at {BOSS_TRIAL_HOUR}:00 CET</p>
+        <p class="ride-caption">
+          {bossTrial && bossTrial.day === build.day ? "today's" : 'the previous'} Boss Trial · the horde that fought at {BOSS_TRIAL_HOUR}:00 CET
+        </p>
         {#if phase === 'done' && bossTrial}
           <p class="result">
             Dealt <strong>{bossTrial.damage}</strong> damage &middot; felled {bossTrial.phases} {bossTrial.phases === 1 ? 'boss' : 'bosses'}
@@ -1501,8 +1514,11 @@
 
   <!-- Daily Boss Trial (issue #107, Phase 1 — leaderboard number only, no
        rewards yet). The trial fights the player's LIVE current board (no
-       snapshot), once per calendar day; `bossTrial` non-null means today's
-       shot is already spent (persistence.ts, keyed by seasonId+day). -->
+       snapshot), once per calendar day; `bossTrial` holds the MOST RECENT
+       resolved fight (persistence.ts, keyed by seasonId only) — `bossTrial.day
+       === build.day` means today's shot is spent, otherwise it's still
+       yesterday's (or older) fight, kept watchable as "the previous fight"
+       until the next one resolves. -->
   <div class="boss-trial">
     <div class="bt-head">
       <span class="panel-label">Boss Trial · day {build.day}/{SEASON_DAYS}</span>
@@ -1513,7 +1529,7 @@
     <p class="bt-blurb">
       Every day at {BOSS_TRIAL_HOUR}:00 CET your horde automatically faces a boss — no trigger, no preview. Fell it to reach the next phase — every phase the next boss hits half again as hard, until the horde falls. Score is total damage dealt.
     </p>
-    {#if bossTrial}
+    {#if bossTrial && bossTrial.day === build.day}
       <p class="bt-result">Today's damage: <strong>{bossTrial.damage}</strong> · felled {bossTrial.phases} {bossTrial.phases === 1 ? 'boss' : 'bosses'} · back tomorrow</p>
       <button class="watch bt-watch" onclick={watchBossTrial} disabled={phase === 'riding'}>
         ▶ watch today's trial
@@ -1524,6 +1540,12 @@
           ? `have a horde standing by before ${BOSS_TRIAL_HOUR}:00 CET — an empty board isn't scored`
           : `fights automatically at ${BOSS_TRIAL_HOUR}:00 CET`}
       </p>
+      {#if bossTrial}
+        <p class="bt-result">Previous fight: <strong>{bossTrial.damage}</strong> dmg · felled {bossTrial.phases} {bossTrial.phases === 1 ? 'boss' : 'bosses'}</p>
+        <button class="watch bt-watch" onclick={watchBossTrial} disabled={phase === 'riding'}>
+          ▶ watch previous fight
+        </button>
+      {/if}
     {/if}
     {#if bossTrialBoard.length === 0}
       <p class="lb-empty">{bossTrialBoardBusy ? 'reading the war-drums…' : 'no challengers yet this week — be the first'}</p>

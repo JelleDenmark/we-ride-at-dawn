@@ -147,12 +147,15 @@ export function loadSeasonKills(seasonId: string): number {
  * the rest of this file keys off — `build.day` (1..SEASON_DAYS, the ISO
  * weekday within the current season/week, see `BuildState.day` in
  * `shop.ts`) — per the RFC's explicit instruction not to invent a new
- * day/rollover primitive. Paired with `seasonId` (as `best`/`kills` above
- * already are) so a stored record only ever matches one exact calendar day
- * within one exact season; a season rollover *or* a day rollover both
- * naturally fail the match below and re-open the trial — no separate reset
- * step is needed the way `seasonBest`/`seasonKills` need one on season
- * change (they're scoped to the season only, not the day).
+ * day/rollover primitive.
+ *
+ * Only the most recent fight is ever stored, but unlike `best`/`kills` its
+ * `day` is part of the returned record (not just the match key): the caller
+ * needs to tell "today's fight" apart from "the last one that happened,
+ * possibly a day or more ago" to keep a replay watchable across a dawn
+ * rollover (see App.svelte's "previous fight" display) rather than losing
+ * it the moment the calendar day turns over. A season rollover still fully
+ * closes it out — `seasonId` is matched exactly, same as `best`/`kills`.
  *
  * Since #120 the trial fights automatically at a fixed hour against
  * whatever's currently persisted, rather than on a player click, so the
@@ -162,14 +165,15 @@ export function loadSeasonKills(seasonId: string): number {
  * not a separate field.
  */
 export interface BossTrialToday {
+  day: number;
   damage: number;
   phases: number;
   lineup: Lineup;
 }
 
-/** Record today's Boss Trial result — the one-shot-per-day gate flips to
- * "used" until `seasonId`/`day` next changes. */
-export function saveBossTrialToday(seasonId: string, day: number, result: BossTrialToday): void {
+/** Record a Boss Trial result for the given day — overwrites whatever was
+ * previously stored (there is only ever one "most recent fight" per season). */
+export function saveBossTrialToday(seasonId: string, day: number, result: Omit<BossTrialToday, 'day'>): void {
   try {
     localStorage.setItem(`${NS}:bosstrial`, JSON.stringify({ seasonId, day, ...result }));
   } catch {
@@ -179,12 +183,15 @@ export function saveBossTrialToday(seasonId: string, day: number, result: BossTr
   }
 }
 
-/** Today's stored Boss Trial result, or null if today's trial hasn't been
- * run yet — covers "no record at all", "a different season", "a different
- * day", and "a pre-#120 record with no stored lineup" identically, since all
- * of those mean the trial is available (the last case self-heals: it just
- * re-resolves next time the fixed hour is checked). */
-export function loadBossTrialToday(seasonId: string, day: number): BossTrialToday | null {
+/** The most recent Boss Trial result for this season, or null if none has
+ * run yet — covers "no record at all", "a different season", and "a pre-#120
+ * record with no stored lineup" identically (the last case self-heals: it
+ * just re-resolves next time the fixed hour is checked). Deliberately does
+ * NOT filter by `day` — the caller compares the returned `day` to the
+ * current `build.day` itself, to distinguish "today's fight" (already
+ * resolved) from "the previous fight" (still worth watching, but due to be
+ * superseded at the next BOSS_TRIAL_HOUR). */
+export function loadBossTrialToday(seasonId: string): BossTrialToday | null {
   try {
     const raw = localStorage.getItem(`${NS}:bosstrial`);
     if (!raw) return null;
@@ -195,8 +202,8 @@ export function loadBossTrialToday(seasonId: string, day: number): BossTrialToda
       phases: number;
       lineup?: Lineup;
     };
-    if (v.seasonId !== seasonId || v.day !== day || !v.lineup) return null;
-    return { damage: v.damage, phases: v.phases, lineup: v.lineup };
+    if (v.seasonId !== seasonId || !v.lineup) return null;
+    return { day: v.day, damage: v.damage, phases: v.phases, lineup: v.lineup };
   } catch {
     return null;
   }
