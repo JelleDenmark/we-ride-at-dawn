@@ -88,3 +88,13 @@ export {
   type BattleResult,
   type UnitView,
 } from './sim';
+export {
+  simulateBossTrial,
+  buildBossTrialGauntlet,
+  bossTrialPhaseAttack,
+  BOSS_TRIAL_BASE_ATTACK,
+  BOSS_TRIAL_HP,
+  BOSS_TRIAL_ESCALATION,
+  BOSS_TRIAL_MAX_PHASES,
+  type BossTrialResult,
+} from './boss-trial';
