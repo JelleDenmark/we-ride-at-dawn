@@ -8,6 +8,7 @@ export {
   reviveHpForTier,
   blockHitsForTier,
   poisonStacksForTier,
+  cellarCoilChargeCapForTier,
   type UnitDef,
   type Ability,
   type Effect,

@@ -58,6 +58,7 @@
     tierHealthMultiplier,
     reviveHpForTier,
     poisonStacksForTier,
+    cellarCoilChargeCapForTier,
     simulateBossTrial,
     simulateBossTrialReplay,
     type ActionResult,
@@ -532,10 +533,26 @@
       case 'poisonAllEnemies':
         what = `rots every enemy in the wave with ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) — poison bites for its full count every clash, ignores armor, and clears when the wave falls`;
         break;
+      case 'buffAdjacentByTribe':
+        what = `grants ${buffScale(e.attack, e.health)} to the rat(s) beside it (a middle seat buffs both neighbours), multiplied by how many OTHER rats on the board share its tribe — no bonus if it's the only one of its kind`;
+        break;
+      case 'backlineDamage':
+        what = `adds its own current attack straight into the clash against the frontmost enemy, from any slot behind the front — takes no retaliation, but this does nothing the wave it's actually the one at the front`;
+        break;
+      case 'teamBuffByTime':
+        what = `grants ${buffScale(e.beforeNoon.attack, e.beforeNoon.health)} to the whole horde riding before noon, or ${buffScale(e.afterNoon.attack, e.afterNoon.health)} riding after noon — whichever half of the day it fights in`;
+        break;
+      case 'chargeWhileBenched': {
+        const cap = (t: number) => cellarCoilChargeCapForTier(t);
+        what = `permanently banks +${e.attackPerWave} attack (★2 +${e.attackPerWave * 2} · ★3 +${e.attackPerWave * 3} per wave) — hard-capped at ${cap(1)} total (★2 ${cap(2)} · ★3 ${cap(3)}), after which it's a no-op for the rest of the ride`;
+        break;
+      }
     }
-    const when = def.ability.condition
+    const when = def.ability.condition?.timeOfDay
       ? `${TIME_OF_DAY_LABEL[def.ability.condition.timeOfDay] ?? ''}`
-      : '';
+      : def.ability.condition?.notFront
+        ? ' — but only on waves it survives NOT at the front'
+        : '';
     const abilityPart = `${TRIGGER_WHEN[def.ability.trigger]} it ${what}${when}.`;
     return armorSentence ? `${abilityPart} ${armorSentence}` : abilityPart;
   }
