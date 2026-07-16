@@ -549,13 +549,21 @@
           return '❋ summon';
         case 'buffBehind':
         case 'buffAdjacent':
+        case 'buffAdjacentByTribe':
         case 'gainStats':
         case 'bequeathAttack':
+        case 'chargeWhileBenched':
           return '▲ buff';
         case 'teamBuff': {
           const icon = ability.condition ? (TIME_OF_DAY_ICON[ability.condition.timeOfDay] ?? '▲') : '▲';
           return `${icon} buff`;
         }
+        case 'teamBuffByTime':
+          // Twilight-Runt (#110): buffs every battle, no condition gate — the
+          // time split lives inside the effect itself, not `ability.condition`
+          // like the old Dawn/Dusk-Runt `teamBuff` case above. Show both
+          // icons since it's genuinely both, not one-or-the-other.
+          return `${TIME_OF_DAY_ICON.beforeNoon}${TIME_OF_DAY_ICON.afterNoon} buff`;
         case 'poisonFrontEnemy':
         case 'poisonLastEnemy':
         case 'poisonTarget':
@@ -565,6 +573,8 @@
           return '✚ revive';
         case 'blockFrontHits':
           return '⛨ block';
+        case 'backlineDamage':
+          return '⚔ strike';
       }
     }
     if ((def.damageReduction ?? 0) > 0) return '⛨ armor';
