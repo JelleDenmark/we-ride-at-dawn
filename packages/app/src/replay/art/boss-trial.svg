@@ -6,25 +6,40 @@
        iron-plated slab planted on wide legs, chained to the ground it holds,
        swinging an ever-heavier mace. Bold flat shapes and thick strokes only;
        this is the one sprite the replay blows up to roughly 60x its base
-       size as the fight escalates, so there is no fine linework to survive that. -->
-  <!-- tether chain: it doesn't get bigger, it digs in -->
-  <path d="M2 57 L15 55" fill="none" stroke="#5e3120" stroke-width="3.2" stroke-linecap="round"/>
-  <circle cx="16" cy="54" r="3.2" fill="none" stroke="#201209" stroke-width="2.4"/>
-  <!-- wide planted legs -->
-  <rect x="15" y="45" width="11" height="16" rx="2" fill="#33414f" stroke="#201209" stroke-width="2.2" stroke-linejoin="round"/>
-  <rect x="30" y="45" width="11" height="16" rx="2" fill="#232c34" stroke="#201209" stroke-width="2.2" stroke-linejoin="round"/>
-  <!-- slab-plated torso: the wall -->
-  <rect x="9" y="15" width="36" height="34" rx="4" fill="#5f7288" stroke="#201209" stroke-width="2.8" stroke-linejoin="round"/>
-  <rect x="9" y="29" width="36" height="7" fill="#46586e"/>
-  <circle cx="17" cy="22" r="2.4" fill="#232c34"/>
-  <circle cx="37" cy="22" r="2.4" fill="#232c34"/>
-  <!-- hood sunk low into the shoulders -->
-  <path d="M17 15 C17 6 37 6 37 15 L37 20 L17 20 Z" fill="#33414f" stroke="#201209" stroke-width="2.4" stroke-linejoin="round"/>
-  <!-- ember eyes: the fury that escalates when nothing else does -->
-  <rect x="21" y="11" width="6" height="3.4" rx="1" fill="#e2793f"/>
-  <rect x="29" y="11" width="6" height="3.4" rx="1" fill="#e2793f"/>
-  <!-- arm raised into the chained mace -->
-  <path d="M39 22 L48 12 L52 15 L43 26 Z" fill="#5f7288" stroke="#201209" stroke-width="2.4" stroke-linejoin="round"/>
-  <circle cx="49" cy="12" r="2.6" fill="none" stroke="#201209" stroke-width="2.2"/>
-  <path d="M55,11 L52,9.5 L52.5,5.8 L50,3 L53,2 L56,4.3 L59,3 L58,6.5 L61,9 L57.5,9.5 Z" fill="#46586e" stroke="#201209" stroke-width="2.2" stroke-linejoin="round"/>
+       size as the fight escalates, so there is no fine linework to survive that.
+
+       Mirrored horizontally (wrapping `<g transform="translate(64,0) scale(-1,1)">`
+       around the original right-facing drawing, rather than hand-flipping every
+       coordinate — mechanically exact, no transcription risk). Every other unit's
+       art is authored "facing right" and the replay auto-mirrors it for gauntlet
+       placement (see ReplayPlayer.ts's UnitSprite), which is correct for assets
+       with an unambiguous directional read (a head/snout thrust one way, e.g.
+       Gnawer, Dray-Ogre). This boss's only directional cue is a raised weapon
+       arm on a squat, roughly symmetric hooded body — too weak a signal to read
+       correctly once auto-mirrored, so it rendered facing the wrong way in
+       practice. Mirroring the source here (rather than touching the shared
+       mirror logic every other enemy correctly relies on) makes the net result
+       face left after the standard gauntlet-side mirror is applied. -->
+  <g transform="translate(64,0) scale(-1,1)">
+    <!-- tether chain: it doesn't get bigger, it digs in -->
+    <path d="M2 57 L15 55" fill="none" stroke="#5e3120" stroke-width="3.2" stroke-linecap="round"/>
+    <circle cx="16" cy="54" r="3.2" fill="none" stroke="#201209" stroke-width="2.4"/>
+    <!-- wide planted legs -->
+    <rect x="15" y="45" width="11" height="16" rx="2" fill="#33414f" stroke="#201209" stroke-width="2.2" stroke-linejoin="round"/>
+    <rect x="30" y="45" width="11" height="16" rx="2" fill="#232c34" stroke="#201209" stroke-width="2.2" stroke-linejoin="round"/>
+    <!-- slab-plated torso: the wall -->
+    <rect x="9" y="15" width="36" height="34" rx="4" fill="#5f7288" stroke="#201209" stroke-width="2.8" stroke-linejoin="round"/>
+    <rect x="9" y="29" width="36" height="7" fill="#46586e"/>
+    <circle cx="17" cy="22" r="2.4" fill="#232c34"/>
+    <circle cx="37" cy="22" r="2.4" fill="#232c34"/>
+    <!-- hood sunk low into the shoulders -->
+    <path d="M17 15 C17 6 37 6 37 15 L37 20 L17 20 Z" fill="#33414f" stroke="#201209" stroke-width="2.4" stroke-linejoin="round"/>
+    <!-- ember eyes: the fury that escalates when nothing else does -->
+    <rect x="21" y="11" width="6" height="3.4" rx="1" fill="#e2793f"/>
+    <rect x="29" y="11" width="6" height="3.4" rx="1" fill="#e2793f"/>
+    <!-- arm raised into the chained mace -->
+    <path d="M39 22 L48 12 L52 15 L43 26 Z" fill="#5f7288" stroke="#201209" stroke-width="2.4" stroke-linejoin="round"/>
+    <circle cx="49" cy="12" r="2.6" fill="none" stroke="#201209" stroke-width="2.2"/>
+    <path d="M55,11 L52,9.5 L52.5,5.8 L50,3 L53,2 L56,4.3 L59,3 L58,6.5 L61,9 L57.5,9.5 Z" fill="#46586e" stroke="#201209" stroke-width="2.2" stroke-linejoin="round"/>
+  </g>
 </svg>
