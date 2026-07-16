@@ -1402,10 +1402,10 @@
       </button>
     </div>
     <p class="bt-blurb">
-      Once a day, your live horde faces a boss with no health cap — its attack escalates every phase until the horde falls. Score is total damage dealt.
+      Once a day, your live horde faces a boss. Fell it to reach the next phase — every phase the next boss hits half again as hard, until the horde falls. Score is total damage dealt.
     </p>
     {#if bossTrial}
-      <p class="bt-result">Today's damage: <strong>{bossTrial.damage}</strong> · reached phase {bossTrial.phases} · back tomorrow</p>
+      <p class="bt-result">Today's damage: <strong>{bossTrial.damage}</strong> · felled {bossTrial.phases} {bossTrial.phases === 1 ? 'boss' : 'bosses'} · back tomorrow</p>
     {:else}
       <button
         class="watch bt-run"
@@ -1426,7 +1426,7 @@
           <li class="bt-row" class:me={isMe(row)}>
             <span class="bt-rank">{i + 1}</span>
             <span class="bt-name">{row.name}{isMe(row) ? ' · you' : ''}</span>
-            <span class="bt-phases">phase {row.phases}</span>
+            <span class="bt-phases">{row.phases} felled</span>
             <span class="bt-damage">{row.damage} dmg</span>
           </li>
         {/each}
