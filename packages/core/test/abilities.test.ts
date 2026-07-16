@@ -52,6 +52,66 @@ describe('unit abilities', () => {
     expect(applied[0].targetId).not.toBe(frontId);
   });
 
+  // Issue #116: the total poison-all (Blight-Witch / Draughtsman Moe) stacks
+  // landed on the enemy side per wave are capped at poisonStacksForTier(3) = 5,
+  // so a stack of casters can't apply additively. A single high-HP dummy with 0
+  // attack lets every caster survive to startOfWave and fire; poison-all only
+  // fires at startOfWave, so summing `poisonApplied.stacks` over a one-wave sim
+  // is exactly the total poison-all budget spent that wave.
+  const poisonAllStacks = (units: Lineup['units'], waves = 1): number[] => {
+    const perWave: UnitDef[][] = Array.from({ length: waves }, () => [dummy(0, 30)]);
+    const { events } = simulate(lineup(...units), gauntletOf(...perWave));
+    return ofType(events, 'poisonApplied').map((e) => e.stacks);
+  };
+
+  it('one ★3 poison-all caster lands the full 5 stacks (at the cap, unchanged)', () => {
+    const total = poisonAllStacks([{ defId: 'blight-witch', tier: 3 }]).reduce((a, b) => a + b, 0);
+    expect(total).toBe(5);
+  });
+
+  it('one ★2 poison-all caster lands 3 stacks, untouched (under the cap)', () => {
+    const total = poisonAllStacks([{ defId: 'blight-witch', tier: 2 }]).reduce((a, b) => a + b, 0);
+    expect(total).toBe(3);
+  });
+
+  it('two ★2 casters clip 3+3=6 down to the 5 cap (2× tier-2 still viable)', () => {
+    const stacks = poisonAllStacks([
+      { defId: 'blight-witch', tier: 2 },
+      { defId: 'blight-witch', tier: 2 },
+    ]);
+    expect(stacks).toEqual([3, 2]); // second caster only gets the remaining budget
+    expect(stacks.reduce((a, b) => a + b, 0)).toBe(5);
+  });
+
+  it('three ★3 casters collapse 15 → 5 (the RatMoe stack exploit, capped)', () => {
+    const total = poisonAllStacks([
+      { defId: 'blight-witch', tier: 3 },
+      { defId: 'blight-witch', tier: 3 },
+      { defId: 'blight-witch', tier: 3 },
+    ]).reduce((a, b) => a + b, 0);
+    expect(total).toBe(5);
+  });
+
+  it('the Draughtsman Moe reskin shares the identical cap (same kit)', () => {
+    const total = poisonAllStacks([
+      { defId: 'draughtsman-moe', tier: 3 },
+      { defId: 'draughtsman-moe', tier: 3 },
+    ]).reduce((a, b) => a + b, 0);
+    expect(total).toBe(5);
+  });
+
+  it('the cap resets each wave — 3×★3 spends a fresh 5 every wave, not once', () => {
+    const stacks = poisonAllStacks(
+      [
+        { defId: 'blight-witch', tier: 3 },
+        { defId: 'blight-witch', tier: 3 },
+        { defId: 'blight-witch', tier: 3 },
+      ],
+      2
+    );
+    expect(stacks.reduce((a, b) => a + b, 0)).toBe(10); // 5 per wave × 2 waves
+  });
+
   // Issue #111 rework: Gnawer's faint payout is no longer a flat literal —
   // the rat behind inherits Gnawer's OWN current attack (tier-scaled,
   // relic-buffed) plus a bonus for the wave it died on, capped at

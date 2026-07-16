@@ -244,11 +244,17 @@ export type Effect =
    * Compounding-law note: enemies are re-instantiated every wave and
    * poison never carries across waves (see `waveClear`'s antidote, and
    * enemies simply not existing yet next wave), so this cannot accumulate
-   * across the 45-wave battle. Multiple Blight-Witches stack additively
-   * within a single wave — each one re-applies `poisonStacksForTier(tier)`
-   * to every living enemy — but that's bounded by fresh enemies next wave
-   * and the board cap on how many Blight-Witches can even be fielded, not
-   * a persistent-horde compounding vector like the shipped exploits.
+   * across the 45-wave battle.
+   *
+   * Multi-caster cap (issue #116): Blight-Witches used to stack ADDITIVELY
+   * within a wave (each re-applying `poisonStacksForTier(tier)` to every
+   * enemy), which drove RatMoe's depth-45 3× board. That stacking is now
+   * capped — the TOTAL poison-all stacks landed on the enemy side per wave
+   * is clamped to `poisonStacksForTier(3)` (see the `poisonAllApplied`
+   * budget and the `poisonAllEnemies` case in sim.ts). A lone ★3 or two ★2s
+   * are essentially unaffected; a stack of three-plus casters is not. Each
+   * caster's own per-tier value is untouched — the cap lives in the sim's
+   * per-wave accounting, mirroring Ward-Weaver's `blockCharges` cap-not-sum.
    */
   | { kind: 'poisonAllEnemies' }
   | { kind: 'gainStats'; attack: number; health: number }

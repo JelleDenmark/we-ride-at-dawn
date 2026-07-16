@@ -439,14 +439,27 @@ export function simulate(
         // Compounding-law check: enemies are re-instantiated every wave and
         // poison never persists on the horde (`waveClear`'s antidote), so
         // this per-wave AoE cannot accumulate across the 45-wave battle.
-        // Multiple Blight-Witches stack additively within a single wave
-        // (each re-applies `poisonStacksForTier(tier)` to every enemy), but
-        // that's bounded by fresh enemies next wave and the board cap on
-        // how many Blight-Witches can be fielded at once — not a
-        // persistent-horde compounding vector like the shipped exploits.
-        const stacks = poisonStacksForTier(tier);
-        for (const target of opposing(source.side)) {
-          if (target.health > 0) applyPoisonStacks(target, stacks);
+        //
+        // Multi-caster stack cap (issue #116): multiple poison-all casters
+        // (Blight-Witch / its Draughtsman Moe reskin) used to stack ADDITIVELY
+        // within a wave — the direct cause of RatMoe's season-2 depth-45 run on
+        // 3× Blight-Witch (a probe measured +10 avg depth going 0→3 casters,
+        // poison then >50% of all damage dealt, ignoring armor and the wave HP
+        // curve). We now cap the TOTAL poison-all stacks dispensed to the enemy
+        // side this wave at `poisonStacksForTier(3)` (Jesper's call, 2026-07-16:
+        // "max should equal the tier-3 damage — you can still field 2 tier-2s
+        // but not exploit a stack"). Each caster fires in board order and takes
+        // only the remaining budget: one ★3 fills it (5), two ★2s clip 3+3=6→5,
+        // 3×★3 collapses 15→5. No single caster's `poisonStacksForTier` value
+        // changes, mirroring Ward-Weaver's `blockCharges` cap-not-sum precedent.
+        const cap = poisonStacksForTier(3);
+        const remaining = cap - poisonAllApplied[source.side];
+        const stacks = Math.min(poisonStacksForTier(tier), remaining);
+        if (stacks > 0) {
+          for (const target of opposing(source.side)) {
+            if (target.health > 0) applyPoisonStacks(target, stacks);
+          }
+          poisonAllApplied[source.side] += stacks;
         }
         break;
       }
@@ -695,6 +708,22 @@ export function simulate(
    */
   let blockCharges: Record<Side, number> = { horde: 0, gauntlet: 0 };
 
+  /**
+   * Total `poisonAllEnemies` stacks already dispensed this wave, keyed by the
+   * CASTER's side (issue #116). Reset to 0 every wave (below), then each
+   * poison-all caster's contribution is capped so the running total never
+   * exceeds `poisonStacksForTier(3)` — see the `poisonAllEnemies` case in
+   * `applyEffect`. Same per-wave, `Math.max`/cap-not-sum anti-stack shape as
+   * `blockCharges` above: it stops a stack of poison-all casters (RatMoe's
+   * depth-45 3× Blight-Witch board) from applying additively without touching
+   * a single caster's `poisonStacksForTier` value, so a lone ★3 (or two ★2s,
+   * which sum to 6 and clip to the 5 cap) is essentially unaffected while
+   * 3×★3 (15 → 5) is not. Keyed by caster side so poison-all casters on one
+   * side share one budget; Plague-Bearer's single-target `poisonLastEnemy` is
+   * a different effect and is deliberately NOT counted against this cap.
+   */
+  let poisonAllApplied: Record<Side, number> = { horde: 0, gauntlet: 0 };
+
   for (let w = 0; w < gauntlet.waves.length && horde.length > 0; w++) {
     // 1-based wave number, matching the `waveStart`/`waveClear` events below
     // (`wave: w + 1`) — see `currentWave`'s declaration above `applyEffect`
@@ -714,6 +743,10 @@ export function simulate(
     // compounding-law note on `blockCharges` above. `fireEntryTriggers`
     // below re-populates it via any `blockFrontHits` watchers present.
     blockCharges = { horde: 0, gauntlet: 0 };
+    // Poison-all's per-wave stack budget resets alongside the block pool (issue
+    // #116) — see `poisonAllApplied` above. Re-filled by any `poisonAllEnemies`
+    // casters in the `fireEntryTriggers` pass below, capped at tier-3's stacks.
+    poisonAllApplied = { horde: 0, gauntlet: 0 };
 
     fireEntryTriggers(horde);
     fireEntryTriggers(enemies);
