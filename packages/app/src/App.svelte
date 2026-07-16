@@ -352,11 +352,22 @@
    * (see the reload effect above and the template below), so a non-null
    * leftover from yesterday must NOT block today's fight from resolving —
    * only an actual record for *today* should.
+   *
+   * Factored out (rather than inlined in the `$effect` below) so
+   * `simulateDawn` — the dev "next day" fast-forward button — can call it
+   * too, BEFORE it jumps `build.date` forward. Without this, that button
+   * silently skipped a still-resolvable trial: it mutates `build` directly
+   * in a click handler, with no equivalent to the real heartbeat's
+   * declaration-order guarantee (see this function's doc comment above)
+   * that lets a page reload resolve today's trial before the date moves on.
+   * Once `build.date` is ahead of the real date, `bossTrialDue`'s own
+   * dev-fast-forward guard (see its doc comment) correctly refuses to fire
+   * early for it — so a skipped trial doesn't just resolve late, it doesn't
+   * resolve at all until real time independently catches up.
    */
-  $effect(() => {
-    void nowTick;
+  function resolveBossTrialIfDue(now: Date) {
     if ((bossTrial !== null && bossTrial.day === build.day) || build.board.length === 0) return;
-    if (!bossTrialDue(new Date(nowTick), build.date)) return;
+    if (!bossTrialDue(now, build.date)) return;
     // Same timedLineup pattern as every other scoring path in this file
     // (see commit 3ba9b2d): `lineupFromBuild` does NOT set `timeOfDay`, and
     // an omitted one makes `teamBuffByTime` silently no-op. ONE timed lineup
@@ -387,6 +398,11 @@
       });
     }
     void refreshBossTrialBoard();
+  }
+
+  $effect(() => {
+    void nowTick;
+    resolveBossTrialIfDue(new Date(nowTick));
   });
 
   // Guard so an unchanged best/name/day doesn't re-POST on every rebuild.
@@ -897,6 +913,11 @@
       lastRide = ride;
       submitRun({ rideDate: build.date, lineup, result: outcome.result, dev: true });
     }
+    // Give today's Boss Trial a chance to resolve against the board as it
+    // stands RIGHT NOW, before the date jumps forward — otherwise this
+    // button can silently skip a still-resolvable trial (see
+    // `resolveBossTrialIfDue`'s doc comment).
+    resolveBossTrialIfDue(new Date());
     const dawnInterest = build.day >= SEASON_DAYS ? 0 : interestFor(build.scrap);
     stopReplay();
     build = advanceAfterDawn(build, addDay(build.date));
