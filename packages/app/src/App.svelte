@@ -549,8 +549,8 @@
       case 'poisonAllEnemies':
         what = `rots every enemy in the wave with ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) — poison bites for its full count every clash, ignores armor, and clears when the wave falls`;
         break;
-      case 'buffAdjacentByTribe':
-        what = `grants ${buffScale(e.attack, e.health)} to the rat(s) beside it (a middle seat buffs both neighbours), multiplied by how many OTHER rats on the board share its tribe — no bonus if it's the only one of its kind`;
+      case 'distributeStatsOnFaint':
+        what = `gives away its own ${buffScale(def.attack, def.health)}, split evenly across every other rat on the board — any point left over after the split goes to whichever of them is furthest forward, so nothing is wasted`;
         break;
       case 'backlineDamage':
         what = `adds its own current attack straight into the clash against the frontmost enemy, from any slot behind the front — takes no retaliation, but this does nothing the wave it's actually the one at the front`;
@@ -593,10 +593,10 @@
           return '❋ summon';
         case 'buffBehind':
         case 'buffAdjacent':
-        case 'buffAdjacentByTribe':
         case 'gainStats':
         case 'bequeathAttack':
         case 'chargeWhileBenched':
+        case 'distributeStatsOnFaint':
           return '▲ buff';
         case 'teamBuff': {
           const icon = ability.condition ? (TIME_OF_DAY_ICON[ability.condition.timeOfDay] ?? '▲') : '▲';

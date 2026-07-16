@@ -180,23 +180,36 @@ export type Effect =
    */
   | { kind: 'buffAdjacent'; attack: number; health: number }
   /**
-   * Pack-Caller (issue #88). Same shape as `buffAdjacent` — both board
-   * neighbors (whichever exist), middle placement hits both — but the
-   * magnitude is not a fixed number: it's `attack`/`health` (pre tier-scale,
-   * same as every other effect here) MULTIPLIED by a live count of how many
-   * OTHER rats currently on the board share the source's own `tribe` tag
-   * (see `UnitDef.tribe`). Counted at apply time in sim.ts, not stored on
-   * the effect — the count depends on the board, which isn't known until
-   * the battle actually starts.
+   * Pack-Caller rework (issue #88 follow-up, 2026-07-16 — replaces the
+   * original `buffAdjacentByTribe`). Jesper's read: the original ability was
+   * mechanically a lazy Press-Kin clone (identical "both neighbors, best in
+   * the middle" targeting via `buffAdjacent`), differing only by a magnitude
+   * multiplier keyed off `UnitDef.tribe` — a tag the UI never surfaces
+   * anywhere, so the two units read as interchangeable and the actual
+   * winner was invisible board trivia, not a real player choice.
    *
-   * Compounding-law note: `startOfBattle`-gated exactly like `buffAdjacent`
-   * (see `fireEntryTriggers`) — fires once per unit instance, ever, never
-   * re-fires on a later wave. The count itself is also bounded: it can
-   * never exceed `BOARD_CAP - 1` (every other slot, at most), so a maxed
-   * board with every rat sharing a tribe is the ceiling, not an unbounded
-   * multiplier. Safe under the same reasoning as `buffAdjacent`.
+   * This version drops the tribe dependency entirely and changes the shape:
+   * `faint`-triggered (not `startOfBattle`), it gives away its OWN base
+   * (tier-scaled) attack/health — exactly the numbers on its own tile —
+   * split EVENLY across every other living teammate, with any remainder
+   * (stat % survivor-count) going one point each to the FRONTMOST survivors
+   * first, so no stat point is ever lost to rounding. No parameters on the
+   * effect itself (unlike `buffBehind`/`teamBuff`'s literal `attack`/
+   * `health`): the payout is always exactly this unit's own stat line, never
+   * a separate tunable number, by design — see the sim.ts case for the
+   * "own BASE stats, not live/buffed stats" distinction and why it matters.
+   *
+   * Compounding-law note: `faint` fires once per unit instance, ever — a
+   * unit only dies once, same fire-once bound `bequeathAttack`/`gainStats`
+   * (allyFaint) already rely on. The payout is a FIXED total (this
+   * instance's own base stats, deliberately NOT its live buffed value — see
+   * sim.ts), so it cannot be inflated by whatever buffs this Pack-Caller
+   * itself received first; multiple Pack-Callers on one board each pay out
+   * independently and the combined total can never exceed the sum of their
+   * own base stats, however they chain. Zero survivors (last unit standing)
+   * is a no-op, not a crash.
    */
-  | { kind: 'buffAdjacentByTribe'; attack: number; health: number }
+  | { kind: 'distributeStatsOnFaint' }
   | { kind: 'poisonFrontEnemy'; stacks: number }
   /**
    * Plague-Bearer (issue #112, reworked from `poisonFrontEnemy`). Poisons
@@ -518,14 +531,16 @@ export interface UnitDef {
    */
   unlockDay?: number;
   /**
-   * Build-around tag (issue #88: Pack-Caller). Purely descriptive on every
-   * unit except Pack-Caller — it's the count Pack-Caller's
-   * `buffAdjacentByTribe` scans the board for. Optional and freeform-ish
-   * (kept to a small fixed vocabulary in practice: "runt", "plague",
-   * "brute", "swarm"); a unit with no obvious kinship gets no tag rather
-   * than a forced one. Tagging is a subjective flavor/mechanics read — see
-   * the tagging rationale next to `UNIT_DEFS` below and the PR description
-   * for issue #88.
+   * Build-around tag (issue #88: Pack-Caller). Originally the count Pack-
+   * Caller's `buffAdjacentByTribe` scanned the board for; that ability was
+   * reworked away from tribe entirely (2026-07-16 — see
+   * `distributeStatsOnFaint`'s doc comment), so this is now PURELY
+   * DESCRIPTIVE on every unit, including Pack-Caller — nothing reads it
+   * mechanically. Optional and freeform-ish (kept to a small fixed
+   * vocabulary in practice: "runt", "plague", "brute", "swarm"); a unit with
+   * no obvious kinship gets no tag rather than a forced one. Tagging is a
+   * subjective flavor read — see the tagging rationale next to `UNIT_DEFS`
+   * below and the PR description for issue #88.
    */
   tribe?: string;
   /**
@@ -597,6 +612,15 @@ export interface Lineup {
  *     None of these read as belonging to an obvious kinship group — forcing
  *     a tag on a unit with no real thematic tribe would just be noise (the
  *     issue explicitly says use judgment, not "tag everything").
+ *
+ * NON-MECHANICAL as of the 2026-07-16 Pack-Caller rework: `tribe` was
+ * counting fodder for `buffAdjacentByTribe`, and Pack-Caller was its only
+ * reader — that ability is gone (see `distributeStatsOnFaint`'s doc comment
+ * above), so no unit currently reads this field at all. Left in place as
+ * flavor/taxonomy (the categorization above still describes the roster
+ * honestly) rather than stripped from every tagged unit, since a future
+ * tribe-synergy mechanic may want it — but don't assume it does anything
+ * today.
  */
 export const UNIT_DEFS: Record<string, UnitDef> = {
   pup: { id: 'pup', name: 'Pup', attack: 1, health: 1, cost: 0, tribe: 'runt' },
@@ -741,21 +765,21 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     unlockDay: 3,
     tribe: 'runt',
   },
-  // Issue #88: Pack-Caller — the build-around unit for the new `tribe` tag.
-  // Stats (attack 2 / health 3 / cost 5) are the design doc's rough starting
+  // Issue #88, reworked 2026-07-16 (see `distributeStatsOnFaint`'s doc
+  // comment above for the full rationale — was a lazy Press-Kin clone with
+  // an invisible-mechanic magnitude). Stats (attack 2 / health 3 / cost 5)
+  // are unchanged from the original, still the design doc's rough starting
   // point, NOT final — flagged for Jesper's balance sign-off, same as every
-  // other tentative stat line in this file. Tagged "runt" itself (see the
-  // tagging-rationale comment above `UNIT_DEFS`): it's a rallying caller for
-  // the horde's little guys, and "runt" already has the deepest bench, which
-  // makes an all-runt board an actually-buildable theme.
+  // other tentative stat line in this file. Still tagged "runt" as pure
+  // flavor (see the tagging-rationale comment above `UNIT_DEFS`) — no unit
+  // currently reads `tribe` mechanically now that this was its only reader.
   'pack-caller': {
     id: 'pack-caller', name: 'Pack-Caller', attack: 2, health: 3, cost: 5,
-    desc: 'battle: buffs the rats beside it +1/+1 for each other same-tribe rat on the board (scales ★)',
-    // startOfBattle: fires once per unit instance, ever (see `fireEntryTriggers`
-    // and the compounding-law note on `buffAdjacentByTribe` above) — bounded
-    // by board size (at most BOARD_CAP-1 other rats to count), and cannot
-    // re-fire on a later wave to re-stack. Safe under the compounding law.
-    ability: { trigger: 'startOfBattle', effect: { kind: 'buffAdjacentByTribe', attack: 1, health: 1 } },
+    desc: 'faint: gives away its own attack/health, split evenly across the rest of the horde (scales ★)',
+    // faint: fires once per unit instance, ever — a unit only dies once, so
+    // this can't re-fire on a later wave. See `distributeStatsOnFaint`'s
+    // doc comment above for the full compounding-law sign-off.
+    ability: { trigger: 'faint', effect: { kind: 'distributeStatsOnFaint' } },
     tribe: 'runt',
   },
   // Issue #86: Slink-Rat — first consumer of the `backlineDamage` primitive

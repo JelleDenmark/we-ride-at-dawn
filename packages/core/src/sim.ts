@@ -98,8 +98,6 @@ interface BattleUnit {
   tier: number;
   side: Side;
   ability?: Ability;
-  /** Pack-Caller's `buffAdjacentByTribe` (issue #88) counts board rats sharing this tag. */
-  tribe?: string;
   relics: RelicDef[];
   poison: number;
   firstAttackDone: boolean;
@@ -196,7 +194,6 @@ export function simulate(
       tier,
       side,
       ability: def.ability,
-      tribe: def.tribe,
       relics,
       poison: 0,
       firstAttackDone: false,
@@ -356,28 +353,38 @@ export function simulate(
         for (const target of targets) buff(target, effect.attack * tierAttackMultiplier(tier), effect.health * tierHealthMultiplier(tier));
         break;
       }
-      case 'buffAdjacentByTribe': {
-        // Pack-Caller (issue #88). Same adjacency shape as `buffAdjacent`
-        // above (both neighbors, whichever exist — middle placement hits
-        // both), but the magnitude is multiplied by a live count of OTHER
-        // board rats sharing this unit's own `tribe` tag. `startOfBattle`
-        // (fireEntryTriggers), so — same as `buffAdjacent` — `removed` is
-        // never true here and `index` is always the live board position.
-        // Compounding-law note is on the Effect's doc comment in
-        // data/units.ts: fires once per instance, ever, and the count is
-        // bounded by board size (at most BOARD_CAP-1 other units), so
-        // there's no per-wave re-stacking vector.
-        const targets: BattleUnit[] = [];
-        if (index > 0) targets.push(board[index - 1]);
-        if (index < board.length - 1) targets.push(board[index + 1]);
-        if (targets.length > 0 && source.tribe) {
-          const sameTribeCount = board.filter((u) => u !== source && u.tribe === source.tribe).length;
-          if (sameTribeCount > 0) {
-            const atk = effect.attack * sameTribeCount * tierAttackMultiplier(tier);
-            const hp = effect.health * sameTribeCount * tierHealthMultiplier(tier);
-            for (const target of targets) buff(target, atk, hp);
-          }
-        }
+      case 'distributeStatsOnFaint': {
+        // Pack-Caller rework (issue #88 follow-up). Only ever wired to
+        // `faint`, so `removed` is always true and `board` has already had
+        // this unit spliced out (same precondition `bequeathAttack` above
+        // relies on) — it's already exactly "the rest of the team," no
+        // manual filtering needed.
+        const survivors = board;
+        if (survivors.length === 0) break; // Last unit standing — no-op, no crash.
+        // Own BASE (tier-scaled) stats — deliberately `source.defId`'s
+        // UnitDef, NOT `source.attack`/`source.maxHealth` (which may already
+        // be inflated by whatever startOfBattle buffs this instance
+        // received — see the Effect's doc comment in data/units.ts for why
+        // that matters for the compounding-law bound). This duplicates
+        // `unitStats`'s formula (shop.ts) rather than importing it: shop.ts
+        // already imports BOARD_CAP/COMBAT_CAP_BONUS from this module, so
+        // the reverse import would cycle.
+        const baseDef = UNIT_DEFS[source.defId];
+        const totalAttack = baseDef.attack * tierAttackMultiplier(tier);
+        const totalHealth = baseDef.health * tierHealthMultiplier(tier);
+        const n = survivors.length;
+        const perUnitAttack = Math.floor(totalAttack / n);
+        const perUnitHealth = Math.floor(totalHealth / n);
+        const remainderAttack = totalAttack - perUnitAttack * n;
+        const remainderHealth = totalHealth - perUnitHealth * n;
+        // Remainder (stat % survivor-count) goes one point each to the
+        // FRONTMOST survivors first (board index order), so the full total
+        // is always distributed — nothing lost to rounding.
+        survivors.forEach((target, i) => {
+          const atk = perUnitAttack + (i < remainderAttack ? 1 : 0);
+          const hp = perUnitHealth + (i < remainderHealth ? 1 : 0);
+          if (atk > 0 || hp > 0) buff(target, atk, hp);
+        });
         break;
       }
       case 'poisonFrontEnemy': {
