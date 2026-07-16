@@ -302,17 +302,19 @@ describe('relics', () => {
     expect(start.horde[0].attack).toBe(3);
   });
 
-  it('Glass Shard adds +3 to the first hit of each wave', () => {
+  it('Glass Shard adds damage equal to the current wave number to the first hit of each wave', () => {
     const { events } = simulate(
       lineup({ defId: 'gutter-runt', relicIds: ['glass-shard'] }),
       gauntletOf([dummy(0, 10)], [dummy(0, 10)])
     );
     const hits = ofType(events, 'damage').filter((d) => d.amount > 0);
-    // First hit of wave 1 is boosted (1 + 3), the rest are 1...
-    expect(hits[0].amount).toBe(4);
+    // First hit of wave 1 is boosted by the wave number (1 + 1 = 2), the rest are 1...
+    expect(hits[0].amount).toBe(2);
     expect(hits[1].amount).toBe(1);
-    // ...and it fires anew on the first hit of wave 2.
-    expect(hits.filter((h) => h.amount === 4)).toHaveLength(2);
+    // ...and it fires anew on the first hit of wave 2, boosted by wave 2 (1 + 2 = 3).
+    const boosted = hits.filter((h) => h.amount > 1);
+    expect(boosted).toHaveLength(2);
+    expect(boosted[1].amount).toBe(3);
   });
 
   it('Weeping Boil damages all enemies when the bearer faints', () => {

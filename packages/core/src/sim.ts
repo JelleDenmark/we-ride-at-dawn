@@ -777,7 +777,7 @@ export function simulate(
       events.push({ type: 'clash', hordeId: front.instanceId, enemyId: foe.instanceId });
 
       const bonusOf = (u: BattleUnit): number =>
-        u.firstAttackDone ? 0 : u.relics.reduce((s, r) => s + (r.firstHitBonus ?? 0), 0);
+        u.firstAttackDone ? 0 : u.relics.reduce((s, r) => s + (r.firstHitBonusScalesWithWave ? currentWave : (r.firstHitBonus ?? 0)), 0);
       const damageOut = front.attack + bonusOf(front);
       const damageIn = foe.attack + bonusOf(foe);
       front.firstAttackDone = true;

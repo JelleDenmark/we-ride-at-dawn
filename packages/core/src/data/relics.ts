@@ -8,6 +8,17 @@ export interface RelicDef {
   health?: number;
   /** Extra damage on the unit's first attack of the battle (Glass Shard). */
   firstHitBonus?: number;
+  /**
+   * Glass Shard rework (Jesper's call, 2026-07-16): the first-hit bonus
+   * damage scales with the current wave number instead of a flat literal,
+   * and is deliberately left UNCAPPED — the compounding-law risk (this
+   * relic can eventually out-damage the rest of the build by late waves)
+   * was explicitly accepted rather than capped. Recomputed fresh from
+   * `currentWave` on every wave's first hit; nothing is stored on the
+   * unit, so it cannot stack within a wave or carry over — it only grows
+   * because the wave number itself grows.
+   */
+  firstHitBonusScalesWithWave?: boolean;
   /** On faint, deal this much damage to every enemy (Weeping Boil). */
   onFaintDamageAll?: number;
   /** Heal this much at the start of each combat tick (Fat Tick). */
@@ -41,7 +52,7 @@ export const RELIC_DEFS: Record<string, RelicDef> = {
   },
   'glass-shard': {
     id: 'glass-shard', name: 'Glass Shard', scope: 'unit', cost: 4,
-    desc: '+3 dmg, first hit each wave', firstHitBonus: 3,
+    desc: '+dmg = wave number, first hit each wave', firstHitBonusScalesWithWave: true,
   },
   'weeping-boil': {
     id: 'weeping-boil', name: 'Weeping Boil', scope: 'unit', cost: 4,
