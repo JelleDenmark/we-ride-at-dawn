@@ -543,7 +543,7 @@ describe('time-of-day abilities (issue #12: Dawn-Runt/Dusk-Runt)', () => {
 });
 
 describe('Twilight-Runt (issue #110: Dawn/Dusk-Runt fusion, teamBuffByTime)', () => {
-  it('grants the placeholder +3 team attack before noon (magnitudes pending sign-off)', () => {
+  it('grants the placeholder +3 attack / +1 health team buff before noon (magnitudes pending sign-off)', () => {
     const { events } = simulate(
       { units: [{ defId: 'twilight-runt' }, { defId: 'gutter-runt' }], timeOfDay: 'beforeNoon' },
       gauntletOf([dummy(0, 100)])
@@ -551,17 +551,17 @@ describe('Twilight-Runt (issue #110: Dawn/Dusk-Runt fusion, teamBuffByTime)', ()
     const buffs = ofType(events, 'buff');
     // Whole team, including the caster itself — same shape as teamBuff.
     expect(buffs.length).toBe(2);
-    expect(buffs.every((b) => b.attack === 3 && b.health === 0)).toBe(true);
+    expect(buffs.every((b) => b.attack === 3 && b.health === 1)).toBe(true);
   });
 
-  it('grants the placeholder +2 team health after noon (magnitudes pending sign-off)', () => {
+  it('grants the placeholder +1 attack / +2 health team buff after noon (magnitudes pending sign-off, issue #110 Option 1 floor)', () => {
     const { events } = simulate(
       { units: [{ defId: 'twilight-runt' }, { defId: 'gutter-runt' }], timeOfDay: 'afterNoon' },
       gauntletOf([dummy(0, 100)])
     );
     const buffs = ofType(events, 'buff');
     expect(buffs.length).toBe(2);
-    expect(buffs.every((b) => b.attack === 0 && b.health === 2)).toBe(true);
+    expect(buffs.every((b) => b.attack === 1 && b.health === 2)).toBe(true);
   });
 
   it('no-ops when the lineup has no timeOfDay (pre-#12 lineups are unaffected, unlike condition-gated Dawn/Dusk-Runt this is enforced inside the effect, not the ability)', () => {
@@ -572,26 +572,26 @@ describe('Twilight-Runt (issue #110: Dawn/Dusk-Runt fusion, teamBuffByTime)', ()
     expect(ofType(events, 'buff')).toHaveLength(0);
   });
 
-  it('scales the before-noon attack half with tier, like every other teamBuff-family magnitude', () => {
+  it('scales the before-noon half with tier, like every other teamBuff-family magnitude', () => {
     const { events } = simulate(
       { units: [{ defId: 'twilight-runt', tier: 2 }, { defId: 'gutter-runt', tier: 2 }], timeOfDay: 'beforeNoon' },
       gauntletOf([dummy(0, 500)])
     );
     const buffs = ofType(events, 'buff');
     expect(buffs.length).toBe(2);
-    // tierAttackMultiplier(2) === 3, so +3 base -> +9 at tier 2.
-    expect(buffs.every((b) => b.attack === 9 && b.health === 0)).toBe(true);
+    // tierAttackMultiplier/tierHealthMultiplier(2) === 3, so +3atk/+1hp base -> +9atk/+3hp at tier 2.
+    expect(buffs.every((b) => b.attack === 9 && b.health === 3)).toBe(true);
   });
 
-  it('scales the after-noon health half with tier, like every other teamBuff-family magnitude', () => {
+  it('scales the after-noon half with tier, like every other teamBuff-family magnitude', () => {
     const { events } = simulate(
       { units: [{ defId: 'twilight-runt', tier: 3 }, { defId: 'gutter-runt', tier: 3 }], timeOfDay: 'afterNoon' },
       gauntletOf([dummy(0, 500)])
     );
     const buffs = ofType(events, 'buff');
     expect(buffs.length).toBe(2);
-    // tierHealthMultiplier(3) === 9, so +2 base -> +18 at tier 3.
-    expect(buffs.every((b) => b.attack === 0 && b.health === 18)).toBe(true);
+    // tierAttackMultiplier/tierHealthMultiplier(3) === 9, so +1atk/+2hp base -> +9atk/+18hp at tier 3.
+    expect(buffs.every((b) => b.attack === 9 && b.health === 18)).toBe(true);
   });
 
   it('fires once per battle, not once per wave (compounding-law check)', () => {
