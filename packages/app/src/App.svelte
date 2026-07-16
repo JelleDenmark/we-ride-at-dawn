@@ -59,6 +59,7 @@
     reviveHpForTier,
     poisonStacksForTier,
     simulateBossTrial,
+    simulateBossTrialReplay,
     type ActionResult,
     type BattleResult,
     type BuildState,
@@ -574,6 +575,12 @@
   let player: ReplayPlayer | undefined;
   let phase: 'idle' | 'riding' | 'done' = $state('idle');
   let result: BattleResult | null = $state(null);
+  // Which replay `player` last played — the stage/controls are shared
+  // (single ReplayPlayer instance, see onMount below), but the caption and
+  // result copy read differently for an hourly ride ("wave X") vs a Boss
+  // Trial replay ("felled N bosses"). Defaults to 'ride' since that's the
+  // only kind before issue #118.
+  let replayKind: 'ride' | 'trial' = $state('ride');
 
   // Stale-tab fix (PWA-SCOPE.md Phase 1): a deployed build never reaches an
   // already-open tab on its own. `updateAvailable` flips true when the
@@ -1083,6 +1090,7 @@
     inspect = null;
     pendingRelic = null;
     pendingSwap = null;
+    replayKind = 'ride';
     phase = 'riding';
     result = null;
     player.speed = speed;
@@ -1096,6 +1104,37 @@
     // that no longer exists, so don't write it over the fresh idle state.
     if (gen !== replayGeneration) return;
     result = outcome.result;
+    phase = 'done';
+  }
+
+  /**
+   * Watch TODAY's Boss Trial — the historic, already-resolved fight (issue
+   * #118), not a live preview. Only ever callable once `bossTrial` is
+   * non-null (the template gates the button on that), so `bossTrial.lineup`
+   * is always the exact timed lineup that fought at BOSS_TRIAL_HOUR — per
+   * commit 3ba9b2d and boss-trial.ts's `simulateBossTrialReplay` doc comment,
+   * re-simulating that SAME lineup reproduces the identical event stream
+   * byte-for-byte, so this is freely re-watchable (unlike fighting the
+   * trial itself, which #120 gates to once/day) — no gate here at all.
+   */
+  async function watchBossTrial() {
+    if (!player || phase === 'riding' || !bossTrial) return;
+    inspect = null;
+    pendingRelic = null;
+    pendingSwap = null;
+    replayKind = 'trial';
+    phase = 'riding';
+    result = null;
+    player.speed = speed;
+    const events = simulateBossTrialReplay(bossTrial.lineup);
+    const gen = replayGeneration;
+    await player.play(events);
+    // Same stale-replay guard as watchRide: a build/season change mid-play
+    // shouldn't clobber a fresh idle state with a result for a stale watch.
+    if (gen !== replayGeneration) return;
+    // The Boss Trial has no BattleResult of its own (simulateBossTrialReplay
+    // returns only events) — the result line below reads `bossTrial` instead
+    // of `result` for trial replays, so `result` intentionally stays null.
     phase = 'done';
   }
 
@@ -1348,15 +1387,25 @@
     {/if}
 
     {#if phase !== 'idle'}
-      <p class="ride-caption">the next hourly ride · your horde as it stands now</p>
-      {#if result}
-        <p class="result">
-          Your horde rides to <strong>wave {result.wavesCleared}</strong>
-          &middot; {result.survivors.length > 0
-            ? `⚑ the drains cleared — ${result.survivors.length} rats ride home`
-            : 'until the last rat falls'}
-        </p>
-        <p class="result-note">the drains hold steady through the day, changing anew each dawn</p>
+      {#if replayKind === 'trial'}
+        <p class="ride-caption">today's Boss Trial · the horde that fought at {BOSS_TRIAL_HOUR}:00 CET</p>
+        {#if phase === 'done' && bossTrial}
+          <p class="result">
+            Dealt <strong>{bossTrial.damage}</strong> damage &middot; felled {bossTrial.phases} {bossTrial.phases === 1 ? 'boss' : 'bosses'}
+          </p>
+          <p class="result-note">watch it again any time — this fight already happened, so replaying it never costs you today's shot</p>
+        {/if}
+      {:else}
+        <p class="ride-caption">the next hourly ride · your horde as it stands now</p>
+        {#if result}
+          <p class="result">
+            Your horde rides to <strong>wave {result.wavesCleared}</strong>
+            &middot; {result.survivors.length > 0
+              ? `⚑ the drains cleared — ${result.survivors.length} rats ride home`
+              : 'until the last rat falls'}
+          </p>
+          <p class="result-note">the drains hold steady through the day, changing anew each dawn</p>
+        {/if}
       {/if}
       <button class="ride" onclick={backToWarren} disabled={phase === 'riding'}>
         {phase === 'riding' ? 'Riding…' : '← back to the warren'}
@@ -1456,6 +1505,9 @@
     </p>
     {#if bossTrial}
       <p class="bt-result">Today's damage: <strong>{bossTrial.damage}</strong> · felled {bossTrial.phases} {bossTrial.phases === 1 ? 'boss' : 'bosses'} · back tomorrow</p>
+      <button class="watch bt-watch" onclick={watchBossTrial} disabled={phase === 'riding'}>
+        ▶ watch today's trial
+      </button>
     {:else}
       <p class="bt-hint">
         {build.board.length === 0
@@ -2603,6 +2655,10 @@
     margin: 4px 0 10px;
     font-size: 14px;
     color: #d4af37;
+  }
+
+  .bt-watch {
+    margin: 0 0 12px;
   }
 
   .bt-hint {

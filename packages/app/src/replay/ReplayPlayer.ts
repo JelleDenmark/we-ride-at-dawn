@@ -11,6 +11,14 @@ const UNIT_SIZE = 64;
 
 const SIDE_COLOR: Record<Side, number> = { horde: 0x8a4b2f, gauntlet: 0x46586e };
 
+// Issue #118: the Boss Trial's boss (defId 'boss-trial', see
+// packages/core/src/boss-trial.ts) grows 1.5^phase — the same factor its
+// attack grows by, so its size literally reads as "how hard it hits". No
+// normal ride gauntlet ever contains this defId, so this constant and the
+// scaling it drives are entirely dormant on the ride-replay path.
+const BOSS_TRIAL_DEF_ID = 'boss-trial';
+const BOSS_TRIAL_SCALE_BASE = 1.5;
+
 // Populated once by ReplayPlayer.init(); unknown ids fall back to a plain rect.
 const ART_TEXTURE = new Map<string, Texture>();
 
@@ -63,13 +71,25 @@ class UnitSprite {
   root = new Container();
   private statsText: Text;
 
-  constructor(view: UnitView) {
+  /**
+   * `growth` (default 1) is the Boss Trial's 1.5^phase visual scale (issue
+   * #118) — applied to the body only (loaded texture OR the missing-texture
+   * fallback rect below, both anchored/drawn centered on `root`'s local
+   * origin, so growth scales symmetrically without shifting the sprite off
+   * its laid-out position). Name/stats text stay unscaled and readable; the
+   * body is left to overflow the fixed-size canvas at deep phases (~1640px
+   * at phase 8) by design — Pixi simply doesn't render past the canvas
+   * bounds, so this "breaches" without distorting any other sprite's
+   * layout. Every non-Boss-Trial caller passes the default 1, so this is a
+   * pure no-op for normal ride replays.
+   */
+  constructor(view: UnitView, growth = 1) {
     const texture = ART_TEXTURE.get(view.defId);
     let body: Container;
     if (texture) {
       const sprite = new Sprite(texture);
       sprite.anchor.set(0.5);
-      const scale = UNIT_SIZE / Math.max(texture.width, texture.height);
+      const scale = (UNIT_SIZE / Math.max(texture.width, texture.height)) * growth;
       // Sprites are drawn facing right; mirror the gauntlet side to face
       // the horde. Text stays a separate, unmirrored child of root.
       sprite.scale.set(view.side === 'gauntlet' ? -scale : scale, scale);
@@ -79,6 +99,7 @@ class UnitSprite {
         .roundRect(-UNIT_SIZE / 2, -UNIT_SIZE / 2, UNIT_SIZE, UNIT_SIZE, 8)
         .fill(SIDE_COLOR[view.side])
         .stroke({ color: 0x000000, width: 2 });
+      if (growth !== 1) body.scale.set(growth);
     }
     const name = new Text({
       text: view.tier > 1 ? `${view.name} ★${view.tier}` : view.name,
@@ -183,7 +204,17 @@ export class ReplayPlayer {
         break;
       }
       case 'waveStart': {
-        for (const unit of event.enemies) this.spawn(unit, this.order.gauntlet.length, W + 80);
+        // Boss Trial phase = wave (see boss-trial.ts's doc comment), so the
+        // 1-based `event.wave` straight off this event is the 0-based phase
+        // index the boss's 1.5^phase growth uses — no separate wave-boundary
+        // tracking needed beyond what this event already carries. Non-boss
+        // enemies (every normal ride gauntlet) always get growth 1.
+        const phaseIndex = event.wave - 1;
+        for (const unit of event.enemies) {
+          const growth =
+            unit.defId === BOSS_TRIAL_DEF_ID ? BOSS_TRIAL_SCALE_BASE ** phaseIndex : 1;
+          this.spawn(unit, this.order.gauntlet.length, W + 80, growth);
+        }
         this.showBanner(`WAVE ${event.wave}`);
         await this.layout(this.d(320));
         await wait(this.d(300));
@@ -295,8 +326,8 @@ export class ReplayPlayer {
     }
   }
 
-  private spawn(view: UnitView, index: number, fromX: number): void {
-    const sprite = new UnitSprite(view);
+  private spawn(view: UnitView, index: number, fromX: number, growth = 1): void {
+    const sprite = new UnitSprite(view, growth);
     sprite.root.x = fromX;
     sprite.root.y = GROUND_Y;
     this.app.stage.addChild(sprite.root);

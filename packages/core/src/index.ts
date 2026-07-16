@@ -90,6 +90,7 @@ export {
 } from './sim';
 export {
   simulateBossTrial,
+  simulateBossTrialReplay,
   buildBossTrialGauntlet,
   bossTrialPhaseAttack,
   BOSS_TRIAL_BASE_ATTACK,
