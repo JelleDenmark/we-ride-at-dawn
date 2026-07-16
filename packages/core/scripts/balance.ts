@@ -25,13 +25,18 @@ const STRATEGIES: Record<string, Lineup> = {
       { defId: 'gutter-runt' },
     ],
   },
+  // 2× Plague-Bearer + 2× Blight-Witch is the poison core at exactly the
+  // 24-scrap cap (the filler Gutter-Runt that used to round this out pushed it
+  // to 26 and tripped the budget guard below — Blight-Witch at cost 8 leaves no
+  // room for it). 4 units, same board shape as `bruiser`. Blight-Witch's kit is
+  // shared by its Draughtsman Moe reskin (#115) and now carries the #116
+  // multi-caster poison cap, though at ★1 here the 2× AoE (1+1) is well under it.
   plague: {
     units: [
       { defId: 'plague-bearer' },
       { defId: 'blight-witch' },
       { defId: 'plague-bearer' },
       { defId: 'blight-witch' },
-      { defId: 'gutter-runt' },
     ],
   },
   sacrifice: {
