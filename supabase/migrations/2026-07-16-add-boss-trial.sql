@@ -53,11 +53,40 @@ create table if not exists public.boss_trial_scores (
 
 -- 2. Public read access mirrors the existing `scores` table's setup: the app
 --    reads the board directly via PostgREST GET (fetchBossTrialTop /
---    fetchBossTrialRank in boss-trial-board.ts), so anon needs SELECT. There
---    is no direct INSERT/UPDATE grant to anon — all writes go through the
---    security-definer RPC below, which is what keeps the greatest()/
---    day-carry upsert logic from being bypassed by a raw POST.
+--    fetchBossTrialRank in boss-trial-board.ts), so anon needs SELECT.
+--
+--    RLS IS LOAD-BEARING HERE — DO NOT DROP IT. A `grant select` alone does
+--    NOT restrict anon to reading. Supabase's default privileges for new
+--    tables in `public` already hand anon INSERT/UPDATE/DELETE/TRUNCATE, so
+--    without RLS the anon key (which ships in the client bundle, readable by
+--    anyone) could raw-POST scores that bypass the greatest()/day-carry logic
+--    in the RPC below, overwrite other riders' rows, or DELETE/TRUNCATE the
+--    whole board. Enabling RLS with a single read-only policy is what actually
+--    reduces anon to SELECT — exactly how the existing `scores` table is set
+--    up (RLS on + a lone "scores public read" SELECT policy), and `runs`
+--    ("anonymous inserts only") and `feedback` (RLS on, zero policies =
+--    fully private) follow the same pattern. Every table in this schema
+--    enables RLS; a new one must too.
+--
+--    The submit RPC below is `security definer`, so it BYPASSES RLS and can
+--    still write — which is the point: writes go through the RPC's upsert
+--    logic or not at all.
 grant select on public.boss_trial_scores to anon;
+alter table public.boss_trial_scores enable row level security;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'boss_trial_scores'
+      and policyname = 'boss trial public read'
+  ) then
+    create policy "boss trial public read"
+      on public.boss_trial_scores for select to anon using (true);
+  end if;
+end
+$$;
 
 -- 3. Upsert RPC — verbatim structural mirror of submit_score's body
 --    (2026-07-06-add-kills.sql) with depth/kills swapped for damage/phases:
