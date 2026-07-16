@@ -304,7 +304,20 @@
     if (bossTrial !== null || bossTrialRunning || build.board.length === 0) return;
     bossTrialRunning = true;
     try {
-      const result = simulateBossTrial(lineupFromBuild(build));
+      // Thread the wall clock in exactly like every ride does (see watchRide /
+      // the idle-accrual paths): `lineupFromBuild` does NOT set `timeOfDay`,
+      // and an omitted `timeOfDay` makes `teamBuffByTime` hit neither branch
+      // and silently no-op — so Twilight-Runt's whole kit was doing nothing in
+      // the one mode built to measure how hard a build hits. The trial is
+      // scored at the hour it's fought, same as a ride.
+      // ONE timed lineup, used for both the scored sim and the submitted
+      // payload — they must be the same object or the board stores a lineup
+      // that doesn't reproduce its own score. The trial is deterministic
+      // (fixed gauntlet, no date seed), so `timedLineup` alone re-derives this
+      // exact fight — that's what a replay of the "then" lineup and any future
+      // server-side re-simulation (#81) both rely on.
+      const timedLineup = { ...lineupFromBuild(build), timeOfDay: timeOfDayAt(new Date()) };
+      const result = simulateBossTrial(timedLineup);
       const today: BossTrialToday = { damage: result.totalDamage, phases: result.phasesSurvived };
       bossTrial = today;
       saveBossTrialToday(build.seasonId, build.day, today.damage, today.phases);
@@ -317,7 +330,7 @@
           damage: today.damage,
           phases: today.phases,
           day: build.day,
-          lineup: lineupFromBuild(build),
+          lineup: timedLineup,
         });
       }
       await refreshBossTrialBoard();
