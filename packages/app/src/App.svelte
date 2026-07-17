@@ -1416,9 +1416,14 @@
             <span
               class="freeze"
               role="button"
-              tabindex="-1"
+              tabindex="0"
               onclick={(e) => freeze(i, e)}
-              onkeydown={() => {}}>❄</span>
+              onkeydown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  freeze(i, e);
+                }
+              }}>❄</span>
           </button>
         {:else if slot.kind === 'relic'}
           {@const relic = RELIC_DEFS[slot.relicId]}
@@ -1434,9 +1439,14 @@
             <span
               class="freeze"
               role="button"
-              tabindex="-1"
+              tabindex="0"
               onclick={(e) => freeze(i, e)}
-              onkeydown={() => {}}>❄</span>
+              onkeydown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  freeze(i, e);
+                }
+              }}>❄</span>
           </button>
         {:else}
           <div class="tile empty-tile">sold</div>
@@ -1462,7 +1472,7 @@
       </div>
     {/if}
 
-    {#if build.board.length === 0 && build.scrap > 0}
+    {#if build.board.length === 0 && build.bench.length === 0 && build.scrap > 0}
       <p class="onboarding-hint">your warren is empty — spend your {build.scrap} ⚙ to recruit your first rats</p>
     {/if}
   </div>
@@ -1496,12 +1506,12 @@
         <p class="ride-caption">the next hourly ride · your horde as it stands now</p>
         {#if result}
           <p class="result">
-            Your horde rides to <strong>wave {result.wavesCleared}</strong>
+            Your horde rides to <strong>depth {result.wavesCleared}</strong>
             &middot; {result.survivors.length > 0
               ? `⚑ the drains cleared — ${result.survivors.length} rats ride home`
               : 'until the last rat falls'}
           </p>
-          <p class="result-note">the drains hold steady through the day, changing anew each dawn</p>
+          <p class="result-note">the drains hold steady all week — resets Monday</p>
         {/if}
       {/if}
       <button class="ride" onclick={backToWarren} disabled={phase === 'riding'}>
@@ -1509,7 +1519,7 @@
       </button>
     {:else}
       <div class="idle">
-        <p class="muster-line">Your horde rides the drains <strong>every hour</strong>, hauling back scrap by how deep it pushes. The drains hold steady through the day, changing anew each dawn.</p>
+        <p class="muster-line">Your horde rides the drains <strong>every hour</strong>, hauling back scrap by how deep it pushes. The drains hold steady all week — a new gauntlet awaits each Monday.</p>
         {#if inRecruitmentWindow}
           <p class="onboarding-hint">recruitment window — the horde doesn't ride until <strong>10:00 CET</strong>. Build your board now; the first haul lands at 10:00.</p>
         {/if}
@@ -1526,10 +1536,10 @@
           {/if}
         </p>
         <button class="watch" onclick={watchRide}>▶ watch the next ride</button>
-        <p class="season-best">Deepest ride this week: <strong>wave {seasonBest}</strong> · resets Monday</p>
+        <p class="season-best">Deepest ride this week: <strong>depth {seasonBest}</strong> · resets Monday</p>
         <p class="season-kills">Rats felled this week: <strong>{seasonKills}</strong></p>
         {#if currentDepth > seasonBest}
-          <p class="season-hint">the next ride will reach wave {currentDepth}</p>
+          <p class="season-hint">the next ride will reach depth {currentDepth}</p>
         {/if}
         {#if awaySummary}
           <p class="away">While you were away: {awaySummary.rides} rides · <strong>+{awaySummary.scrap} scrap</strong>.</p>
@@ -1541,7 +1551,7 @@
               {#each rideLog as r}
                 <li class="rl-row" class:deepest={r.depth === seasonBest && r.depth > 0}>
                   <span class="rl-time">{fmtRideHour(r.hour)}</span>
-                  <span class="rl-depth">wave {r.depth}{r.depth === seasonBest && r.depth > 0 ? ' ★' : ''}</span>
+                  <span class="rl-depth">depth {r.depth}{r.depth === seasonBest && r.depth > 0 ? ' ★' : ''}</span>
                   <span class="rl-kills">{r.enemiesDefeated ?? 0} felled</span>
                   <span class="rl-scrap">+{r.scrap} ⚙</span>
                   <!-- Riding until the last rat falls is the normal end of a ride;
@@ -1572,13 +1582,13 @@
             <span class="lb-rank">{i + 1}</span>
             <span class="lb-name">{row.name}{isMe(row) ? ' · you' : ''}</span>
             <span class="lb-kills">{row.kills} felled</span>
-            <span class="lb-depth">wave {row.depth}</span>
+            <span class="lb-depth">depth {row.depth}</span>
           </li>
         {/each}
       </ol>
     {/if}
     {#if myRank !== null && myRank > board.length}
-      <p class="lb-myrank">your rank: <strong>#{myRank}</strong> · wave {seasonBest} · {seasonKills} felled</p>
+      <p class="lb-myrank">your rank: <strong>#{myRank}</strong> · depth {seasonBest} · {seasonKills} felled</p>
     {/if}
     <p class="lb-you">
       riding as <strong>{playerName || '—'}</strong>
@@ -1795,7 +1805,7 @@
           onkeydown={(e) => e.key === 'Enter' && confirmName()}
         />
         <div class="card-actions">
-          <button class="primary" onclick={confirmName}>ride out</button>
+          <button class="primary" onclick={confirmName}>{playerName ? 'save name' : 'ride out'}</button>
           <button onclick={() => (nameDraft = defaultName())}>↻ new name</button>
           {#if playerName}
             <button onclick={() => (nameEntryOpen = false)}>cancel</button>
@@ -2155,11 +2165,13 @@
     font-size: 10px;
     color: var(--ink-dim);
     line-height: 1.2;
+    overflow-wrap: break-word;
   }
 
   .tile-cost {
     font-size: 11px;
     color: #d4af37;
+    overflow-wrap: break-word;
   }
 
   .unit-tile.selected {
@@ -2188,8 +2200,14 @@
 
   .freeze {
     position: absolute;
-    top: 3px;
-    right: 6px;
+    top: 0;
+    right: 0;
+    padding: 6px;
+    min-width: 22px;
+    min-height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     font-size: 12px;
     color: #7ba7cc;
     opacity: 0.65;
@@ -2376,7 +2394,11 @@
   }
 
   .ride-controls button {
-    padding: 3px 10px;
+    padding: 10px 16px;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     font-family: inherit;
     font-size: 12px;
     color: var(--ink);
@@ -2628,6 +2650,11 @@
   }
 
   .lb-refresh {
+    min-width: 40px;
+    min-height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     padding: 2px 10px;
     font-family: inherit;
     font-size: 13px;
