@@ -81,11 +81,14 @@ describe('Boss Trial (issue #107)', () => {
     expect(mid).toBeLessThan(strong);
   });
 
-  it('poison COUNTS toward the score — total damage exceeds clash-only damage when a poison caster is present', () => {
-    // simulateBossTrial sums `damage` + `poisonTick` events; the sim's own
-    // `result.damageDealt` counts clash only. So a board with a poison-all
-    // caster must score strictly higher through the trial than the clash-only
-    // total, proving poison is credited (a poison build "hits harder").
+  it('poison COUNTS toward the score, and toward damageDealt too (issue #126)', () => {
+    // simulateBossTrial sums `damage` + `poisonTick` events landed on the
+    // boss; `simulate`'s own `result.damageDealt` (issue #126 fix) now counts
+    // gauntlet-side poison too, via the exact same underlying event stream
+    // (simulateBossTrial is a thin wrapper over one `simulate` call against
+    // `buildBossTrialGauntlet()`) — so the two totals must agree exactly.
+    // Before the #126 fix, damageDealt was clash-only and this board's poison
+    // ticks made the trial's own total strictly higher; that gap is now closed.
     const poisonBoard: Lineup = {
       units: ['dire-rat', 'draughtsman-moe', 'bone-priest', 'ward-weaver'].map((defId) => ({
         defId,
@@ -93,9 +96,14 @@ describe('Boss Trial (issue #107)', () => {
         relicIds: [],
       })),
     };
-    const clashOnly = simulate(poisonBoard, buildBossTrialGauntlet()).result.damageDealt;
-    const withPoison = simulateBossTrial(poisonBoard).totalDamage;
-    expect(withPoison).toBeGreaterThan(clashOnly);
+    const { events, result } = simulate(poisonBoard, buildBossTrialGauntlet());
+    const damageDealt = result.damageDealt;
+    const totalDamage = simulateBossTrial(poisonBoard).totalDamage;
+    expect(totalDamage).toBe(damageDealt);
+    // Sanity check the equality above isn't vacuous: poison actually landed
+    // on the boss in this run (Draughtsman Moe's poisonAllEnemies).
+    const poisonOnBoss = events.filter((e) => e.type === 'poisonTick' && e.amount > 0).length;
+    expect(poisonOnBoss).toBeGreaterThan(0);
   });
 
   it('is deterministic — same lineup yields the same score', () => {

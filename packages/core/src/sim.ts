@@ -872,7 +872,15 @@ export function simulate(
 
       for (const board of [horde, enemies]) {
         for (const unit of [...board]) {
-          if (unit.poison > 0 && unit.health > 0) applyDamage(unit, unit.poison, 'poison');
+          if (unit.poison > 0 && unit.health > 0) {
+            // Only poison landed on the gauntlet side counts as damage dealt
+            // (issue #126) — the horde's own poison intake is upkeep, not
+            // output. Poison bypasses armor (see applyDamage), so the amount
+            // dealt always equals unit.poison exactly; no need to read a
+            // return value back out of applyDamage for the true dealt amount.
+            if (board === enemies) totalDamage += unit.poison;
+            applyDamage(unit, unit.poison, 'poison');
+          }
         }
       }
 
