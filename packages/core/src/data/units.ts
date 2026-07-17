@@ -716,13 +716,13 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   },
   'plague-bearer': {
     id: 'plague-bearer', name: 'Plague-Bearer', attack: 2, health: 2, cost: 4,
-    desc: 'each wave: poisons the back foe (scales ★)',
+    desc: 'each wave: poisons the back foe (scales ★, capped)',
     ability: { trigger: 'startOfWave', effect: { kind: 'poisonLastEnemy' } },
     tribe: 'plague',
   },
   'blight-witch': {
     id: 'blight-witch', name: 'Blight-Witch', attack: 3, health: 3, cost: 8,
-    desc: 'each wave: poisons the whole enemy line (scales ★)',
+    desc: 'each wave: poisons the whole enemy line (scales ★, capped)',
     ability: { trigger: 'startOfWave', effect: { kind: 'poisonAllEnemies' } },
     tribe: 'plague',
   },
@@ -738,7 +738,7 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   // kit is tracked in #116 — tune the kit there, since Moe IS that kit.
   'draughtsman-moe': {
     id: 'draughtsman-moe', name: 'Draughtsman Moe', attack: 3, health: 3, cost: 8,
-    desc: "Season 2 champion; an architect who drafts the enemy's ruin from his Svendborg boat and doses the whole line by the draught; each wave: poisons the entire enemy line (scales ★)",
+    desc: 'Season 2 champion, returned; each wave: poisons the whole enemy line (scales ★, capped)',
     ability: { trigger: 'startOfWave', effect: { kind: 'poisonAllEnemies' } },
     tribe: 'plague',
   },
@@ -796,7 +796,7 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   },
   'ward-weaver': {
     id: 'ward-weaver', name: 'Ward-Weaver', attack: 1, health: 3, cost: 5,
-    desc: 'each wave, blocks the front rat’s hit outright — ★2 blocks 2 hits, ★3 blocks 3; resets every wave',
+    desc: 'each wave, blocks the front rat’s hit outright (★2 blocks 2, ★3 blocks 3)',
     ability: { trigger: 'startOfWave', effect: { kind: 'blockFrontHits' } },
     unlockDay: 2, // day-1 shop kept plain — see Dire-Rat's note.
   },
@@ -838,7 +838,7 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   // currently reads `tribe` mechanically now that this was its only reader.
   'pack-caller': {
     id: 'pack-caller', name: 'Pack-Caller', attack: 2, health: 3, cost: 5,
-    desc: "faint: gives away its own current attack/health (whatever it has grown to) split evenly across the rest of the horde — your Pack-Callers share one lifetime budget for this, however you split it (scales ★)",
+    desc: 'faint: splits its current attack/health evenly across the horde — all your Pack-Callers share one lifetime budget for this (scales ★)',
     // faint: fires on every death, so a Bone-Priest-revived Pack-Caller that
     // dies a second time pays out twice (revive is capped once per corpse,
     // same as Gnawer's `bequeathAttack`). `totalBudgetMultiplier` (issue
@@ -859,7 +859,7 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   // front, rewarding a durable front wall built to protect it.
   'slink-rat': {
     id: 'slink-rat', name: 'Slink-Rat', attack: 3, health: 1, cost: 6,
-    desc: 'fights from the dark: each wave, adds its own attack to the clash against the front foe, from any slot — but 1 HP means it dies to almost anything if it ever reaches the front (scales ★)',
+    desc: 'fights from the dark: each wave, adds its own attack to the front clash, from any slot (scales ★)',
     // startOfWave, via `backlineDamage` (see that Effect's doc comment for
     // the full compounding-law note and the four resolved interaction
     // decisions against Marrow-Snap/Ward-Weaver/Gore-Cleaver). Fixed
@@ -876,7 +876,7 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   // and the placeholder-magnitude flag.
   'twilight-runt': {
     id: 'twilight-runt', name: 'Twilight-Runt', attack: 1, health: 2, cost: 5,
-    desc: 'fused of dawn and dusk, never idle: battle (before noon) mostly buffs the horde’s attack, battle (after noon) mostly buffs its health — neither half is ever a dead stat (scales ★; magnitudes pending balance sign-off, issue #110)',
+    desc: 'fused of dawn and dusk, never idle: battle (before noon) mostly buffs the horde’s attack, battle (after noon) mostly buffs its health — neither half is ever a dead stat (scales ★)',
     ability: {
       trigger: 'startOfBattle',
       effect: {
@@ -894,7 +894,7 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   // Waves it takes to fill the cap is a real risk, not a free stat stick.
   'cellar-coil': {
     id: 'cellar-coil', name: 'Cellar-Coil', attack: 2, health: 4, cost: 5,
-    desc: 'each wave it survives off the front, permanently banks +attack (hard-capped) — cashes in once the line finally breaks to it (scales ★)',
+    desc: 'each wave it survives off the front, permanently banks +attack (hard-capped, scales ★)',
     // startOfWave + `condition.notFront` (see both doc comments above): fires
     // every Wave the unit survives while NOT at board index 0, and is a
     // no-op the Wave it's front (or the Wave it doesn't survive). The
