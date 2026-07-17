@@ -28,7 +28,6 @@
     advanceAfterDawn,
     weekdayFor,
     seasonIdFor,
-    interestFor,
     scrapForDepth,
     SEASON_DAYS,
     buyUnit,
@@ -787,9 +786,7 @@
           lastRide = ride;
           submitRun({ rideDate: build.date, lineup, result: outcome.result, dev: CHANNEL === 'dev' });
         }
-        const dawnInterest = interestFor(build.scrap);
         build = advanceAfterDawn(build, addDay(build.date));
-        if (dawnInterest > 0) build = { ...build, scrap: build.scrap + dawnInterest };
         advanced = true;
       }
     }
@@ -953,10 +950,8 @@
     // button can silently skip a still-resolvable trial (see
     // `resolveBossTrialIfDue`'s doc comment).
     resolveBossTrialIfDue(new Date());
-    const dawnInterest = build.day >= SEASON_DAYS ? 0 : interestFor(build.scrap);
     stopReplay();
     build = advanceAfterDawn(build, addDay(build.date));
-    if (dawnInterest > 0) build = { ...build, scrap: build.scrap + dawnInterest };
     saveBuild(build);
     inspect = null;
     pendingRelic = null;
@@ -1186,6 +1181,7 @@
     pendingSwap = null;
     replayKind = 'ride';
     phase = 'riding';
+    stageEl?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     result = null;
     player.speed = speed;
     // Capture the outcome: the hour can flip (or the horde change) while the
@@ -1218,6 +1214,7 @@
     pendingSwap = null;
     replayKind = 'trial';
     phase = 'riding';
+    stageEl?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     result = null;
     player.speed = speed;
     const events = simulateBossTrialReplay(bossTrial.lineup);
@@ -1532,7 +1529,7 @@
           {#if inRecruitmentWindow}
             "next haul" is a preview of your build, not banked yet — it won't be credited until 10:00 CET · scrap per depth cleared once rides start (deeper waves pay less) · gets tougher deeper
           {:else}
-            scrap per depth cleared, every hour (deeper waves pay less) · +{interestFor(build.scrap)} interest banked each dawn · gets tougher deeper
+            scrap per depth cleared, every hour (deeper waves pay less) · gets tougher deeper
           {/if}
         </p>
         <button class="watch" onclick={watchRide}>▶ watch the next ride</button>
@@ -1610,6 +1607,7 @@
         {bossTrialBoardBusy ? '…' : '↻'}
       </button>
     </div>
+    <img class="bt-portrait" src={ART_URL['boss-trial']} alt="" />
     <p class="bt-blurb">
       Every day at {BOSS_TRIAL_HOUR}:00 CET your horde automatically faces a boss — no trigger, no preview. Fell it to reach the next phase — every phase the next boss hits half again as hard, until the horde falls. Score is total damage dealt.
     </p>
@@ -2278,6 +2276,17 @@
     background: #241a14;
     border: 1px solid #4a3520;
     border-radius: 10px;
+  }
+
+  .bt-portrait {
+    width: 64px;
+    height: 64px;
+    object-fit: contain;
+    background: #241a14;
+    border: 1px solid #4a3520;
+    border-radius: 10px;
+    display: block;
+    margin: 12px auto;
   }
 
   .card-relic-icon {

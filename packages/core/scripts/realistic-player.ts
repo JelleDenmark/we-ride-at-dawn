@@ -71,7 +71,6 @@ import {
   moveUnit,
   effectiveBoardCap,
   nextSlotPrice,
-  interestFor,
   lineupFromBuild,
   scrapForDepth,
   seasonIdFor,
@@ -487,9 +486,7 @@ function runWeek(startDate: string, policy: Policy): SeedRun {
     build = policy(build, g, stats);
 
     if ((h + 1) % HOURS_PER_DAY === 0 && h + 1 < TOTAL_HOURS) {
-      const dawnInterest = interestFor(build.scrap);
       build = advanceAfterDawn(build, addDay(build.date, build.day));
-      if (dawnInterest > 0) build = { ...build, scrap: build.scrap + dawnInterest };
       build = policy(build, gauntletFor(build), stats);
     }
   }

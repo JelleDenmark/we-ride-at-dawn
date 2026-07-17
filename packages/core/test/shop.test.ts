@@ -24,10 +24,8 @@ import {
   nextSlotPrice,
   SLOT_PRICES,
   SEASON_DAYS,
-  interestFor,
   weekdayFor,
   seasonIdFor,
-  INTEREST_CAP,
   DAILY_SCRAP,
   REROLL_COST,
   BENCH_SIZE,
@@ -708,17 +706,6 @@ describe('synchronized seasons', () => {
     // every day of the reissued week shares the one bumped id
     const week = Array.from({ length: 7 }, (_, i) => addDays('2026-07-13', i));
     expect(new Set(week.map(seasonIdFor)).size).toBe(1);
-  });
-});
-
-describe('idle economy', () => {
-  it('interest is 5% floored and capped, never on a tiny bank', () => {
-    expect(interestFor(0)).toBe(0);
-    expect(interestFor(19)).toBe(0);
-    expect(interestFor(20)).toBe(1);
-    expect(interestFor(74)).toBe(3);
-    expect(interestFor(100)).toBe(INTEREST_CAP);
-    expect(interestFor(9999)).toBe(INTEREST_CAP);
   });
 });
 

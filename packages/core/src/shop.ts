@@ -16,12 +16,7 @@ export const SEASON_DAYS = 7;
 export const BENCH_SIZE = 3;
 
 // Idle economy: the horde skirmishes hourly, earning scrap per wave cleared.
-// Interest (TFT-style, 5% of the bank, capped) is paid once per DAY at dawn,
-// not per hour — the daily cadence + cap keep the bank from snowballing over
-// the hundreds of hours in an expedition.
 export const SCRAP_PER_DEPTH = 1;
-export const INTEREST_RATE = 0.05;
-export const INTEREST_CAP = 5;
 
 // Income decoupling (issue #90). Income used to be a flat `depth *
 // SCRAP_PER_DEPTH` — every extra wave cleared paid the same, so ANY change
@@ -69,10 +64,6 @@ export function scrapForDepth(depth: number): number {
   const mid = Math.max(0, Math.min(depth, SCRAP_MID_DEPTH) - SCRAP_FULL_DEPTH);
   const far = Math.max(0, depth - SCRAP_MID_DEPTH);
   return Math.floor(full * SCRAP_PER_DEPTH + mid * SCRAP_DEEP_RATE + far * SCRAP_FAR_RATE);
-}
-
-export function interestFor(scrap: number): number {
-  return Math.min(INTEREST_CAP, Math.floor(scrap * INTEREST_RATE));
 }
 
 /** Starting/day-1 board size floor. The board opens at 5 seats on day 1 and
