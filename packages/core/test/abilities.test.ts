@@ -112,6 +112,66 @@ describe('unit abilities', () => {
     expect(stacks.reduce((a, b) => a + b, 0)).toBe(10); // 5 per wave × 2 waves
   });
 
+  // Issue #131: Plague-Bearer's single-target `poisonLastEnemy` gets the same
+  // cap-not-sum treatment as #116 gave poison-all, but via its OWN separate
+  // budget — multiple Plague-Bearers all target the same back-of-line enemy,
+  // so without a cap they stacked additively onto one target with no ceiling
+  // (the direct cause of a balance-analyst-found Boss Trial cap-hit: 2-5x
+  // Plague-Bearer against a single fixed boss target). Same
+  // `poisonAllStacks` idiom, different effect.
+  const poisonLastStacks = (units: Lineup['units'], waves = 1): number[] => {
+    const perWave: UnitDef[][] = Array.from({ length: waves }, () => [dummy(0, 30)]);
+    const { events } = simulate(lineup(...units), gauntletOf(...perWave));
+    return ofType(events, 'poisonApplied').map((e) => e.stacks);
+  };
+
+  it('one ★3 Plague-Bearer lands the full 5 stacks (at the cap, unchanged)', () => {
+    const total = poisonLastStacks([{ defId: 'plague-bearer', tier: 3 }]).reduce((a, b) => a + b, 0);
+    expect(total).toBe(5);
+  });
+
+  it('two ★2 Plague-Bearers clip 3+3=6 down to the 5 cap', () => {
+    const stacks = poisonLastStacks([
+      { defId: 'plague-bearer', tier: 2 },
+      { defId: 'plague-bearer', tier: 2 },
+    ]);
+    expect(stacks).toEqual([3, 2]); // second caster only gets the remaining budget
+    expect(stacks.reduce((a, b) => a + b, 0)).toBe(5);
+  });
+
+  it('three to five ★3 Plague-Bearers all collapse to the same 5-stack cap', () => {
+    for (const count of [3, 4, 5]) {
+      const total = poisonLastStacks(
+        Array.from({ length: count }, () => ({ defId: 'plague-bearer', tier: 3 }) as const)
+      ).reduce((a, b) => a + b, 0);
+      expect(total).toBe(5);
+    }
+  });
+
+  it("Plague-Bearer's cap resets each wave, independently of the wave count", () => {
+    const stacks = poisonLastStacks(
+      [
+        { defId: 'plague-bearer', tier: 3 },
+        { defId: 'plague-bearer', tier: 3 },
+        { defId: 'plague-bearer', tier: 3 },
+      ],
+      2
+    );
+    expect(stacks.reduce((a, b) => a + b, 0)).toBe(10); // 5 per wave × 2 waves
+  });
+
+  it('a Plague-Bearer and a poison-all caster STACK — independent caps, not one shared budget', () => {
+    // Jesper's call (2026-07-17): same-effect stacking is capped, but two
+    // DIFFERENT poison effects on the same board should still add up to more
+    // than either alone. 1× tier-3 Plague-Bearer (5, its own cap) + 1× tier-3
+    // Blight-Witch (5, its own separate cap) = 10, not clipped to 5.
+    const total = poisonLastStacks([
+      { defId: 'plague-bearer', tier: 3 },
+      { defId: 'blight-witch', tier: 3 },
+    ]).reduce((a, b) => a + b, 0);
+    expect(total).toBe(10);
+  });
+
   // Issue #111 rework: Gnawer's faint payout is no longer a flat literal —
   // the rat behind inherits Gnawer's OWN current attack (tier-scaled,
   // relic-buffed) plus a bonus for the wave it died on, capped at

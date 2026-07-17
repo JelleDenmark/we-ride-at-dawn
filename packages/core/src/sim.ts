@@ -415,13 +415,33 @@ export function simulate(
         // Compounding-law check: enemies are re-instantiated every wave and
         // poison never carries across waves (`waveClear`'s antidote, plus
         // enemies simply not existing yet next wave), so this cannot
-        // accumulate across the 45-wave battle. Multiple Plague-Bearers
-        // stack additively within a single wave (each re-applies
-        // `poisonStacksForTier(tier)` to the same last enemy) — bounded by
-        // fresh enemies next wave, not a persistent-horde compounding vector.
+        // accumulate across the 45-wave battle.
+        //
+        // Multi-caster stack cap (issue #131, same shape as #116's
+        // `poisonAllEnemies` cap): multiple Plague-Bearers used to stack
+        // additively onto the same single last-enemy target with no ceiling
+        // — against a single fixed target (e.g. Boss Trial's one boss per
+        // phase) this let 2-5x Plague-Bearer push well past the trial's
+        // intended "a few dozen phases" ceiling, all the way to its 60-phase
+        // hard cap. Capped at `poisonStacksForTier(3)` via its own budget
+        // (`poisonLastApplied`, separate from `poisonAllApplied`) — same
+        // cap-not-sum precedent as `blockCharges`/`poisonAllEnemies`: one ★3
+        // fills it, extra Plague-Bearers clip rather than add. Kept
+        // independent of the poison-all budget on purpose — a Plague-Bearer
+        // and a poison-all caster (Blight-Witch/Draughtsman Moe) together
+        // should still out-poison either alone; only stacking copies of the
+        // SAME effect is capped.
         const foes = opposing(source.side);
         const target = foes[foes.length - 1];
-        if (target) applyPoisonStacks(target, poisonStacksForTier(tier));
+        if (target) {
+          const cap = poisonStacksForTier(3);
+          const remaining = cap - poisonLastApplied[source.side];
+          const stacks = Math.min(poisonStacksForTier(tier), remaining);
+          if (stacks > 0) {
+            applyPoisonStacks(target, stacks);
+            poisonLastApplied[source.side] += stacks;
+          }
+        }
         break;
       }
       case 'poisonTarget': {
@@ -735,10 +755,31 @@ export function simulate(
    * a single caster's `poisonStacksForTier` value, so a lone ★3 (or two ★2s,
    * which sum to 6 and clip to the 5 cap) is essentially unaffected while
    * 3×★3 (15 → 5) is not. Keyed by caster side so poison-all casters on one
-   * side share one budget; Plague-Bearer's single-target `poisonLastEnemy` is
-   * a different effect and is deliberately NOT counted against this cap.
+   * side share one budget. Plague-Bearer's single-target `poisonLastEnemy` is
+   * a different effect and is NOT counted against this cap — it has its own,
+   * separate budget (`poisonLastApplied` below), deliberately independent so
+   * a Plague-Bearer and a poison-all caster (Blight-Witch/Draughtsman Moe) on
+   * the same board still stack with each other; only same-effect stacking is
+   * capped.
    */
   let poisonAllApplied: Record<Side, number> = { horde: 0, gauntlet: 0 };
+  /**
+   * Total `poisonLastEnemy` stacks already dispensed this wave, keyed by the
+   * CASTER's side (issue #131 follow-up to #116). Multiple Plague-Bearers all
+   * target the same back-of-line enemy on `startOfWave` — before this cap,
+   * they stacked additively onto that single target with no ceiling, which a
+   * balance-analyst pass found let 2-5x Plague-Bearer + a sustain wall push
+   * Boss Trial to its 60-phase hard cap (a fixed single target is exactly the
+   * shape #116 already fixed for poison-all; Plague-Bearer's single-target
+   * cousin was missed at the time). Same cap-not-sum shape as
+   * `poisonAllApplied`: total capped at `poisonStacksForTier(3)`, one ★3
+   * fills it, extra casters clip rather than add. Kept in a SEPARATE budget
+   * from `poisonAllApplied` (not merged into one shared cap) so a
+   * Plague-Bearer and a poison-all caster together still deal MORE poison
+   * than either alone — only stacking the same effect twice is capped, not
+   * poison in general.
+   */
+  let poisonLastApplied: Record<Side, number> = { horde: 0, gauntlet: 0 };
 
   for (let w = 0; w < gauntlet.waves.length && horde.length > 0; w++) {
     // 1-based wave number, matching the `waveStart`/`waveClear` events below
@@ -763,6 +804,9 @@ export function simulate(
     // #116) — see `poisonAllApplied` above. Re-filled by any `poisonAllEnemies`
     // casters in the `fireEntryTriggers` pass below, capped at tier-3's stacks.
     poisonAllApplied = { horde: 0, gauntlet: 0 };
+    // Plague-Bearer's own separate per-wave budget (issue #131) — see
+    // `poisonLastApplied` above. Independent of `poisonAllApplied`.
+    poisonLastApplied = { horde: 0, gauntlet: 0 };
 
     fireEntryTriggers(horde);
     fireEntryTriggers(enemies);
