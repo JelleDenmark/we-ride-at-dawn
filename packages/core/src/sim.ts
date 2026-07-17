@@ -121,20 +121,6 @@ interface BattleUnit {
    * just Cellar-Coil — harmless dead weight on units without the effect.
    */
   chargeStacks: number;
-  /**
-   * Pack-Caller's `distributeStatsOnFaint` receiver-side cap (issue #131).
-   * Total attack/health this instance has ALREADY absorbed from that effect,
-   * across every payout this battle (persists across Waves the same way
-   * `chargeStacks` does — never reset mid-Ride). Capped at
-   * `receiveCapMultiplier * this unit's own tier-scaled base attack/health`
-   * (see the `distributeStatsOnFaint` case) so payout concentration onto one
-   * long-lived survivor as a board thins can't produce an unbounded single
-   * mega-unit — see that Effect's doc comment in data/units.ts for the full
-   * balance-analyst finding this fixes. Init 0 for every unit, not just
-   * Pack-Caller targets — harmless dead weight otherwise.
-   */
-  faintPayoutAttackReceived: number;
-  faintPayoutHealthReceived: number;
 }
 
 /** A hit reduced by armor still lands for at least this much. */
@@ -216,8 +202,6 @@ export function simulate(
       startOfBattleFired: false,
       raised: false,
       chargeStacks: 0,
-      faintPayoutAttackReceived: 0,
-      faintPayoutHealthReceived: 0,
     };
   };
 
@@ -390,46 +374,40 @@ export function simulate(
         // fire-once/bounded under ADR-0003, so a one-time snapshot at death
         // is bounded too — just variable with board synergy, which is the
         // point (the more you've invested in it, the bigger its send-off).
-        const totalAttack = source.attack;
-        const totalHealth = source.maxHealth;
+        // Shared per-side, whole-battle budget (issue #131 v2): clip the
+        // TOTAL this death gives away, before splitting, against whatever
+        // budget every Pack-Caller on this side has left for the rest of the
+        // battle. Deliberately does NOT care who ends up with it — spreading
+        // early across a full board or banking it for one late payout both
+        // draw from the same pool, preserving the card's actual choice.
+        // Same "clip, don't reroute" shape as the poison-all/Plague-Bearer
+        // caps: whatever this death COULD have given beyond the remaining
+        // budget is simply lost, not carried to a later death.
+        const budgetAttack = Math.round(
+          UNIT_DEFS['pack-caller'].attack * tierAttackMultiplier(3) * effect.totalBudgetMultiplier
+        );
+        const budgetHealth = Math.round(
+          UNIT_DEFS['pack-caller'].health * tierHealthMultiplier(3) * effect.totalBudgetMultiplier
+        );
+        const spent = distributeStatsOnFaintSpent[source.side];
+        const totalAttack = Math.max(0, Math.min(source.attack, budgetAttack - spent.attack));
+        const totalHealth = Math.max(0, Math.min(source.maxHealth, budgetHealth - spent.health));
+        spent.attack += totalAttack;
+        spent.health += totalHealth;
+        if (totalAttack <= 0 && totalHealth <= 0) break;
         const n = survivors.length;
         const perUnitAttack = Math.floor(totalAttack / n);
         const perUnitHealth = Math.floor(totalHealth / n);
         const remainderAttack = totalAttack - perUnitAttack * n;
         const remainderHealth = totalHealth - perUnitHealth * n;
         // Remainder (stat % survivor-count) goes one point each to the
-        // FRONTMOST survivors first (board index order) — before the
-        // receiver cap below, this always distributed the full total with
-        // nothing lost to rounding; now a recipient already at (or near) its
-        // own cap simply absorbs less, same as any other capped effect here.
+        // FRONTMOST survivors first (board index order), so the (possibly
+        // budget-reduced) total is always fully distributed — nothing lost
+        // to rounding once it's past the budget clip above.
         survivors.forEach((target, i) => {
-          const rawAtk = perUnitAttack + (i < remainderAttack ? 1 : 0);
-          const rawHp = perUnitHealth + (i < remainderHealth ? 1 : 0);
-          if (rawAtk <= 0 && rawHp <= 0) return;
-          // Receiver-side cap (issue #131): no single recipient can absorb
-          // more than `receiveCapMultiplier` times its OWN tier-scaled base
-          // attack/health from this effect, cumulative across the whole
-          // battle — fixes the payout-CONCENTRATION exploit (a board
-          // thinning down to one long-lived survivor that soaks up nearly
-          // every Pack-Caller's death payout), not the Pack-Caller-buffs-
-          // Pack-Caller case (excluding same-defId targets was considered
-          // and rejected — the sink in the reproduced exploit was never
-          // another Pack-Caller). Base stats read from UNIT_DEFS, not the
-          // target's current (possibly already-buffed) attack/health, so the
-          // ceiling is a fixed property of what the recipient IS, not a
-          // moving target that grows as it gets buffed. Same "clip, don't
-          // reroute" shape as the poison-all/Plague-Bearer caps: overflow
-          // is simply lost, never redistributed to another survivor.
-          const targetDef = UNIT_DEFS[target.defId];
-          const attackCap = Math.round(targetDef.attack * tierAttackMultiplier(target.tier) * effect.receiveCapMultiplier);
-          const healthCap = Math.round(targetDef.health * tierHealthMultiplier(target.tier) * effect.receiveCapMultiplier);
-          const atk = Math.max(0, Math.min(rawAtk, attackCap - target.faintPayoutAttackReceived));
-          const hp = Math.max(0, Math.min(rawHp, healthCap - target.faintPayoutHealthReceived));
-          if (atk > 0 || hp > 0) {
-            target.faintPayoutAttackReceived += atk;
-            target.faintPayoutHealthReceived += hp;
-            buff(target, atk, hp);
-          }
+          const atk = perUnitAttack + (i < remainderAttack ? 1 : 0);
+          const hp = perUnitHealth + (i < remainderHealth ? 1 : 0);
+          if (atk > 0 || hp > 0) buff(target, atk, hp);
         });
         break;
       }
@@ -822,6 +800,43 @@ export function simulate(
    * poison in general.
    */
   let poisonLastApplied: Record<Side, number> = { horde: 0, gauntlet: 0 };
+
+  /**
+   * Total attack/health every `distributeStatsOnFaint` caster (Pack-Caller)
+   * on a side has EVER given away, across the WHOLE battle — unlike
+   * `poisonAllApplied`/`poisonLastApplied` above, this is deliberately NOT
+   * reset per wave (see the wave loop below: no reset line for this one).
+   * A per-wave reset would be meaningless here anyway, since the exploit
+   * this fixes (issue #131) plays out across MANY separate waves/phases as a
+   * board thins over a long Boss Trial, not within one wave.
+   *
+   * Design history: the first shipped fix (2026-07-17) was a RECEIVER-side
+   * cap (how much any one unit could absorb, tracked per-instance) — it
+   * closed the exploit but, on review, gutted half of Pack-Caller's
+   * intended play pattern: positioning it to die LATE and dump a big
+   * payout onto 1-2 chosen units stopped working, because by the time few
+   * survivors remain the payout has grown far past what those (still
+   * board-average-sized) survivors' own caps allow, wasting most of it.
+   * Early-death broad-spread became the only non-wasteful line, which
+   * wasn't the intent.
+   *
+   * This version caps the SOURCE side instead: total `distributeStatsOnFaint`
+   * output per side per battle is capped at `totalBudgetMultiplier` × a
+   * single tier-3 Pack-Caller's own base attack/health (same "sized to one
+   * strong instance" idiom as `poisonStacksForTier(3)`), shared across every
+   * Pack-Caller on that side — same cap-not-sum precedent as
+   * `poisonAllApplied`/`blockCharges`, just scoped to the whole battle
+   * instead of one wave. This preserves the actual choice the card offers
+   * (spread it early across many survivors, or bank it and dump it all on
+   * one or two late) while still bounding the aggregate power this ability
+   * can inject over a ride — see the `distributeStatsOnFaint` case for the
+   * exact accounting, and that Effect's doc comment in data/units.ts for the
+   * balance-analyst numbers behind the multiplier.
+   */
+  let distributeStatsOnFaintSpent: Record<Side, { attack: number; health: number }> = {
+    horde: { attack: 0, health: 0 },
+    gauntlet: { attack: 0, health: 0 },
+  };
 
   for (let w = 0; w < gauntlet.waves.length && horde.length > 0; w++) {
     // 1-based wave number, matching the `waveStart`/`waveClear` events below

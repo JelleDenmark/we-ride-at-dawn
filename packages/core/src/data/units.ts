@@ -220,47 +220,59 @@ export type Effect =
    * A board with several Pack-Callers CAN chain — one's payout can inflate
    * the live stats a later one gives away when it too falls — bounded by
    * (up to) twice the board's own size given the revive interaction above,
-   * not by wave count or ride length, AND now further bounded per-recipient
-   * by `receiveCapMultiplier` below. Zero survivors (last unit standing) is
+   * not by wave count or ride length, AND now further bounded in aggregate
+   * by `totalBudgetMultiplier` below. Zero survivors (last unit standing) is
    * a no-op, not a crash.
    *
-   * PAYOUT-CONCENTRATION fix (issue #131, 2026-07-17 balance-analyst
-   * investigation, receiver cap implemented same day per Jesper's call):
-   * the real Boss Trial risk was never Pack-Caller-buffing-Pack-Caller —
-   * it was PAYOUT CONCENTRATION as a board thins: as fewer survivors
-   * remain, each subsequent faint's split lands on a shrinking pool,
-   * letting a late "sink" unit (which need not be another Pack-Caller —
-   * Corpse-Glutton or even a plain Dire-Rat reproduces it) accumulate
-   * enough attack/health to tank far more escalating-attack Boss Trial
-   * phases than the design assumes. Reproduced hitting
+   * PAYOUT-CONCENTRATION fix, v1 — RECEIVER-side cap (issue #131, shipped
+   * 2026-07-17, replaced same day): the real Boss Trial risk was never
+   * Pack-Caller-buffing-Pack-Caller — it was PAYOUT CONCENTRATION as a board
+   * thins: as fewer survivors remain, each subsequent faint's split lands on
+   * a shrinking pool, letting a late "sink" unit (which need not be another
+   * Pack-Caller — Corpse-Glutton or even a plain Dire-Rat reproduces it)
+   * accumulate enough attack/health to tank far more escalating-attack Boss
+   * Trial phases than the design assumes — reproduced hitting
    * `BOSS_TRIAL_MAX_PHASES` (the trial's hard safety cap, which
    * boss-trial.ts's own comment calls a bug signal, not a valid outcome),
-   * highly sensitive to board ORDER — identical units/tiers scored 7 vs.
-   * 60 phases depending purely on ordering. Excluding other Pack-Callers
-   * from this effect's targets would NOT have fixed it (the sink was never
-   * another Pack-Caller in reproduction), so the fix instead caps what ANY
-   * single recipient can absorb from this effect over the whole battle:
-   * `receiveCapMultiplier × the recipient's OWN tier-scaled base attack/
-   * health` (see the sim.ts case for the exact accounting) — a receiver-side
-   * cap, not a source-side one, so it bounds the "one mega-sink" pattern
-   * specifically without touching normal mid-battle synergy on a healthy-
-   * sized board. Once a recipient's running total hits its cap, further
-   * payout to it is simply lost (not redistributed to other survivors),
-   * same "clip, don't reroute" shape as the poison-all/Plague-Bearer caps.
+   * highly sensitive to board ORDER (identical units/tiers scored 7 vs. 60
+   * phases depending purely on ordering). The first fix capped what ANY
+   * single recipient could absorb, tuned empirically against Jesper's actual
+   * reported board (4x Pack-Caller + Warren-Warden + Ward-Weaver, screenshot
+   * 2026-07-17) down to `receiveCapMultiplier: 1` (3x and 1.5x barely moved
+   * it — Warren-Warden's own base stats are already large at tier 3, so a
+   * multiple of THAT stayed enormous), which did bring the reported board to
+   * 10 phases, in line with ordinary strong boards (7-9). But on review
+   * (Jesper, 2026-07-17) this flattened the card's actual strategic choice:
+   * anchoring the cap to each recipient's own (small, early) stats meant
+   * positioning Pack-Caller to die LATE — banking a big payout to dump on
+   * 1-2 chosen units, the card's other intended play pattern alongside early
+   * broad-spread — mostly wasted the payout once survivors thinned, since
+   * the accumulated total vastly exceeded any individual recipient's cap.
+   * Early-spread became the only non-wasteful line, which wasn't the intent.
    *
-   * Multiplier chosen by direct measurement against Jesper's actual reported
-   * board (4x Pack-Caller + Warren-Warden + Ward-Weaver, screenshot
-   * 2026-07-17), not picked blind: 3x barely moved it (47 -> 46 phases) and
-   * 1.5x still didn't (43) — because the sink in that board is Warren-Warden,
-   * a unit with substantial base stats (2/6) already multiplied ×9 at tier 3,
-   * so even "3x THAT" is still an enormous absolute cap. `receiveCapMultiplier:
-   * 1` (a recipient can gain at most its own tier-scaled base line, once,
-   * total, from this effect) brought the same board down to 10 phases — back
-   * in line with ordinary strong boards (7-9 phases in the same investigation).
-   * Still tentative pending Jesper's balance sign-off like every other new
-   * magnitude in this file, but empirically grounded rather than a guess.
+   * PAYOUT-CONCENTRATION fix, v2 — SOURCE-side shared budget (shipped same
+   * day, replacing v1): instead of capping what one recipient can absorb,
+   * cap the TOTAL this effect can move per side over the WHOLE battle,
+   * shared across every Pack-Caller on that side — same cap-not-sum idiom as
+   * the poison-all/Plague-Bearer caps (`poisonAllApplied`/`poisonLastApplied`
+   * in sim.ts), just scoped to the whole battle instead of one wave, since
+   * this exploit plays out across many separate waves as a board thins, not
+   * within one. Budget = `totalBudgetMultiplier` × a single tier-3
+   * Pack-Caller's own base attack/health (see the sim.ts case for the exact
+   * accounting) — sized the same way `poisonStacksForTier(3)` sizes the
+   * poison-all cap: "worth of one strong instance," not tied to whichever
+   * unit happens to receive it. This preserves the actual choice (spread
+   * early across a full board, or bank it and dump it all on 1-2 units
+   * late) since it doesn't care WHO receives, only how much this ability can
+   * inject over a ride in total. Overflow past the remaining budget is
+   * simply lost when the dying unit's own total is clipped, before the
+   * (possibly-reduced) total is split — not redistributed to a later death,
+   * same "clip, don't reroute" shape as everywhere else in this file.
+   * `totalBudgetMultiplier` value: tentative pending Jesper's balance
+   * sign-off like every other new magnitude in this file — re-verify against
+   * the same reported board before trusting a specific number.
    */
-  | { kind: 'distributeStatsOnFaint'; receiveCapMultiplier: number }
+  | { kind: 'distributeStatsOnFaint'; totalBudgetMultiplier: number }
   | { kind: 'poisonFrontEnemy'; stacks: number }
   /**
    * Plague-Bearer (issue #112, reworked from `poisonFrontEnemy`). Poisons
@@ -826,18 +838,18 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   // currently reads `tribe` mechanically now that this was its only reader.
   'pack-caller': {
     id: 'pack-caller', name: 'Pack-Caller', attack: 2, health: 3, cost: 5,
-    desc: "faint: gives away its own current attack/health (whatever it has grown to) split evenly across the rest of the horde — no rat can gain more than its own base stats from this, total (scales ★)",
+    desc: "faint: gives away its own current attack/health (whatever it has grown to) split evenly across the rest of the horde — your Pack-Callers share one lifetime budget for this, however you split it (scales ★)",
     // faint: fires on every death, so a Bone-Priest-revived Pack-Caller that
     // dies a second time pays out twice (revive is capped once per corpse,
-    // same as Gnawer's `bequeathAttack`). `receiveCapMultiplier: 1` (issue
-    // #131, tentative pending balance sign-off): no single recipient can
-    // absorb more than its own tier-scaled base attack/health, once total,
-    // from this effect over the whole battle — see `distributeStatsOnFaint`'s
-    // doc comment above for the full compounding-law sign-off, why this is a
-    // receiver-side cap not a source-side one, and why 1x (not a more
-    // generous-sounding 3x) is the value that actually closes the measured
-    // exploit.
-    ability: { trigger: 'faint', effect: { kind: 'distributeStatsOnFaint', receiveCapMultiplier: 1 } },
+    // same as Gnawer's `bequeathAttack`). `totalBudgetMultiplier` (issue
+    // #131 v2, tentative pending balance sign-off, see `distributeStatsOnFaint`'s
+    // doc comment above for the full history — a receiver-side cap shipped
+    // first and was replaced same day for flattening the card's late-death
+    // playstyle): every Pack-Caller on a side shares one lifetime budget for
+    // this effect, sized to one tier-3 Pack-Caller's own base attack/health
+    // — spread it thin early or bank it for one big late payout, your call,
+    // but the total across the whole battle is capped either way.
+    ability: { trigger: 'faint', effect: { kind: 'distributeStatsOnFaint', totalBudgetMultiplier: 3 } },
     tribe: 'runt',
   },
   // Issue #86: Slink-Rat — first consumer of the `backlineDamage` primitive
