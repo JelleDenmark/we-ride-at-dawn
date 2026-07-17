@@ -21,6 +21,8 @@
     "balance:maxed-board-guardrail": "tsx scripts/maxed-board-guardrail.ts",
     "balance:slot-value": "tsx scripts/slot-value.ts",
     "balance:boss-trial": "tsx scripts/boss-trial-probe.ts",
+    "balance:realistic": "tsx scripts/realistic-player.ts",
+    "balance:combos": "tsx scripts/combo-matrix.ts",
     "balance:t2-percentiles": "tsx scripts/t2-percentiles.ts"
   },
   "devDependencies": {
