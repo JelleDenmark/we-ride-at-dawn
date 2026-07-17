@@ -556,10 +556,15 @@ export function simulate(
         // instead of a flat `health * tier`, capped at the revived corpse's
         // own `maxHealth` so a low-tier ally can't be overhealed past its
         // ceiling. This is a magnitude change only, not a frequency one —
-        // `faint` still fires exactly once per unit instance, ever (a unit
-        // only dies once), so the compounding-law bound above still holds
-        // regardless of how steep the HP table gets or how long the battle
-        // (up to 45 waves) runs.
+        // `faint` fires on EVERY death (see `resolveDeaths` below), so a
+        // revived unit that dies again fires its faint ability a second time
+        // (see Gnawer's `bequeathAttack` doc comment and Pack-Caller's
+        // `distributeStatsOnFaint` doc comment, both in units.ts, for the
+        // per-ability bound this produces). What keeps THIS effect's own
+        // compounding-law bound intact regardless is the `raised` flag two
+        // paragraphs up: revival itself is capped to once per corpse, so no
+        // single unit instance can be revived more than once no matter how
+        // steep the HP table gets or how long the battle (up to 45 waves) runs.
         const corpseIdx = fallen[source.side].findIndex((c) => c !== source && !c.raised);
         if (corpseIdx === -1 || board.length >= combatCap) break;
         const [corpse] = fallen[source.side].splice(corpseIdx, 1);

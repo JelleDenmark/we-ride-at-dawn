@@ -201,22 +201,43 @@ export type Effect =
    * never a separate tunable number — see the sim.ts case for exactly
    * which fields that reads.
    *
-   * Compounding-law note: `faint` fires once per unit instance, ever — a
-   * unit only dies once, same fire-once bound `bequeathAttack`/`gainStats`
-   * (allyFaint) already rely on, and the same "own live stat, not a flat
-   * literal" pattern `bequeathAttack` already uses for attack. Using the
-   * LIVE (buffed) value rather than a fixed base is safe for the same
-   * reason it's safe there: every effect that could have inflated this
-   * unit's stats first (buffBehind, teamBuff, relics, ...) is itself
-   * already fire-once/bounded under ADR-0003, so a one-time snapshot of
-   * their sum at death is bounded too — it just varies with board synergy,
-   * which is the intended payoff for building around it. A board with
-   * several Pack-Callers CAN chain — one's payout can inflate the live
-   * stats a later one gives away when it too falls — but the chain is
-   * still finite: each instance can only die and pay out once, so the
-   * longest possible chain is bounded by the board's own size (BOARD_CAP),
-   * not by wave count or ride length. Zero survivors (last unit standing)
-   * is a no-op, not a crash.
+   * Compounding-law note (corrected 2026-07-17 — the previous version of
+   * this note was simply wrong; see below): `faint` fires on EVERY death,
+   * not just the first (`resolveDeaths` in sim.ts), so a Bone-Priest-revived
+   * Pack-Caller that dies a second time pays out again — same shape as
+   * Gnawer's `bequeathAttack`. Revive is capped once per corpse, so a single
+   * Pack-Caller instance can pay out at most twice per battle, same bound
+   * Gnawer relies on. Using the LIVE (buffed) value rather than a fixed base
+   * is safe for the same reason it's safe there: every effect that could
+   * have inflated this unit's stats first (buffBehind, teamBuff, relics,
+   * revive itself, ...) is itself already fire-once/bounded under ADR-0003,
+   * so even a twice-paid-out snapshot is bounded — it just varies with board
+   * synergy, which is the intended payoff for building around it. Measured
+   * impact of the revive double-payout on a 6× Pack-Caller + Bone-Priest
+   * board: a modest ~10-18% higher peak single-unit attack than the same
+   * board without Bone-Priest — not degenerate on its own.
+   *
+   * A board with several Pack-Callers CAN chain — one's payout can inflate
+   * the live stats a later one gives away when it too falls — bounded by
+   * (up to) twice the board's own size given the revive interaction above,
+   * not by wave count or ride length. Zero survivors (last unit standing) is
+   * a no-op, not a crash.
+   *
+   * Separate, larger finding (2026-07-17 balance-analyst investigation):
+   * the real Boss Trial risk isn't Pack-Caller-buffing-Pack-Caller — it's
+   * PAYOUT CONCENTRATION as a board thins: as fewer survivors remain, each
+   * subsequent faint's split lands on a shrinking pool, letting a late
+   * "sink" unit (which need not be another Pack-Caller — Corpse-Glutton or
+   * even a plain Dire-Rat reproduces it) accumulate enough attack/health to
+   * tank far more escalating-attack Boss Trial phases than the design
+   * assumes. This is highly sensitive to board ORDER (identical units/tiers
+   * scored 7 vs. 60 phases — the trial's hard safety cap — depending purely
+   * on ordering) and was reproduced hitting `BOSS_TRIAL_MAX_PHASES`, which
+   * boss-trial.ts's own comment calls a bug signal, not a valid outcome.
+   * Excluding other Pack-Callers from this effect's targets would NOT fix
+   * it (the sink was never another Pack-Caller in reproduction). Flagged
+   * for a real fix (likely a per-instance payout cap, Gnawer-`waveBonusCapMultiplier`-style,
+   * or revisiting Boss Trial's own assumptions) — not fixed here.
    */
   | { kind: 'distributeStatsOnFaint' }
   | { kind: 'poisonFrontEnemy'; stacks: number }
@@ -785,9 +806,10 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   'pack-caller': {
     id: 'pack-caller', name: 'Pack-Caller', attack: 2, health: 3, cost: 5,
     desc: 'faint: gives away its own current attack/health (whatever it has grown to) split evenly across the rest of the horde (scales ★)',
-    // faint: fires once per unit instance, ever — a unit only dies once, so
-    // this can't re-fire on a later wave. See `distributeStatsOnFaint`'s
-    // doc comment above for the full compounding-law sign-off.
+    // faint: fires on every death, so a Bone-Priest-revived Pack-Caller that
+    // dies a second time pays out twice (revive is capped once per corpse,
+    // same as Gnawer's `bequeathAttack`). See `distributeStatsOnFaint`'s doc
+    // comment above for the full compounding-law sign-off.
     ability: { trigger: 'faint', effect: { kind: 'distributeStatsOnFaint' } },
     tribe: 'runt',
   },
