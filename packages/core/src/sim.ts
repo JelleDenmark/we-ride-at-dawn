@@ -121,6 +121,20 @@ interface BattleUnit {
    * just Cellar-Coil — harmless dead weight on units without the effect.
    */
   chargeStacks: number;
+  /**
+   * Pack-Caller's `distributeStatsOnFaint` receiver-side cap (issue #131).
+   * Total attack/health this instance has ALREADY absorbed from that effect,
+   * across every payout this battle (persists across Waves the same way
+   * `chargeStacks` does — never reset mid-Ride). Capped at
+   * `receiveCapMultiplier * this unit's own tier-scaled base attack/health`
+   * (see the `distributeStatsOnFaint` case) so payout concentration onto one
+   * long-lived survivor as a board thins can't produce an unbounded single
+   * mega-unit — see that Effect's doc comment in data/units.ts for the full
+   * balance-analyst finding this fixes. Init 0 for every unit, not just
+   * Pack-Caller targets — harmless dead weight otherwise.
+   */
+  faintPayoutAttackReceived: number;
+  faintPayoutHealthReceived: number;
 }
 
 /** A hit reduced by armor still lands for at least this much. */
@@ -202,6 +216,8 @@ export function simulate(
       startOfBattleFired: false,
       raised: false,
       chargeStacks: 0,
+      faintPayoutAttackReceived: 0,
+      faintPayoutHealthReceived: 0,
     };
   };
 
@@ -382,12 +398,38 @@ export function simulate(
         const remainderAttack = totalAttack - perUnitAttack * n;
         const remainderHealth = totalHealth - perUnitHealth * n;
         // Remainder (stat % survivor-count) goes one point each to the
-        // FRONTMOST survivors first (board index order), so the full total
-        // is always distributed — nothing lost to rounding.
+        // FRONTMOST survivors first (board index order) — before the
+        // receiver cap below, this always distributed the full total with
+        // nothing lost to rounding; now a recipient already at (or near) its
+        // own cap simply absorbs less, same as any other capped effect here.
         survivors.forEach((target, i) => {
-          const atk = perUnitAttack + (i < remainderAttack ? 1 : 0);
-          const hp = perUnitHealth + (i < remainderHealth ? 1 : 0);
-          if (atk > 0 || hp > 0) buff(target, atk, hp);
+          const rawAtk = perUnitAttack + (i < remainderAttack ? 1 : 0);
+          const rawHp = perUnitHealth + (i < remainderHealth ? 1 : 0);
+          if (rawAtk <= 0 && rawHp <= 0) return;
+          // Receiver-side cap (issue #131): no single recipient can absorb
+          // more than `receiveCapMultiplier` times its OWN tier-scaled base
+          // attack/health from this effect, cumulative across the whole
+          // battle — fixes the payout-CONCENTRATION exploit (a board
+          // thinning down to one long-lived survivor that soaks up nearly
+          // every Pack-Caller's death payout), not the Pack-Caller-buffs-
+          // Pack-Caller case (excluding same-defId targets was considered
+          // and rejected — the sink in the reproduced exploit was never
+          // another Pack-Caller). Base stats read from UNIT_DEFS, not the
+          // target's current (possibly already-buffed) attack/health, so the
+          // ceiling is a fixed property of what the recipient IS, not a
+          // moving target that grows as it gets buffed. Same "clip, don't
+          // reroute" shape as the poison-all/Plague-Bearer caps: overflow
+          // is simply lost, never redistributed to another survivor.
+          const targetDef = UNIT_DEFS[target.defId];
+          const attackCap = Math.round(targetDef.attack * tierAttackMultiplier(target.tier) * effect.receiveCapMultiplier);
+          const healthCap = Math.round(targetDef.health * tierHealthMultiplier(target.tier) * effect.receiveCapMultiplier);
+          const atk = Math.max(0, Math.min(rawAtk, attackCap - target.faintPayoutAttackReceived));
+          const hp = Math.max(0, Math.min(rawHp, healthCap - target.faintPayoutHealthReceived));
+          if (atk > 0 || hp > 0) {
+            target.faintPayoutAttackReceived += atk;
+            target.faintPayoutHealthReceived += hp;
+            buff(target, atk, hp);
+          }
         });
         break;
       }
