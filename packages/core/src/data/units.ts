@@ -574,7 +574,6 @@ export interface UnitDef {
   attack: number;
   health: number;
   cost: number;
-  desc?: string;
   archetype?: Archetype;
   ability?: Ability;
   /**
@@ -689,7 +688,6 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   pup: { id: 'pup', name: 'Pup', attack: 1, health: 1, cost: 0, tribe: 'runt' },
   'gutter-runt': {
     id: 'gutter-runt', name: 'Gutter Runt', attack: 1, health: 1, cost: 2,
-    desc: 'cheap body',
     tribe: 'runt',
     // Season unit-churn (issue #109): an honest day-1/2 body and merge
     // fodder, then leaves the shop rolls from day 3 onward — cheap filler
@@ -704,25 +702,21 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   },
   'rat-piper': {
     id: 'rat-piper', name: 'Rat-Piper', attack: 1, health: 2, cost: 4,
-    desc: 'each wave: pipes in a pup',
     ability: { trigger: 'startOfWave', effect: { kind: 'summon', unitId: 'pup', count: 1 } },
     tribe: 'swarm',
   },
   'brood-mother': {
     id: 'brood-mother', name: 'Brood-Mother', attack: 2, health: 3, cost: 5,
-    desc: 'faint: births 2 pups',
     ability: { trigger: 'faint', effect: { kind: 'summon', unitId: 'pup', count: 2 } },
     tribe: 'swarm',
   },
   'plague-bearer': {
     id: 'plague-bearer', name: 'Plague-Bearer', attack: 2, health: 2, cost: 4,
-    desc: 'each wave: poisons the back foe (scales ★, capped)',
     ability: { trigger: 'startOfWave', effect: { kind: 'poisonLastEnemy' } },
     tribe: 'plague',
   },
   'blight-witch': {
     id: 'blight-witch', name: 'Blight-Witch', attack: 3, health: 3, cost: 8,
-    desc: 'each wave: poisons the whole enemy line (scales ★, capped)',
     ability: { trigger: 'startOfWave', effect: { kind: 'poisonAllEnemies' } },
     tribe: 'plague',
   },
@@ -738,13 +732,11 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   // kit is tracked in #116 — tune the kit there, since Moe IS that kit.
   'draughtsman-moe': {
     id: 'draughtsman-moe', name: 'Draughtsman Moe', attack: 3, health: 3, cost: 8,
-    desc: 'Season 2 champion, returned; each wave: poisons the whole enemy line (scales ★, capped)',
     ability: { trigger: 'startOfWave', effect: { kind: 'poisonAllEnemies' } },
     tribe: 'plague',
   },
   gnawer: {
     id: 'gnawer', name: 'Gnawer', attack: 3, health: 1, cost: 4,
-    desc: 'faint: the rat behind inherits its OWN attack, plus a bonus for the wave it died on (capped)',
     // Issue #111 rework: was a flat `buffBehind` +2 that never aged. Now a
     // `bequeathAttack` (own live attack + capped wave-died-on bonus) — see
     // that effect kind's doc comment above for the full formula and the
@@ -754,23 +746,19 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   },
   'corpse-glutton': {
     id: 'corpse-glutton', name: 'Corpse-Glutton', attack: 3, health: 2, cost: 7,
-    desc: '+1/+1 when an ally faints',
     ability: { trigger: 'allyFaint', effect: { kind: 'gainStats', attack: 1, health: 1 } },
   },
   'bone-priest': {
     id: 'bone-priest', name: 'Bone-Priest', attack: 1, health: 4, cost: 5,
-    desc: 'faint: revives first fallen at 1/10/20 HP (tier), capped at their own max',
     ability: { trigger: 'faint', effect: { kind: 'revive' } },
   },
   'warren-warden': {
     id: 'warren-warden', name: 'Warren-Warden', attack: 2, health: 6, cost: 6,
-    desc: 'battle: buffs all rats behind it (scales ★)',
     ability: { trigger: 'startOfBattle', effect: { kind: 'buffBehind', attack: 1, health: 1, all: true } },
     tribe: 'brute',
   },
   'dire-rat': {
     id: 'dire-rat', name: 'Dire-Rat', attack: 4, health: 5, cost: 7,
-    desc: 'hide like a door: shrugs off 2 from every blow',
     damageReduction: 2,
     // Day-1 shop is deliberately kept plain (Jesper, 2026-07-11): the three
     // strongest early picks — the armored tank, the Season-1 anchor, and the
@@ -784,19 +772,16 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   },
   'md-rattyfock': {
     id: 'md-rattyfock', name: 'MD Rattyfock', attack: 2, health: 6, cost: 6,
-    desc: 'Season 1 survivor, patched and returned; battle: buffs all rats behind it (scales ★)',
     ability: { trigger: 'startOfBattle', effect: { kind: 'buffBehind', attack: 1, health: 1, all: true } },
     unlockDay: 2, // day-1 shop kept plain — see Dire-Rat's note.
     tribe: 'brute',
   },
   'press-kin': {
     id: 'press-kin', name: 'Press-Kin', attack: 2, health: 4, cost: 5,
-    desc: 'battle: buffs the rats beside it, best in the middle (scales ★)',
     ability: { trigger: 'startOfBattle', effect: { kind: 'buffAdjacent', attack: 2, health: 2 } },
   },
   'ward-weaver': {
     id: 'ward-weaver', name: 'Ward-Weaver', attack: 1, health: 3, cost: 5,
-    desc: 'each wave, blocks the front rat’s hit outright (★2 blocks 2, ★3 blocks 3)',
     ability: { trigger: 'startOfWave', effect: { kind: 'blockFrontHits' } },
     unlockDay: 2, // day-1 shop kept plain — see Dire-Rat's note.
   },
@@ -808,7 +793,6 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   // (date, day) with no new per-account state.
   'dawn-runt': {
     id: 'dawn-runt', name: 'Dawn-Runt', attack: 1, health: 2, cost: 4,
-    desc: 'thrives in the grey light before the city wakes; battle (before noon): buffs the horde’s attack (scales ★)',
     ability: {
       trigger: 'startOfBattle',
       effect: { kind: 'teamBuff', attack: 2, health: 0 },
@@ -819,7 +803,6 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   },
   'dusk-runt': {
     id: 'dusk-runt', name: 'Dusk-Runt', attack: 1, health: 2, cost: 4,
-    desc: 'comes alive as the drains go black again, ahead of the next dawn’s ride; battle (after noon): buffs the horde’s health (scales ★)',
     ability: {
       trigger: 'startOfBattle',
       effect: { kind: 'teamBuff', attack: 0, health: 2 },
@@ -838,7 +821,6 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   // currently reads `tribe` mechanically now that this was its only reader.
   'pack-caller': {
     id: 'pack-caller', name: 'Pack-Caller', attack: 2, health: 3, cost: 5,
-    desc: 'faint: splits its current attack/health evenly across the horde — all your Pack-Callers share one lifetime budget for this (scales ★)',
     // faint: fires on every death, so a Bone-Priest-revived Pack-Caller that
     // dies a second time pays out twice (revive is capped once per corpse,
     // same as Gnawer's `bequeathAttack`). `totalBudgetMultiplier` (issue
@@ -859,7 +841,6 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   // front, rewarding a durable front wall built to protect it.
   'slink-rat': {
     id: 'slink-rat', name: 'Slink-Rat', attack: 3, health: 1, cost: 6,
-    desc: 'fights from the dark: each wave, adds its own attack to the front clash, from any slot (scales ★)',
     // startOfWave, via `backlineDamage` (see that Effect's doc comment for
     // the full compounding-law note and the four resolved interaction
     // decisions against Marrow-Snap/Ward-Weaver/Gore-Cleaver). Fixed
@@ -876,7 +857,6 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   // and the placeholder-magnitude flag.
   'twilight-runt': {
     id: 'twilight-runt', name: 'Twilight-Runt', attack: 1, health: 2, cost: 5,
-    desc: 'fused of dawn and dusk, never idle: battle (before noon) mostly buffs the horde’s attack, battle (after noon) mostly buffs its health — neither half is ever a dead stat (scales ★)',
     ability: {
       trigger: 'startOfBattle',
       effect: {
@@ -894,7 +874,6 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   // Waves it takes to fill the cap is a real risk, not a free stat stick.
   'cellar-coil': {
     id: 'cellar-coil', name: 'Cellar-Coil', attack: 2, health: 4, cost: 5,
-    desc: 'each wave it survives off the front, permanently banks +attack (hard-capped, scales ★)',
     // startOfWave + `condition.notFront` (see both doc comments above): fires
     // every Wave the unit survives while NOT at board index 0, and is a
     // no-op the Wave it's front (or the Wave it doesn't survive). The

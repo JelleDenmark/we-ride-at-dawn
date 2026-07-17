@@ -462,6 +462,16 @@
   // a keyword tag, so THIS is where a player learns what a unit really does —
   // including exactly how much it scales per star. Numbers come from the same
   // core tables the sim uses (never hand-copied), so they can't drift.
+  //
+  // This is also the ONLY place a unit's ability is ever explained to a
+  // player. `UnitDef` in core used to carry its own hand-written `desc`
+  // string too — a second, separately-maintained explanation of the exact
+  // same ability that nothing ever rendered (only RelicDef.desc is actually
+  // shown; see the two `relic.desc` usages elsewhere in this file). It went
+  // stale more than once (silently — nothing broke, it just quietly stopped
+  // matching the mechanic) before being removed entirely. If a unit ever
+  // needs a description again, extend this function, not `UnitDef` — one
+  // generator, one place to keep in sync with sim.ts.
 
   // Shared per-star blurb builder: `mult(t)` is the per-tier stat multiplier,
   // which differs by effect (the 3x `tierAttackMultiplier` curve for fire-once
@@ -509,7 +519,7 @@
     }
     const e = def.ability.effect;
     if (e.kind === 'blockFrontHits') {
-      return 'Each wave, blocks the front rat’s first incoming hit outright — whoever is front at the time. ★2 blocks the first 2 hits, ★3 the first 3. Charges reset every wave and never carry over.';
+      return 'Each wave, blocks the front rat’s first hit outright (★2 blocks 2, ★3 blocks 3) — resets every wave.';
     }
     if (e.kind === 'chargeWhileBenched') {
       // Bespoke sentence (not the generic trigger/condition template below):
@@ -520,16 +530,16 @@
       // shape. Leading with the condition, then the gain, then the cap
       // framed as a ceiling reads as one plain sentence instead.
       const cap = (t: number) => cellarCoilChargeCapForTier(t);
-      return `Each wave it survives anywhere but the front, it permanently gains +${e.attackPerWave} attack (★2 +${e.attackPerWave * 2} · ★3 +${e.attackPerWave * 3}) — up to ${cap(1)} total over the whole ride (★2 ${cap(2)} · ★3 ${cap(3)}). At the front, or once that cap is banked, the wave simply passes with no gain.`;
+      return `Each wave off the front, permanently gains +${e.attackPerWave} attack (★2 +${e.attackPerWave * 2} · ★3 +${e.attackPerWave * 3}) — up to ${cap(1)} total (★2 ${cap(2)} · ★3 ${cap(3)}). No gain at the front, or once capped.`;
     }
     if (e.kind === 'distributeStatsOnFaint') {
       // Bespoke sentence (not the generic template below): the shared-budget
       // caveat (issue #131) doesn't fit the `${TRIGGER_WHEN} it ${what}` shape
       // without an awkward bolt-on clause, same reasoning as chargeWhileBenched.
-      return `When it faints, it gives away its current attack and health, split evenly across the horde — any point left over goes to the rat furthest forward. All your Pack-Callers share one lifetime budget for this, so spreading it thin or saving it for one big payout both draw from the same pool.`;
+      return `When it faints, splits its current attack/health evenly across the horde (leftover point to the frontmost rat). All your Pack-Callers share one lifetime budget for this.`;
     }
     if (e.kind === 'backlineDamage') {
-      return `At the start of every wave, if it's not the frontmost rat, it adds its own current attack directly into the clash against the frontmost enemy — no retaliation. If it ends up at the front itself, it just fights normally there instead.`;
+      return `At the start of every wave, if not at the front, adds its own attack into the clash against the frontmost enemy — no retaliation. At the front, it just fights normally.`;
     }
     let what = '';
     switch (e.kind) {
@@ -557,7 +567,7 @@
         what = `gains ${gainStatsScale(e.attack, e.health)}`;
         break;
       case 'revive':
-        what = `revives your first fallen rat at ${reviveHpForTier(1)} health (★2 ${reviveHpForTier(2)} · ★3 ${reviveHpForTier(3)}), never above the rat's own max; each fallen rat can only be raised once`;
+        what = `revives your first fallen rat at ${reviveHpForTier(1)} health (★2 ${reviveHpForTier(2)} · ★3 ${reviveHpForTier(3)}), capped at its own max — once per rat`;
         break;
       case 'buffAdjacent':
         what = `grants ${buffScale(e.attack, e.health)} to the rat(s) beside it — a middle seat buffs both neighbours`;
@@ -569,7 +579,7 @@
         what = `rots every enemy in the wave with ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) — ignores armor, clears when the wave falls, capped across multiple casters`;
         break;
       case 'teamBuffByTime':
-        what = `grants ${buffScale(e.beforeNoon.attack, e.beforeNoon.health)} to the whole horde riding before noon, or ${buffScale(e.afterNoon.attack, e.afterNoon.health)} riding after noon — whichever half of the day it fights in`;
+        what = `grants the whole horde ${buffScale(e.beforeNoon.attack, e.beforeNoon.health)} before noon, or ${buffScale(e.afterNoon.attack, e.afterNoon.health)} after noon`;
         break;
     }
     const when = def.ability.condition?.timeOfDay
@@ -624,7 +634,7 @@
         case 'blockFrontHits':
           return '⛨ block';
         case 'backlineDamage':
-          return '⚔ strike';
+          return '⚔ snipe';
       }
     }
     if ((def.damageReduction ?? 0) > 0) return '⛨ armor';
