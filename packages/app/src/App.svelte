@@ -522,6 +522,15 @@
       const cap = (t: number) => cellarCoilChargeCapForTier(t);
       return `Each wave it survives anywhere but the front, it permanently gains +${e.attackPerWave} attack (★2 +${e.attackPerWave * 2} · ★3 +${e.attackPerWave * 3}) — up to ${cap(1)} total over the whole ride (★2 ${cap(2)} · ★3 ${cap(3)}). At the front, or once that cap is banked, the wave simply passes with no gain.`;
     }
+    if (e.kind === 'distributeStatsOnFaint') {
+      // Bespoke sentence (not the generic template below): the shared-budget
+      // caveat (issue #131) doesn't fit the `${TRIGGER_WHEN} it ${what}` shape
+      // without an awkward bolt-on clause, same reasoning as chargeWhileBenched.
+      return `When it faints, it gives away its current attack and health, split evenly across the horde — any point left over goes to the rat furthest forward. All your Pack-Callers share one lifetime budget for this, so spreading it thin or saving it for one big payout both draw from the same pool.`;
+    }
+    if (e.kind === 'backlineDamage') {
+      return `At the start of every wave, if it's not the frontmost rat, it adds its own current attack directly into the clash against the frontmost enemy — no retaliation. If it ends up at the front itself, it just fights normally there instead.`;
+    }
     let what = '';
     switch (e.kind) {
       case 'summon': {
@@ -533,13 +542,13 @@
         what = `grants ${buffScale(e.attack, e.health)} to ${e.all ? 'every rat behind it' : 'the rat behind it'}`;
         break;
       case 'bequeathAttack':
-        what = `passes its OWN current attack to the rat behind it, plus a bonus for how deep into the ride it fell (capped at ${e.waveBonusCapMultiplier}× its own attack) — the rat right behind it inherits everything; the last slot has nobody to pass it to`;
+        what = `passes its OWN current attack to the rat behind it, plus a bonus for how deep into the ride it fell (capped at ${e.waveBonusCapMultiplier}× its own attack)`;
         break;
       case 'poisonFrontEnemy':
-        what = `applies ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) to the frontmost enemy — poison bites for its full count every clash and clears when the wave falls`;
+        what = `applies ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) to the frontmost enemy — clears when the wave falls`;
         break;
       case 'poisonLastEnemy':
-        what = `applies ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) to the enemy at the back of the line — poison bites for its full count every clash and clears when the wave falls`;
+        what = `applies ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) to the enemy at the back of the line — clears when the wave falls, capped across multiple casters`;
         break;
       case 'poisonTarget':
         what = `applies ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) to whatever it just struck`;
@@ -557,13 +566,7 @@
         what = `grants ${buffScale(e.attack, e.health)} to the whole horde, itself included`;
         break;
       case 'poisonAllEnemies':
-        what = `rots every enemy in the wave with ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) — poison bites for its full count every clash, ignores armor, and clears when the wave falls`;
-        break;
-      case 'distributeStatsOnFaint':
-        what = `gives away its own current attack and health — the same numbers shown above, plus anything it's picked up mid-battle (Warren-Warden, the Forgotten Backpack, and the like) — split evenly across every other rat on the board; any point left over goes to whichever of them is furthest forward, so nothing is wasted`;
-        break;
-      case 'backlineDamage':
-        what = `adds its own current attack straight into the clash against the frontmost enemy, from any slot behind the front — takes no retaliation, but this does nothing the wave it's actually the one at the front`;
+        what = `rots every enemy in the wave with ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) — ignores armor, clears when the wave falls, capped across multiple casters`;
         break;
       case 'teamBuffByTime':
         what = `grants ${buffScale(e.beforeNoon.attack, e.beforeNoon.health)} to the whole horde riding before noon, or ${buffScale(e.afterNoon.attack, e.afterNoon.health)} riding after noon — whichever half of the day it fights in`;
