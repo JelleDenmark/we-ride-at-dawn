@@ -655,7 +655,7 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     tribe: 'swarm',
   },
   'brood-mother': {
-    id: 'brood-mother', name: 'Brood-Mother', attack: 2, health: 3, cost: 6,
+    id: 'brood-mother', name: 'Brood-Mother', attack: 2, health: 3, cost: 5,
     desc: 'faint: births 2 pups',
     ability: { trigger: 'faint', effect: { kind: 'summon', unitId: 'pup', count: 2 } },
     tribe: 'swarm',
@@ -699,12 +699,12 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     tribe: 'runt',
   },
   'corpse-glutton': {
-    id: 'corpse-glutton', name: 'Corpse-Glutton', attack: 3, health: 2, cost: 6,
+    id: 'corpse-glutton', name: 'Corpse-Glutton', attack: 3, health: 2, cost: 7,
     desc: '+1/+1 when an ally faints',
     ability: { trigger: 'allyFaint', effect: { kind: 'gainStats', attack: 1, health: 1 } },
   },
   'bone-priest': {
-    id: 'bone-priest', name: 'Bone-Priest', attack: 1, health: 4, cost: 6,
+    id: 'bone-priest', name: 'Bone-Priest', attack: 1, health: 4, cost: 5,
     desc: 'faint: revives first fallen at 1/10/20 HP (tier), capped at their own max',
     ability: { trigger: 'faint', effect: { kind: 'revive' } },
   },
@@ -715,7 +715,7 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     tribe: 'brute',
   },
   'dire-rat': {
-    id: 'dire-rat', name: 'Dire-Rat', attack: 4, health: 5, cost: 8,
+    id: 'dire-rat', name: 'Dire-Rat', attack: 4, health: 5, cost: 7,
     desc: 'hide like a door: shrugs off 2 from every blow',
     damageReduction: 2,
     // Day-1 shop is deliberately kept plain (Jesper, 2026-07-11): the three
@@ -741,7 +741,7 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     ability: { trigger: 'startOfBattle', effect: { kind: 'buffAdjacent', attack: 2, health: 2 } },
   },
   'ward-weaver': {
-    id: 'ward-weaver', name: 'Ward-Weaver', attack: 1, health: 3, cost: 6,
+    id: 'ward-weaver', name: 'Ward-Weaver', attack: 1, health: 3, cost: 5,
     desc: 'each wave, blocks the front rat’s hit outright — ★2 blocks 2 hits, ★3 blocks 3; resets every wave',
     ability: { trigger: 'startOfWave', effect: { kind: 'blockFrontHits' } },
     unlockDay: 2, // day-1 shop kept plain — see Dire-Rat's note.
@@ -814,7 +814,7 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   // fires in — see `teamBuffByTime`'s doc comment above for the mechanism
   // and the placeholder-magnitude flag.
   'twilight-runt': {
-    id: 'twilight-runt', name: 'Twilight-Runt', attack: 1, health: 2, cost: 4,
+    id: 'twilight-runt', name: 'Twilight-Runt', attack: 1, health: 2, cost: 5,
     desc: 'fused of dawn and dusk, never idle: battle (before noon) mostly buffs the horde’s attack, battle (after noon) mostly buffs its health — neither half is ever a dead stat (scales ★; magnitudes pending balance sign-off, issue #110)',
     ability: {
       trigger: 'startOfBattle',

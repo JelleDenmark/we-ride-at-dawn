@@ -135,9 +135,9 @@ describe('shop basics', () => {
         { defId: 'gutter-runt', tier: 3, relicIds: [] },
       ],
     };
-    // dire-rat cost 8 -> floor(8/2)=4, tier 1 -> 4 * 1*1 = 4
+    // dire-rat cost 7 -> floor(7/2)=3, tier 1 -> 3 * 1*1 = 3
     const afterDire = must(sellUnit(s, 0)).state;
-    expect(afterDire.scrap).toBe(DAILY_SCRAP + 4);
+    expect(afterDire.scrap).toBe(DAILY_SCRAP + 3);
     expect(afterDire.board).toHaveLength(2);
     // gutter-runt cost 2 -> floor(2/2)=1, tier 2 -> 1 * 2*2 = 4 (was 2 linearly)
     const afterRunt2 = must(sellUnit(s, 1)).state;
@@ -1108,7 +1108,7 @@ describe('bench', () => {
     const afterDire = sellBenchUnit(s, 0);
     expect(afterDire.ok).toBe(true);
     if (afterDire.ok) {
-      expect(afterDire.state.scrap).toBe(DAILY_SCRAP + 4);
+      expect(afterDire.state.scrap).toBe(DAILY_SCRAP + 3); // dire-rat t1: floor(7/2)*1=3
       expect(afterDire.state.bench).toHaveLength(2);
     }
     const afterRunt2 = sellBenchUnit(s, 1);
@@ -1617,7 +1617,7 @@ describe('severance: par buyback for retired units (issue #108)', () => {
         { defId: 'gutter-runt', tier: 3, relicIds: [] },
       ],
     };
-    expect(must(sellUnit(s, 0)).state.scrap).toBe(DAILY_SCRAP + 4); // dire-rat t1: floor(8/2)*1=4
+    expect(must(sellUnit(s, 0)).state.scrap).toBe(DAILY_SCRAP + 3); // dire-rat t1: floor(7/2)*1=3
     expect(must(sellUnit(s, 1)).state.scrap).toBe(DAILY_SCRAP + 4); // gutter-runt t2: floor(2/2)*4=4
     expect(must(sellUnit(s, 2)).state.scrap).toBe(DAILY_SCRAP + 9); // gutter-runt t3: floor(2/2)*9=9
   });
