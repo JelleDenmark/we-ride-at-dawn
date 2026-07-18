@@ -90,11 +90,9 @@ describe('shop basics', () => {
     expect(buyUnit(full, unitSlot(s)).ok).toBe(true);
     const noRoom = {
       ...full,
-      bench: [
-        { defId: 'plague-bearer', tier: 1, relicIds: [] },
-        { defId: 'warren-warden', tier: 1, relicIds: [] },
-        { defId: 'gutter-runt', tier: 1, relicIds: [] },
-      ],
+      bench: ['plague-bearer', 'warren-warden', 'gutter-runt', 'press-kin', 'ward-weaver']
+        .slice(0, BENCH_SIZE)
+        .map((defId) => ({ defId, tier: 1, relicIds: [] as string[] })),
     };
     expect(buyUnit(noRoom, unitSlot(s)).ok).toBe(false);
   });
@@ -842,11 +840,9 @@ describe('bench', () => {
         { defId: 'brood-mother', tier: 1, relicIds: [] },
         { defId: 'bone-priest', tier: 1, relicIds: [] },
       ],
-      bench: [
-        { defId: 'plague-bearer', tier: 1, relicIds: [] },
-        { defId: 'warren-warden', tier: 1, relicIds: [] },
-        { defId: 'gutter-runt', tier: 1, relicIds: [] },
-      ],
+      bench: ['plague-bearer', 'warren-warden', 'gutter-runt', 'press-kin', 'ward-weaver']
+        .slice(0, BENCH_SIZE)
+        .map((defId) => ({ defId, tier: 1, relicIds: [] as string[] })),
       shop: {
         ...base.shop,
         slots: [{ kind: 'unit' as const, defId: 'dire-rat' }, ...base.shop.slots.slice(1)],
@@ -862,7 +858,7 @@ describe('bench', () => {
     expect(buyUnit(s, 0).ok).toBe(false);
     expect(s.scrap).toBe(20);
     expect(s.board).toHaveLength(5);
-    expect(s.bench).toHaveLength(3);
+    expect(s.bench).toHaveLength(BENCH_SIZE);
   });
 
   it('a 3rd copy merges across board+bench: 2 on bench + buy 1 (board full) lands on the bench', () => {
@@ -916,11 +912,13 @@ describe('bench', () => {
         { defId: 'brood-mother', tier: 1, relicIds: [] },
         { defId: 'bone-priest', tier: 1, relicIds: [] },
       ],
-      // Bench full (BENCH_SIZE = 3): two merge candidates + one bystander.
+      // Bench full: two merge candidates + bystanders padding to BENCH_SIZE.
       bench: [
         { defId: 'gutter-runt', tier: 1, relicIds: ['rusted-nail'] },
         { defId: 'gutter-runt', tier: 1, relicIds: ['tail-charm'] },
-        { defId: 'plague-bearer', tier: 1, relicIds: [] },
+        ...['plague-bearer', 'warren-warden', 'press-kin', 'ward-weaver']
+          .slice(0, BENCH_SIZE - 2)
+          .map((defId) => ({ defId, tier: 1, relicIds: [] as string[] })),
       ],
       shop: {
         ...base.shop,
@@ -931,10 +929,10 @@ describe('bench', () => {
     const res = buyUnit(s, 0);
     expect(res.ok).toBe(true);
     if (res.ok) {
-      // Board untouched; bench shrank from 3 to 2 (the trio collapsed to one).
+      // Board untouched; bench shrank by one (the trio collapsed to one).
       expect(res.state.board).toEqual(s.board);
       expect(res.state.board.length).toBeLessThanOrEqual(boardCapForDay(1));
-      expect(res.state.bench).toHaveLength(2);
+      expect(res.state.bench).toHaveLength(BENCH_SIZE - 1);
       expect(res.state.bench.length).toBeLessThanOrEqual(BENCH_SIZE);
       const merged = res.state.bench.find((u) => u.defId === 'gutter-runt')!;
       expect(merged.tier).toBe(2);
@@ -947,7 +945,7 @@ describe('bench', () => {
     }
     // The original state is never mutated by the (successful) buy.
     expect(s.scrap).toBe(20);
-    expect(s.bench).toHaveLength(3);
+    expect(s.bench).toHaveLength(BENCH_SIZE);
   });
 
   it('buys the 3rd copy for a trio even when board AND bench are full (2 on board)', () => {
@@ -964,11 +962,9 @@ describe('bench', () => {
         { defId: 'brood-mother', tier: 1, relicIds: [] },
         { defId: 'bone-priest', tier: 1, relicIds: [] },
       ],
-      bench: [
-        { defId: 'plague-bearer', tier: 1, relicIds: [] },
-        { defId: 'warren-warden', tier: 1, relicIds: [] },
-        { defId: 'dire-rat', tier: 1, relicIds: [] },
-      ],
+      bench: ['plague-bearer', 'warren-warden', 'dire-rat', 'press-kin', 'ward-weaver']
+        .slice(0, BENCH_SIZE)
+        .map((defId) => ({ defId, tier: 1, relicIds: [] as string[] })),
       shop: {
         ...base.shop,
         slots: [{ kind: 'unit' as const, defId: 'gutter-runt' }, ...base.shop.slots.slice(1)],
@@ -1020,11 +1016,9 @@ describe('bench', () => {
         { defId: 'dire-rat', tier: 1, relicIds: [] },
         { defId: 'gnawer', tier: 1, relicIds: [] },
       ],
-      bench: [
-        { defId: 'rat-piper', tier: 1, relicIds: [] },
-        { defId: 'brood-mother', tier: 1, relicIds: [] },
-        { defId: 'bone-priest', tier: 1, relicIds: [] },
-      ],
+      bench: ['rat-piper', 'brood-mother', 'bone-priest', 'plague-bearer', 'warren-warden']
+        .slice(0, BENCH_SIZE)
+        .map((defId) => ({ defId, tier: 1, relicIds: [] as string[] })),
     };
     expect(benchUnit(s, 0).ok).toBe(false); // bench already at BENCH_SIZE
     const room = { ...s, bench: s.bench.slice(0, BENCH_SIZE - 1) };
@@ -1032,7 +1026,10 @@ describe('bench', () => {
     expect(res.ok).toBe(true);
     if (res.ok) {
       expect(res.state.board.map((u) => u.defId)).toEqual(['gnawer']);
-      expect(res.state.bench.map((u) => u.defId)).toEqual(['rat-piper', 'brood-mother', 'dire-rat']);
+      expect(res.state.bench.map((u) => u.defId)).toEqual([
+        ...room.bench.map((u) => u.defId),
+        'dire-rat',
+      ]);
     }
     expect(benchUnit(s, 99).ok).toBe(false); // nothing there
   });

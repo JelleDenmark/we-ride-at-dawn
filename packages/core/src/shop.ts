@@ -13,7 +13,7 @@ export const SEASON_DAYS = 7;
 /** Bench slots: storage for rats outside the fighting horde (never enter
  * `simulate`). Small on purpose — it's for holding merge candidates and
  * counter-tech, not a second board. */
-export const BENCH_SIZE = 3;
+export const BENCH_SIZE = 5;
 
 // Idle economy: the horde skirmishes hourly, earning scrap per wave cleared.
 export const SCRAP_PER_DEPTH = 1;
