@@ -477,19 +477,34 @@ export type Effect =
    * dose in EITHER mode — an intentional "you have to survive to earn the
    * survival buff" shape, not a bug.
    *
-   * PLACEHOLDER MAGNITUDES, PENDING JESPER SIGN-OFF (same gate issue #110
-   * always required, not yet re-run for this rework): early
-   * {attack: 2, health: 1}, late {attack: 1, health: 1}, switchWave 15.
-   * Deliberately NOT a straight carryover of the old {3,1}/{1,2} halves —
-   * those summed to a single dose per battle; here both eventually land in
-   * the SAME battle, so each was cut down to keep total late-battle power
-   * in the same neighborhood as the old single-dose magnitude rather than
-   * roughly doubling it. Needs a fresh balance pass — `twilight-runt-probe.ts`
-   * was deleted as part of this rework, since its entire premise was
-   * separating an externally-random 50/50 blend, which no longer exists:
-   * every battle now deterministically experiences the same wave-keyed
-   * progression, so the standard `all-unit-value.ts` measurement is
-   * sufficient going forward, no bespoke unblending probe required.
+   * MAGNITUDES (balance pass run 2026-07-18, this rework's required gate):
+   * early {attack: 2, health: 1}, late {attack: 1, health: 1}, switchWave
+   * 15, cost 6. Deliberately NOT a straight carryover of the old {3,1}/
+   * {1,2} halves — those summed to a single dose per battle; here both
+   * eventually land in the SAME battle, so each was cut down to keep total
+   * late-battle power in the same neighborhood rather than doubling it.
+   * The pass measured (PR #123 has the full tables):
+   *   - all-unit-value at cost 6: 20.4/12.4/6.9 waves-per-100-scrap, ranks
+   *     #1/#1/#3 — TAMER than the time-blend version's all-#1 22.7/12.8/8.1
+   *     profile that cost 6 was originally set against. Cost 6 stands.
+   *   - switchWave 15 fires for real boards, not just in theory: the
+   *     realistic-player lookahead rides avg 22-27 waves from day 3 on, and
+   *     on a census-style day-7 t2+relics board a BACK-seat Runt survives
+   *     past wave 15 in ~100% of rides (late dose worth +0.93 waves there,
+   *     shipped vs early-only). Lowering switchWave to 10-12 mostly buffs
+   *     the tier-list's weak probe boards (T3 depth eff 6.9 -> 9.4-10.2,
+   *     back to runaway-#1) while adding only +0.3 waves for strong boards
+   *     — worse balance for no identity gain. 15 stands.
+   *   - Dose shape: back-loading ({1,1}/{2,1}) measured strictly worse at
+   *     every tier on every metric; early-heavy is correct.
+   *   - Boss Trial: real Trial boards top out ~8 phases, so the late dose
+   *     effectively never fires there at any sane switchWave — accepted:
+   *     the EARLY dose always fires, so no mode has a dead-card axis (the
+   *     root bug this rework fixes), and the compounding-law bound means
+   *     Trial contribution was always going to be modest.
+   *   - Seat value on a realistic day-7 board: +2.5 waves vs a mid-adoption
+   *     alternative seat — second to Ward-Weaver's +5.9, i.e. strong but
+   *     not the outlier the pre-#127 tooling had hidden.
    */
   | { kind: 'teamBuffByWave'; early: { attack: number; health: number }; late: { attack: number; health: number }; switchWave: number };
 
@@ -844,10 +859,11 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   // waves-per-100-scrap vs. the next-best unit's 20.1/10.5/7.6. 6 keeps it
   // #1 at every tier but with a normal-sized lead (22.7/12.8/8.1), rather
   // than a structural outlier, while respecting `unlockDay: 3` as the
-  // primary limiter on how much of it a horde can field this week. NOTE:
-  // those numbers were measured on the pre-rework 50/50 time blend; the
-  // wave-based version below is cumulative (both doses land in one battle),
-  // so the cost needs re-measuring as part of this rework's balance gate.
+  // primary limiter on how much of it a horde can field this week. Cost 6
+  // re-measured for the wave-based rework (2026-07-18 balance pass, PR
+  // #123): 20.4/12.4/6.9 waves-per-100-scrap, ranks #1/#1/#3 — tamer than
+  // the time-blend profile above; cost 6 stands. See `teamBuffByWave`'s
+  // doc comment for the full pass.
   'twilight-runt': {
     id: 'twilight-runt', name: 'Twilight-Runt', attack: 1, health: 2, cost: 6,
     ability: {
