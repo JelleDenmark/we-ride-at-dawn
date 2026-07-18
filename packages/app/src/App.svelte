@@ -23,6 +23,7 @@
     generateGauntlet,
     simulate,
     UNIT_DEFS,
+    ENEMY_POOL,
     RELIC_DEFS,
     newBuild,
     advanceAfterDawn,
@@ -443,7 +444,16 @@
   // only one of the two can be armed at a time (arming either clears both).
   let pendingSwap = $state<number | null>(null);
   let inspect = $state<{ area: 'shop' | 'board' | 'bench'; index: number } | null>(null);
+  // Compendium/bestiary (issue #136): browse full stats/abilities for every
+  // UnitDef, own-horde or enemy, without needing an owned copy on the
+  // board/bench/shop. `selected` holds a def id within the active tab's
+  // list; null shows the tab's list, non-null shows that entry's detail.
+  let compendium = $state<{ tab: 'units' | 'enemies'; selected: string | null } | null>(null);
   let notice = $state('');
+
+  // Enemy summon targets (e.g. Watch-Sergeant -> Watch-Whelp) live in
+  // ENEMY_POOL, not UNIT_DEFS — abilitySentence's summon case needs both.
+  const ENEMY_DEFS: Record<string, UnitDef> = Object.fromEntries(ENEMY_POOL.map((e) => [e.id, e]));
 
   const TRIGGER_WHEN: Record<string, string> = {
     startOfBattle: 'At the start of the ride,',
@@ -505,8 +515,11 @@
     return buffScaleWith(attack, health, (t) => t);
   }
 
-  function abilitySentence(defId: string): string {
-    const def = UNIT_DEFS[defId];
+  function abilitySentence(def: UnitDef | undefined): string {
+    // Takes the def directly (not an id + UNIT_DEFS lookup) so it works for
+    // both rats and enemies — enemies live in ENEMY_POOL, a separate array
+    // not keyed by id (issue #136), and every caller already has the def
+    // object in hand.
     // Passive armor is not an `ability`, but it's absolutely something the
     // player must be told about — Dire-Rat's whole identity lives here.
     const armor = def?.damageReduction ?? 0;
@@ -544,7 +557,7 @@
     let what = '';
     switch (e.kind) {
       case 'summon': {
-        const name = UNIT_DEFS[e.unitId]?.name ?? e.unitId;
+        const name = UNIT_DEFS[e.unitId]?.name ?? ENEMY_DEFS[e.unitId]?.name ?? e.unitId;
         what = `summons ${e.count} ${name}${e.count > 1 ? 's' : ''} (★2 ${e.count * 2} · ★3 ${e.count * 3}) in front`;
         break;
       }
@@ -589,8 +602,8 @@
     return armorSentence ? `${abilityPart} ${armorSentence}` : abilityPart;
   }
 
-  function isSummoner(defId: string): boolean {
-    return UNIT_DEFS[defId]?.ability?.effect.kind === 'summon';
+  function isSummoner(def: UnitDef | undefined): boolean {
+    return def?.ability?.effect.kind === 'summon';
   }
 
   // Compact tile tag (issue: mobile shop overflow) — the tile shows only a
@@ -1290,6 +1303,11 @@
       : ''}
   </p>
 
+  <div class="compendium-nav">
+    <button onclick={() => (compendium = { tab: 'units', selected: null })}>📖 Rats</button>
+    <button onclick={() => (compendium = { tab: 'enemies', selected: null })}>📖 Enemies</button>
+  </div>
+
   {#if CHANNEL === 'dev'}
   <div class="dev">
     <span class="panel-label">testing</span>
@@ -1698,8 +1716,8 @@
                 </div>
               </div>
             </div>
-            <p class="card-ability">{abilitySentence(def.id)}</p>
-            {#if isSummoner(def.id)}
+            <p class="card-ability">{abilitySentence(def)}</p>
+            {#if isSummoner(def)}
               <p class="card-hint">summoned rats fight beyond your warren's size (up to {combatCapForBuild(build)} in the drains)</p>
             {/if}
             <p class="card-hint">recruit three of a kind and they merge into one stronger ★ rat</p>
@@ -1749,8 +1767,8 @@
                 <div class="card-stats">{stats.attack}/{stats.health}</div>
               </div>
             </div>
-            <p class="card-ability">{abilitySentence(unit.defId)}</p>
-            {#if isSummoner(unit.defId)}
+            <p class="card-ability">{abilitySentence(def)}</p>
+            {#if isSummoner(def)}
               <p class="card-hint">summoned rats fight beyond your warren's size (up to {combatCapForBuild(build)} in the drains)</p>
             {/if}
             {#if unit.relicIds.length > 0}
@@ -1778,7 +1796,7 @@
                 <div class="card-stats">{stats.attack}/{stats.health}</div>
               </div>
             </div>
-            <p class="card-ability">{abilitySentence(unit.defId)}</p>
+            <p class="card-ability">{abilitySentence(def)}</p>
             <p class="card-hint">
               {boardFull
                 ? 'the warren is full — swap this one in for a fighting rat'
@@ -1797,6 +1815,59 @@
               <button onclick={() => (inspect = null)}>close</button>
             </div>
           {/if}
+        {/if}
+      </div>
+    </div>
+  {/if}
+
+  {#if compendium}
+    {@const comp = compendium}
+    {@const list = comp.tab === 'units' ? Object.values(UNIT_DEFS) : ENEMY_POOL}
+    {@const selectedDef = comp.selected ? list.find((d) => d.id === comp.selected) : null}
+    <div class="sheet-backdrop" role="presentation" onclick={() => (compendium = null)}>
+      <div class="sheet compendium-sheet" role="dialog" aria-modal="true" onclick={(e) => e.stopPropagation()}>
+        {#if selectedDef}
+          {@const armor = selectedDef.damageReduction ?? 0}
+          <div class="card-head">
+            {#if ART_URL[selectedDef.id]}<img class="card-portrait" src={ART_URL[selectedDef.id]} alt="" />{/if}
+            <div>
+              <div class="card-name">{selectedDef.name}</div>
+              <div class="card-stats">{selectedDef.attack}/{selectedDef.health}</div>
+              {#if selectedDef.archetype || armor > 0}
+                <div class="card-sub">
+                  {#if selectedDef.archetype}{selectedDef.archetype}{/if}{#if selectedDef.archetype && armor > 0} · {/if}{#if armor > 0}{armor} armor{/if}
+                </div>
+              {/if}
+            </div>
+          </div>
+          <p class="card-ability">{abilitySentence(selectedDef)}</p>
+          {#if isSummoner(selectedDef)}
+            <p class="card-hint">summoned rats fight beyond your warren's size (up to {combatCapForBuild(build)} in the drains)</p>
+          {/if}
+          {#if comp.tab === 'enemies'}
+            <p class="card-hint">raw stats, as fielded at ★1 — the gauntlet may scale these by depth</p>
+          {/if}
+          <div class="card-actions">
+            <button onclick={() => (compendium = { tab: comp.tab, selected: null })}>◀ back</button>
+            <button onclick={() => (compendium = null)}>close</button>
+          </div>
+        {:else}
+          <div class="compendium-header">
+            <div class="compendium-tabs">
+              <button class:active={comp.tab === 'units'} onclick={() => (compendium = { tab: 'units', selected: null })}>Rats</button>
+              <button class:active={comp.tab === 'enemies'} onclick={() => (compendium = { tab: 'enemies', selected: null })}>Enemies</button>
+            </div>
+            <button class="compendium-close" onclick={() => (compendium = null)} aria-label="close compendium">✕</button>
+          </div>
+          <div class="compendium-list">
+            {#each list as def (def.id)}
+              <button class="compendium-row" onclick={() => (compendium = { tab: comp.tab, selected: def.id })}>
+                {#if ART_URL[def.id]}<img class="compendium-row-portrait" src={ART_URL[def.id]} alt="" />{/if}
+                <span class="compendium-row-name">{def.name}</span>
+                <span class="compendium-row-stats">{def.attack}/{def.health}</span>
+              </button>
+            {/each}
+          </div>
         {/if}
       </div>
     </div>
@@ -2398,6 +2469,111 @@
     margin-top: 8px;
     font-size: 12px;
     color: #d4af37;
+  }
+
+  .compendium-nav {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin: 0 0 16px;
+  }
+
+  .compendium-nav button {
+    padding: 6px 14px;
+    font-family: inherit;
+    font-size: 12px;
+    color: var(--ink);
+    background: #241a14;
+    border: 1px solid #4a3520;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+
+  .compendium-sheet {
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .compendium-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .compendium-tabs {
+    display: flex;
+    gap: 6px;
+  }
+
+  .compendium-tabs button {
+    padding: 6px 14px;
+    font-family: inherit;
+    font-size: 13px;
+    color: var(--ink-dim);
+    background: #241a14;
+    border: 1px solid #4a3520;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+
+  .compendium-tabs button.active {
+    color: #f0e6d2;
+    border-color: var(--accent);
+  }
+
+  .compendium-close {
+    padding: 6px 10px;
+    font-family: inherit;
+    font-size: 14px;
+    color: var(--ink-dim);
+    background: none;
+    border: none;
+    cursor: pointer;
+  }
+
+  .compendium-list {
+    margin-top: 12px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .compendium-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    font-family: inherit;
+    text-align: left;
+    color: var(--ink);
+    background: #241a14;
+    border: 1px solid #4a3520;
+    border-radius: 8px;
+    cursor: pointer;
+  }
+
+  .compendium-row-portrait {
+    width: 36px;
+    height: 36px;
+    object-fit: contain;
+    background: #1a140f;
+    border: 1px solid #4a3520;
+    border-radius: 6px;
+    flex-shrink: 0;
+  }
+
+  .compendium-row-name {
+    flex: 1;
+    font-size: 14px;
+  }
+
+  .compendium-row-stats {
+    font-size: 13px;
+    font-weight: bold;
+    color: #f0e6d2;
   }
 
   .team-relics {
