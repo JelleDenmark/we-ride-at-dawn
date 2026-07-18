@@ -52,9 +52,9 @@ after dark. read slow, this one's long.
   every Pack-Caller on your board shares that one pool.
 - **Slink-Rat** — 3/1, cost 6. each wave it adds its own attack straight into the clash
   against the front foe, from anywhere in the back line — no retaliation.
-- **Twilight-Runt** — 1/2, cost 6. fuses Dawn-Runt and Dusk-Runt into one card: before noon
-  it mostly hits attack (+3atk/+1hp), after noon it mostly hits health (+1atk/+2hp) — never
-  a dead half, whichever hour you're riding in.
+- **Twilight-Runt** — 1/2, cost 6. fuses Dawn-Runt and Dusk-Runt into one card: the whole
+  horde gains +2atk/+1hp on its first wave, then +1atk/+1hp more once wave 15 hits — both
+  permanent for the rest of the ride. never a dead card, whenever you ride.
 - **Cellar-Coil** — 2/4, cost 5. every wave it survives anywhere but the front, it banks
   permanent attack — capped hard per tier (6/12/18 total) so waiting in the back can't
   become infinite. cash it in once the line finally breaks to it.
@@ -199,6 +199,14 @@ in battle replays instead of a plain grey block.
   was hand-copied and had gone stale the same way the cost list itself once did (still
   measuring retired MD-Rattyfock, never measuring returning Warren-Warden) — it now derives
   from `seasonUnitPool()` so it can't drift from the real shop pool again.
+  **Wave-based rework (PR #123, supersedes the mechanism above):** the wall-clock split was
+  replaced wholesale before ship with `teamBuffByWave` — +2atk/+1hp to the whole horde on the
+  unit's first wave, +1atk/+1hp more the first wave ≥ 15, additive and wave-keyed instead of
+  clock-keyed, killing both the invisible-to-the-player problem and the fixed-hour Boss Trial
+  dead-axis at the root. Balance pass re-run 2026-07-18 on the reworked shape: 20.4/12.4/6.9
+  waves-per-100-scrap at cost 6 (ranks #1/#1/#3 — tamer than the time-blend profile the cost
+  was originally set against); cost 6, doses {2,1}/{1,1}, and switchWave 15 all confirmed —
+  full tables in PR #123. The player-copy bullet above describes the wave-based version.
 - **Cellar-Coil:** `1a9500e`/`1b7e4fc` (issue #106), portrait `c674064`. Stats 2/4/cost 5
   and cap table [6,12,18] (`cellarCoilChargeCapForTier`) explicitly flagged tentative.
   Description text polished in `d6cd5de` (bespoke sentence, not the generic template) —
