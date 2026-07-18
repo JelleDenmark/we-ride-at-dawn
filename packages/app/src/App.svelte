@@ -580,7 +580,10 @@
         what = `applies ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) to the enemy at the back of the line — clears when the wave falls, capped across multiple casters`;
         break;
       case 'poisonTarget':
-        what = `applies ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) to whatever it just struck`;
+        // Flat `stacks * tier`, NOT poisonStacksForTier — mirrors sim.ts's
+        // (flagged-but-live) exemption for this one effect, so the numbers
+        // shown match what the sim actually applies.
+        what = `applies ${e.stacks} poison (★2 ${e.stacks * 2} · ★3 ${e.stacks * 3}) to whatever it just struck`;
         break;
       case 'gainStats':
         what = `gains ${gainStatsScale(e.attack, e.health)}`;
@@ -1885,11 +1888,11 @@
             </p>
           {:else}
             <p class="card-ability">{abilitySentence(selectedUnit)}</p>
-            {#if isSummoner(selectedUnit)}
+            {#if comp.tab === 'units' && isSummoner(selectedUnit)}
               <p class="card-hint">summoned rats fight beyond your warren's size (up to {combatCapForBuild(build)} in the drains)</p>
             {/if}
             {#if comp.tab === 'enemies'}
-              <p class="card-hint">raw stats, as fielded at ★1 — the gauntlet may scale these by depth</p>
+              <p class="card-hint">shown at ★1 — enemies never star up; the gauntlet may scale their stats by depth</p>
             {/if}
           {/if}
           <div class="card-actions">
