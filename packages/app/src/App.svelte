@@ -2262,8 +2262,7 @@
   }
 
   .bench-board {
-    grid-template-columns: repeat(3, 1fr);
-    max-width: 280px;
+    grid-template-columns: repeat(5, 1fr);
   }
 
   .bench-tile {
