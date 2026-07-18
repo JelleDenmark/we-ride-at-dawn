@@ -65,10 +65,11 @@ const FLAG_THRESHOLD = 1.0;
 const IDS = Object.keys(UNIT_DEFS).filter((id) => id !== 'pup');
 const CAP = boardCapForDay(DAY);
 
-// timeOfDay-gated kits (dawn/dusk-runt's condition, twilight-runt's
-// teamBuffByTime) are blended 50/50 across both half-days, like a real
-// expedition sees; everything else skips the second sim for speed.
-const TOD_SENSITIVE = new Set(['dawn-runt', 'dusk-runt', 'twilight-runt']);
+// timeOfDay-gated kits (dawn/dusk-runt's condition — twilight-runt's rework
+// to the wave-keyed teamBuffByWave removed it from this set) are blended
+// 50/50 across both half-days, like a real expedition sees; everything else
+// skips the second sim for speed.
+const TOD_SENSITIVE = new Set(['dawn-runt', 'dusk-runt']);
 
 let SIM_CALLS = 0;
 const gauntlets = SEASONS.map((d) => generateGauntlet(d, DAY));

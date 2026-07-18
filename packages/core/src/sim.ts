@@ -121,6 +121,18 @@ interface BattleUnit {
    * just Cellar-Coil — harmless dead weight on units without the effect.
    */
   chargeStacks: number;
+  /**
+   * Twilight-Runt's `teamBuffByWave` (2026-07-16 rework of issue #110).
+   * Tracks how far this instance has progressed through its two fire-once
+   * team grants — 'none' (neither fired yet), 'early' (only the early-wave
+   * dose fired), 'both' (both doses fired, ever). Each transition happens at
+   * most once per unit instance — same fire-once invariant class as
+   * `startOfBattleFired` — see the `teamBuffByWave` case in `applyEffect`
+   * and its Effect doc comment in data/units.ts for the full compounding-law
+   * reasoning. Init 'none' for every unit, harmless dead weight on units
+   * without the effect.
+   */
+  waveBuffPhase: 'none' | 'early' | 'both';
 }
 
 /** A hit reduced by armor still lands for at least this much. */
@@ -202,6 +214,7 @@ export function simulate(
       startOfBattleFired: false,
       raised: false,
       chargeStacks: 0,
+      waveBuffPhase: 'none',
     };
   };
 
@@ -552,29 +565,26 @@ export function simulate(
         for (const target of board) buff(target, effect.attack * tierAttackMultiplier(tier), effect.health * tierHealthMultiplier(tier));
         break;
       }
-      case 'teamBuffByTime': {
-        // Twilight-Runt (issue #110). Unlike `teamBuff`, this effect carries
-        // NO `condition` on its ability — the startOfBattle trigger always
-        // fires (once per unit instance, same fire-once rule as every other
-        // startOfBattle buff below/above), and the half applied is picked
-        // right here from the closure's `timeOfDay` (Lineup.timeOfDay, never
-        // the wall clock — see its declaration near the top of `simulate`).
-        // `timeOfDay` absent (pre-#12 lineups, every existing golden log)
-        // matches neither branch, so this is a no-op — same
-        // golden-log-preserving guarantee as `condition.timeOfDay` mismatching
-        // on Dawn-Runt/Dusk-Runt, just enforced here instead of in
-        // `fireEntryTriggers`.
-        //
-        // Compounding-law check: identical reasoning to `teamBuff` above —
-        // `startOfBattle` fires once per unit instance, ever, so this cannot
-        // re-fire on a later wave and accumulate across the 45-wave battle,
-        // regardless of which half (or neither) ends up applying.
-        const half =
-          timeOfDay === 'beforeNoon' ? effect.beforeNoon :
-          timeOfDay === 'afterNoon' ? effect.afterNoon :
-          undefined;
-        if (half) {
-          for (const target of board) buff(target, half.attack * tierAttackMultiplier(tier), half.health * tierHealthMultiplier(tier));
+      case 'teamBuffByWave': {
+        // Twilight-Runt wave-based rework (2026-07-16, replaces
+        // teamBuffByTime). `startOfWave`-triggered — fires for every unit,
+        // every wave (see fireEntryTriggers) — so unlike startOfBattle
+        // effects there is no free fire-once gate at the trigger level;
+        // `source.waveBuffPhase` does that job instead. Two grants, each
+        // landing at most once per unit instance ever: the early dose the
+        // first wave this unit is alive for, the late dose the first wave
+        // `currentWave >= effect.switchWave` holds. ADDITIVE, not a swap —
+        // the early dose is never revoked, so once both have fired a battle
+        // holds the sum of both. See the Effect's doc comment in
+        // data/units.ts for the full compounding-law reasoning and why this
+        // is deliberately simpler than a revoke-and-reapply swap.
+        if (source.waveBuffPhase === 'none') {
+          for (const target of board) buff(target, effect.early.attack * tierAttackMultiplier(tier), effect.early.health * tierHealthMultiplier(tier));
+          source.waveBuffPhase = 'early';
+        }
+        if (source.waveBuffPhase === 'early' && currentWave >= effect.switchWave) {
+          for (const target of board) buff(target, effect.late.attack * tierAttackMultiplier(tier), effect.late.health * tierHealthMultiplier(tier));
+          source.waveBuffPhase = 'both';
         }
         break;
       }

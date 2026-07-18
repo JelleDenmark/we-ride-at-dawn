@@ -143,14 +143,9 @@ function simOnce(build: BuildState, g: Gauntlet, timeOfDay?: TimeOfDay): Eval {
 
 function evalBuild(build: BuildState, g: Gauntlet): Eval {
   if (build.board.length === 0) return { waves: 0, score: 0 };
-  // Twilight-Runt's teamBuffByTime is the only board effect that reads
-  // Lineup.timeOfDay (dawn/dusk-runt are out of the shop pool and can't be
-  // bought). Blend both halves when it's fielded; otherwise omit (a no-op).
-  if (build.board.some((u) => u.defId === 'twilight-runt')) {
-    const a = simOnce(build, g, 'beforeNoon');
-    const b = simOnce(build, g, 'afterNoon');
-    return { waves: (a.waves + b.waves) / 2, score: (a.score + b.score) / 2 };
-  }
+  // No purchasable unit reads Lineup.timeOfDay anymore: Twilight-Runt's old
+  // teamBuffByTime became the wave-keyed teamBuffByWave, and dawn/dusk-runt
+  // are out of the shop pool. Omitting timeOfDay is a no-op.
   return simOnce(build, g);
 }
 

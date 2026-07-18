@@ -44,9 +44,10 @@
  * "genuinely dead weight."
  *
  * Time-sensitive units are blended 50/50 across the before/after-noon halves,
- * since a real expedition sees both. This covers BOTH shapes: `condition.
- * timeOfDay` gates (Dawn-Runt/Dusk-Runt) and `teamBuffByTime` (Twilight-Runt),
- * whose time branch lives inside the effect with no top-level condition.
+ * since a real expedition sees both. Only `condition.timeOfDay` gates
+ * (Dawn-Runt/Dusk-Runt) remain time-sensitive — Twilight-Runt's old
+ * `teamBuffByTime` shape was replaced by the wave-keyed `teamBuffByWave`,
+ * which every battle experiences identically (no blend needed).
  *
  * Run from packages/core: npx tsx scripts/all-unit-value.ts
  */
@@ -107,13 +108,9 @@ function measure(lineup: Lineup, day: number): Measure {
 }
 
 // Blend 50/50 across the two day-halves for any time-sensitive unit; plain
-// measure otherwise. Time sensitivity comes in TWO shapes and both need the
-// blend: a `condition.timeOfDay` gate (Dawn/Dusk-Runt — active one half,
-// dormant the other), and `teamBuffByTime` (Twilight-Runt — different buff
-// each half, chosen inside the effect with NO top-level condition). Detecting
-// only the condition shape made Twilight-Runt fall through to a measurement
-// with `timeOfDay` unset, where sim.ts applies NEITHER half — the unit read
-// as a total no-op (~0, rank 18-19/19) purely as a tooling artifact.
+// measure otherwise. Since the `teamBuffByWave` rework, the only remaining
+// time-sensitive shape is a `condition.timeOfDay` gate (Dawn/Dusk-Runt —
+// active one half, dormant the other).
 function measureUnit(candidateId: string | null, tier: number, day: number, pos: Position, timeSensitive: boolean): Measure {
   if (!timeSensitive) return measure(roster(candidateId, tier, day, pos), day);
   const am = measure(roster(candidateId, tier, day, pos, 'beforeNoon'), day);
@@ -146,8 +143,7 @@ function baseline(tier: number, day: number, pos: Position): Measure {
 const rows: Row[] = [];
 for (const id of CANDIDATE_IDS) {
   const def = UNIT_DEFS[id];
-  const timeSensitive =
-    def.ability?.condition?.timeOfDay !== undefined || def.ability?.effect.kind === 'teamBuffByTime';
+  const timeSensitive = def.ability?.condition?.timeOfDay !== undefined;
   for (let tier = 1; tier <= 3; tier++) {
     const day = TIER_DAY[tier];
     const scrapCost = def.cost * Math.pow(3, tier - 1);
