@@ -265,8 +265,13 @@ const SHOP_RELIC_POOL = Object.values(RELIC_DEFS);
  * `unlockDay` and before the earliest `retireDay` in play, this filters down
  * to byte-identical output to the old unconditional pool — existing golden
  * shop rolls for those days are unaffected.
+ *
+ * Exported (issue #136) so the compendium can list exactly the rats a
+ * player can actually obtain this week — same day gate, same permanent
+ * pool exclusions (pup/blight-witch/md-rattyfock/dawn-runt/dusk-runt) — no
+ * second filter to keep in sync.
  */
-function shopUnitPoolForDay(day: number): UnitDef[] {
+export function shopUnitPoolForDay(day: number): UnitDef[] {
   return SHOP_UNIT_POOL.filter(
     (u) =>
       (u.unlockDay === undefined || day >= u.unlockDay) &&

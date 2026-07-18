@@ -46,6 +46,7 @@ export {
   rollOfferings,
   upcomingUnlocks,
   upcomingRetirements,
+  shopUnitPoolForDay,
   buyUnit,
   canRecruit,
   buyRelic,

@@ -54,6 +54,7 @@
     nextSlotPrice,
     buyBoardSlot,
     upcomingUnlocks,
+    shopUnitPoolForDay,
     tierAttackMultiplier,
     tierHealthMultiplier,
     reviveHpForTier,
@@ -1822,7 +1823,7 @@
 
   {#if compendium}
     {@const comp = compendium}
-    {@const list = comp.tab === 'units' ? Object.values(UNIT_DEFS) : ENEMY_POOL}
+    {@const list = comp.tab === 'units' ? shopUnitPoolForDay(build.day) : ENEMY_POOL}
     {@const selectedDef = comp.selected ? list.find((d) => d.id === comp.selected) : null}
     <div class="sheet-backdrop" role="presentation" onclick={() => (compendium = null)}>
       <div class="sheet compendium-sheet" role="dialog" aria-modal="true" onclick={(e) => e.stopPropagation()}>
