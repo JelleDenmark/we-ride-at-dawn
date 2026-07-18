@@ -3,21 +3,25 @@
 **STATUS: DRAFT — NOT POSTED. Nothing in this draft is live. Do not post until the release
 is actually cut, merged to `master`, and prod-verified per the standard process.**
 
-- Source: `git log --oneline master..origin/dev` (76 commits as of this update — 50 at
-  draft time, plus the 3-commit `issue-121-realistic-economy-sim` branch that merged into
-  `dev` as PR #125 (`fc7535f`), plus `484d5d3` (bot-playtest fixes) and `2ca87d7` (idle
-  interest removed, Boss Trial portrait, scroll-to-replay), plus the 2026-07-17 evening
-  batch: `63cc786` (Sluice-Bulwark art), `ca6d56b` (poison into damageDealt, scripts-only),
-  the #131 exploit-cap arc (`998b3da`/`f4d78b9`/`fadb850`/`a8f3844` — Plague-Bearer poison
-  cap, Pack-Caller shared-budget cap, linear Boss HP), the three description-cleanup
-  commits (`5e7c1a8`/`b8f672a`/`3e28427`), `ef0ca99` (bench 3 -> 5, 2026-07-18), Gutter-Runt's
-  `retireDay` moving from 3 to 1 (full-season retirement, not just day-3-on — see the
-  sourcing note below), the compendium feature (`bae91c1`/`b9678f8`/`9e79556`/`d0d3a97`/
-  `82e55c9`, issue #136, plus a pre-launch-review fix pass to it, `c47d60e`), and the
-  2026-07-18 pre-launch balance sign-off pass: `14df91c`/`1dc5326` (fix + hardening of
-  `all-unit-value.ts`'s Twilight-Runt measurement bug, issue #127) and `30b884c`
-  (Twilight-Runt cost 5 -> 6, the correction that measurement fix revealed was needed —
-  see the sourcing note below).
+- Source: `git log --oneline master..origin/dev` (85 commits as of this update — 76 at the
+  last update, plus PR #123 (Twilight-Runt's wave-based rework, `e5de7b3`/`3ddd662`, merged
+  to `dev` via `5e40c35`) and `33db602` (Ward-Weaver cost 5 -> 6, a second correction the
+  same balance pass turned up — see the sourcing notes below for both). Everything from the
+  76-commit count forward is unchanged and still applies: the 3-commit
+  `issue-121-realistic-economy-sim` branch that merged into `dev` as PR #125 (`fc7535f`),
+  `484d5d3` (bot-playtest fixes) and `2ca87d7` (idle interest removed, Boss Trial portrait,
+  scroll-to-replay), the 2026-07-17 evening batch: `63cc786` (Sluice-Bulwark art), `ca6d56b`
+  (poison into damageDealt, scripts-only), the #131 exploit-cap arc (`998b3da`/`f4d78b9`/
+  `fadb850`/`a8f3844` — Plague-Bearer poison cap, Pack-Caller shared-budget cap, linear Boss
+  HP), the three description-cleanup commits (`5e7c1a8`/`b8f672a`/`3e28427`), `ef0ca99`
+  (bench 3 -> 5, 2026-07-18), Gutter-Runt's `retireDay` moving from 3 to 1 (full-season
+  retirement, not just day-3-on — see the sourcing note below), the compendium feature
+  (`bae91c1`/`b9678f8`/`9e79556`/`d0d3a97`/`82e55c9`, issue #136, plus a pre-launch-review
+  fix pass to it, `c47d60e`), and the 2026-07-18 pre-launch balance sign-off pass:
+  `14df91c`/`1dc5326` (fix + hardening of `all-unit-value.ts`'s Twilight-Runt measurement
+  bug, issue #127) and `30b884c` (Twilight-Runt cost 5 -> 6, the correction that measurement
+  fix revealed was needed — see the sourcing note below, since superseded by the
+  wave-based rework's own balance pass).
   All still `dev`-only — read directly from
   `packages/core/src/data/units.ts`, `relics.ts`, `shop.ts`, `sim.ts`, `boss-trial.ts`, and
   `packages/app/src/App.svelte`. Only the FINAL state of anything touched more than once in
@@ -199,14 +203,22 @@ in battle replays instead of a plain grey block.
   was hand-copied and had gone stale the same way the cost list itself once did (still
   measuring retired MD-Rattyfock, never measuring returning Warren-Warden) — it now derives
   from `seasonUnitPool()` so it can't drift from the real shop pool again.
-  **Wave-based rework (PR #123, supersedes the mechanism above):** the wall-clock split was
-  replaced wholesale before ship with `teamBuffByWave` — +2atk/+1hp to the whole horde on the
-  unit's first wave, +1atk/+1hp more the first wave ≥ 15, additive and wave-keyed instead of
-  clock-keyed, killing both the invisible-to-the-player problem and the fixed-hour Boss Trial
-  dead-axis at the root. Balance pass re-run 2026-07-18 on the reworked shape: 20.4/12.4/6.9
-  waves-per-100-scrap at cost 6 (ranks #1/#1/#3 — tamer than the time-blend profile the cost
-  was originally set against); cost 6, doses {2,1}/{1,1}, and switchWave 15 all confirmed —
-  full tables in PR #123. The player-copy bullet above describes the wave-based version.
+  **Wave-based rework (PR #123, supersedes the mechanism above) — MERGED to `dev` via
+  `5e40c35`, 2026-07-18.** The wall-clock split was replaced wholesale before ship with
+  `teamBuffByWave` (`e5de7b3`) — +2atk/+1hp to the whole horde on the unit's first wave,
+  +1atk/+1hp more the first wave ≥ 15, additive and wave-keyed instead of clock-keyed,
+  killing both the invisible-to-the-player problem and the fixed-hour Boss Trial dead-axis
+  at the root. Balance pass (`3ddd662`) re-run the same day on the reworked shape:
+  20.4/12.4/6.9 waves-per-100-scrap at cost 6 (ranks #1/#1/#3 — tamer than the time-blend
+  profile the cost was originally set against); cost 6, doses {2,1}/{1,1}, and switchWave 15
+  all confirmed — full tables in PR #123's balance-pass comment. The player-copy bullet
+  above describes the wave-based version; the beforeNoon/afterNoon mechanism two paragraphs
+  up never shipped to players. Inspect-sheet text needed no separate fix — `abilitySentence()`
+  in App.svelte generates it from the ability's own `early`/`late`/`switchWave` fields, so it
+  already reflects these numbers. Full core suite re-run clean at 267/267 after the merge
+  (test count dropped from 269 as part of this range: the rework's own commit replaced the
+  wall-clock Twilight-Runt describe block in `abilities.test.ts` with a smaller wave-based
+  one — not a coverage regression, a like-for-like swap of what the old tests covered).
 - **Cellar-Coil:** `1a9500e`/`1b7e4fc` (issue #106), portrait `c674064`. Stats 2/4/cost 5
   and cap table [6,12,18] (`cellarCoilChargeCapForTier`) explicitly flagged tentative.
   Description text polished in `d6cd5de` (bespoke sentence, not the generic template) —
@@ -242,13 +254,14 @@ in battle replays instead of a plain grey block.
   actual `units.ts` like everything else here. Twilight-Runt's cost moved again after this
   merge (5->6, see its own sourcing note above) — the player-copy bullet states the net
   4->6 change, not the two intermediate steps. Ward-Weaver ALSO moved again after this
-  merge, back 5->6 (2026-07-18, same session as the Twilight-Runt wave-rework balance
-  pass on PR #123): the real-board seat-swap probe run for that pass (not the isolated
-  tier-list script — see the balance-blind-spots note on that PR) found Ward-Weaver the
-  single strongest back-seat swap tested, +5.9 waves on a day-7 t2+relics board, clear of
-  every alternative. Net effect for players: unchanged from `master`'s current 6, so it's
-  omitted from the player-copy cost list above (nothing to notice) but disclosed here for
-  the record. `dev` re-tested at 269/269 after the bump.
+  merge, back 5->6 (`33db602`, 2026-07-18, same session as the Twilight-Runt wave-rework
+  balance pass on PR #123, committed directly to `dev` rather than its own PR): the
+  real-board seat-swap probe run for that pass (not the isolated tier-list script — see
+  the balance-blind-spots note on PR #123) found Ward-Weaver the single strongest back-seat
+  swap tested, +5.9 waves on a day-7 t2+relics board, clear of every alternative including
+  Twilight-Runt's own +2.5. Net effect for players: unchanged from `master`'s current 6, so
+  it's omitted from the player-copy cost list above (nothing to notice) but disclosed here
+  for the record.
 - **Glass Shard:** `ea24651` (issue #122). `firstHitBonusScalesWithWave`, explicitly
   "deliberately left UNCAPPED per Jesper's explicit sign-off" in the commit body — this is
   a disclosed, accepted design risk, not an oversight or a live bug. Worth watching next
