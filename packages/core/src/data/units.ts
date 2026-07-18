@@ -777,12 +777,13 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   },
   // COST 6 -> 5 -> 6 (2026-07-18, Jesper's call): PR #125's cost rebalance
   // dropped this to 5. The Twilight-Runt wave-rework balance pass (PR #123)
-  // ran a real-board seat-swap probe (see [[wrad-benchmark-blind-spots]] for
-  // why that's the right tool, not the isolated tier list) and found
-  // Ward-Weaver the single best back-seat swap on a day-7 t2+relics board —
-  // +5.9 waves, clear of every alternative including Twilight-Runt's own
-  // +2.5. Bumped back to 6 to bring that outlier in line; not re-run through
-  // the full all-unit-value/realistic-player suite yet.
+  // ran a real-board seat-swap probe (the isolated all-unit-value tier list
+  // doesn't reach deep enough waves to catch this — see that script's doc
+  // comment) and found Ward-Weaver the single best back-seat swap on a
+  // day-7 t2+relics board — +5.9 waves, clear of every alternative
+  // including Twilight-Runt's own +2.5. Bumped back to 6 to bring that
+  // outlier in line; not re-run through the full all-unit-value/
+  // realistic-player suite yet.
   'ward-weaver': {
     id: 'ward-weaver', name: 'Ward-Weaver', attack: 1, health: 3, cost: 6,
     ability: { trigger: 'startOfWave', effect: { kind: 'blockFrontHits' } },
