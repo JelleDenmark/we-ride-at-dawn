@@ -55,6 +55,7 @@
     buyBoardSlot,
     upcomingUnlocks,
     shopUnitPoolForDay,
+    seasonUnitPool,
     tierAttackMultiplier,
     tierHealthMultiplier,
     reviveHpForTier,
@@ -62,6 +63,10 @@
     cellarCoilChargeCapForTier,
     simulateBossTrial,
     simulateBossTrialReplay,
+    bossTrialPhaseAttack,
+    bossTrialPhaseHP,
+    BOSS_TRIAL_ESCALATION,
+    BOSS_TRIAL_HP_GROWTH_PER_PHASE,
     type ActionResult,
     type BattleResult,
     type BuildState,
@@ -1835,13 +1840,21 @@
 
   {#if compendium}
     {@const comp = compendium}
-    {@const unitList = [...Object.values(UNIT_DEFS)].sort((a, b) => a.cost - b.cost)}
+    {@const unitList = seasonUnitPool().sort((a, b) => a.cost - b.cost)}
     {@const relicList = [...Object.values(RELIC_DEFS)].sort((a, b) => a.cost - b.cost)}
+    {@const bossDef = {
+      id: 'boss-trial',
+      name: 'The Gauntlet Boss',
+      attack: Math.round(bossTrialPhaseAttack(0)),
+      health: Math.round(bossTrialPhaseHP(0)),
+      cost: 0,
+    } as UnitDef}
+    {@const enemyList = [...ENEMY_POOL, bossDef]}
     {@const selectedUnit =
       comp.tab === 'units' && comp.selected
         ? UNIT_DEFS[comp.selected]
         : comp.tab === 'enemies' && comp.selected
-          ? ENEMY_POOL.find((e) => e.id === comp.selected)
+          ? enemyList.find((e) => e.id === comp.selected)
           : undefined}
     {@const selectedRelic = comp.tab === 'relics' && comp.selected ? RELIC_DEFS[comp.selected] : undefined}
     <div class="sheet-backdrop" role="presentation" onclick={() => (compendium = null)}>
@@ -1865,12 +1878,19 @@
               {/if}
             </div>
           </div>
-          <p class="card-ability">{abilitySentence(selectedUnit)}</p>
-          {#if isSummoner(selectedUnit)}
-            <p class="card-hint">summoned rats fight beyond your warren's size (up to {combatCapForBuild(build)} in the drains)</p>
-          {/if}
-          {#if comp.tab === 'enemies'}
-            <p class="card-hint">raw stats, as fielded at ★1 — the gauntlet may scale these by depth</p>
+          {#if selectedUnit.id === 'boss-trial'}
+            <p class="card-ability">
+              Fought once a day in the Boss Trial, not the weekly gauntlet — a single foe that escalates every phase
+              cleared: attack ×{BOSS_TRIAL_ESCALATION}, health +{BOSS_TRIAL_HP_GROWTH_PER_PHASE}. Stats shown are phase 1.
+            </p>
+          {:else}
+            <p class="card-ability">{abilitySentence(selectedUnit)}</p>
+            {#if isSummoner(selectedUnit)}
+              <p class="card-hint">summoned rats fight beyond your warren's size (up to {combatCapForBuild(build)} in the drains)</p>
+            {/if}
+            {#if comp.tab === 'enemies'}
+              <p class="card-hint">raw stats, as fielded at ★1 — the gauntlet may scale these by depth</p>
+            {/if}
           {/if}
           <div class="card-actions">
             <button onclick={() => (compendium = { tab: comp.tab, selected: null })}>◀ back</button>
@@ -1910,7 +1930,7 @@
                 </button>
               {/each}
             {:else if comp.tab === 'enemies'}
-              {#each ENEMY_POOL as def (def.id)}
+              {#each enemyList as def (def.id)}
                 <button class="compendium-row" onclick={() => (compendium = { tab: 'enemies', selected: def.id })}>
                   {#if ART_URL[def.id]}<img class="compendium-row-portrait" src={ART_URL[def.id]} alt="" />{/if}
                   <span class="compendium-row-name">{def.name}</span>

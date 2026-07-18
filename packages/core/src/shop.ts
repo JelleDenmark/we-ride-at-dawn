@@ -280,6 +280,30 @@ export function shopUnitPoolForDay(day: number): UnitDef[] {
 }
 
 /**
+ * Every rat obtainable in the shop on ANY day this season (issue #136
+ * follow-up) — the compendium's "will I ever see this" filter, as opposed to
+ * `shopUnitPoolForDay`'s "right now." A not-yet-unlocked rat still counts
+ * (it unlocks later this week); a rat whose `retireDay` has already passed
+ * for every day 1..SEASON_DAYS (e.g. `retireDay: 1`), or one excluded from
+ * `SHOP_UNIT_POOL` entirely (replaced units — Pup, Blight-Witch, ...),
+ * never does. Union over the season, same underlying rule, no second filter
+ * to keep in sync.
+ */
+export function seasonUnitPool(): UnitDef[] {
+  const seen = new Set<string>();
+  const result: UnitDef[] = [];
+  for (let day = 1; day <= SEASON_DAYS; day++) {
+    for (const u of shopUnitPoolForDay(day)) {
+      if (!seen.has(u.id)) {
+        seen.add(u.id);
+        result.push(u);
+      }
+    }
+  }
+  return result;
+}
+
+/**
  * Units still locked on `day` but arriving later this week, soonest first —
  * lets the app tell players new rats are coming instead of them only
  * noticing once the pool quietly grows (there was no such signal until this
