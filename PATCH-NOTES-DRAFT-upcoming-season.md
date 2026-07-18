@@ -3,17 +3,21 @@
 **STATUS: DRAFT — NOT POSTED. Nothing in this draft is live. Do not post until the release
 is actually cut, merged to `master`, and prod-verified per the standard process.**
 
-- Source: `git log --oneline master..origin/dev` (66 commits as of this update — 50 at
+- Source: `git log --oneline master..origin/dev` (76 commits as of this update — 50 at
   draft time, plus the 3-commit `issue-121-realistic-economy-sim` branch that merged into
   `dev` as PR #125 (`fc7535f`), plus `484d5d3` (bot-playtest fixes) and `2ca87d7` (idle
   interest removed, Boss Trial portrait, scroll-to-replay), plus the 2026-07-17 evening
   batch: `63cc786` (Sluice-Bulwark art), `ca6d56b` (poison into damageDealt, scripts-only),
   the #131 exploit-cap arc (`998b3da`/`f4d78b9`/`fadb850`/`a8f3844` — Plague-Bearer poison
   cap, Pack-Caller shared-budget cap, linear Boss HP), the three description-cleanup
-  commits (`5e7c1a8`/`b8f672a`/`3e28427`), `ef0ca99` (bench 3 -> 5, 2026-07-18), and one
-  further **uncommitted** change made directly against this draft (2026-07-18): Gutter-Runt's
-  `retireDay` moved from 3 to 1, retiring it from the shop pool for the whole season instead
-  of just from day 3 on (see the sourcing note below).
+  commits (`5e7c1a8`/`b8f672a`/`3e28427`), `ef0ca99` (bench 3 -> 5, 2026-07-18), Gutter-Runt's
+  `retireDay` moving from 3 to 1 (full-season retirement, not just day-3-on — see the
+  sourcing note below), the compendium feature (`bae91c1`/`b9678f8`/`9e79556`/`d0d3a97`/
+  `82e55c9`, issue #136, plus a pre-launch-review fix pass to it, `c47d60e`), and the
+  2026-07-18 pre-launch balance sign-off pass: `14df91c`/`1dc5326` (fix + hardening of
+  `all-unit-value.ts`'s Twilight-Runt measurement bug, issue #127) and `30b884c`
+  (Twilight-Runt cost 5 -> 6, the correction that measurement fix revealed was needed —
+  see the sourcing note below).
   All still `dev`-only — read directly from
   `packages/core/src/data/units.ts`, `relics.ts`, `shop.ts`, `sim.ts`, `boss-trial.ts`, and
   `packages/app/src/App.svelte`. Only the FINAL state of anything touched more than once in
@@ -22,8 +26,8 @@ is actually cut, merged to `master`, and prod-verified per the standard process.
 - Version: **not yet bumped anywhere in this range.** Prod (`master`) currently serves
   `0.6.9`. This draft uses **v0.7.0** as a placeholder — flag for a real number when the
   release is actually cut; a season this size (five new units, a full rework of two more,
-  a whole new game mode) reads as more than a patch bump, but that's a judgment call, not
-  a fact.
+  a whole new game mode, and an in-game compendium) reads as more than a patch bump, but
+  that's a judgment call, not a fact.
 - This is a **balance + content release**, built for the Monday 06:00 CET season reset —
   it should NOT ship as a hotfix, and should ride the weekly leaderboard wipe like v0.6.5 did.
 - Texture note: minion (unit/relic) changes are written in full stat-line detail, the way
@@ -50,7 +54,7 @@ after dark. read slow, this one's long.
 - **Slink-Rat** — 3/1, cost 6. each wave it adds its own attack straight into the clash
   against the front foe, from anywhere in the back line — no retaliation. 1 HP means it's
   paper if it ever reaches the front itself; it wants a wall in front of it, not a fight.
-- **Twilight-Runt** — 1/2, cost 5. fuses Dawn-Runt and Dusk-Runt into one card: before noon
+- **Twilight-Runt** — 1/2, cost 6. fuses Dawn-Runt and Dusk-Runt into one card: before noon
   it mostly hits attack (+3atk/+1hp), after noon it mostly hits health (+1atk/+2hp) — never
   a dead half, whichever hour you're riding in.
 - **Cellar-Coil** — 2/4, cost 5. every wave it survives anywhere but the front, it banks
@@ -85,8 +89,9 @@ after dark. read slow, this one's long.
 this straightens the ladder without touching a single kit:
 - Bone-Priest 6 -> 5 / Brood-Mother 6 -> 5 / Ward-Weaver 6 -> 5 (all three were overpriced
   for their solo output)
-- Twilight-Runt 4 -> 5 (best t2 solo unit in the game had never been priced against real
-  numbers)
+- Twilight-Runt 4 -> 6 (a scouting-tool blind spot had it reading as barely worth fielding —
+  fixed, it turned out to be the strongest solo unit in the game at every star level, not
+  just t2. priced up to match, twice, before this ever reached a real board)
 - Corpse-Glutton 6 -> 7 (the strongest realistic-board pick in the game was underpriced)
 - Dire-Rat 8 -> 7 (the vanilla tank was priced almost nobody into playing it)
 
@@ -118,6 +123,14 @@ climbs steadily phase over phase, scored and ranked on its own
 leaderboard, with its own replay so you can watch today's fight back afterward. the panel
 now shows a boss portrait instead of a blank slot, and starting either replay scrolls the
 fight into view instead of leaving it playing out below your screen.
+
+**New: Compendium**
+every rat, enemy, and relic in the game now has a proper reference card. tap "rats",
+"enemies", or "relics" up top to browse full stats and abilities any time — owned or not,
+on your board or still sitting in the stalls. rat cards say whether they're in today's
+stalls, arriving later this week, or off the roster for the season; enemy cards show their
+raw stats as fielded (the gauntlet may still scale them by depth). nothing here is new —
+same numbers the fight always used — there was just nowhere to look them up before now.
 
 **Economy**
 deep runs pay a little more evenly now — the old scrap curve had a flat dead zone around
@@ -171,8 +184,22 @@ in battle replays instead of a plain grey block.
   afterNoon (pure-health) half scored a structural +0 damage — floors both halves in the
   other stat. Final: beforeNoon {atk:3,hp:1}, afterNoon {atk:1,hp:2}, both explicitly
   flagged "pending Jesper sign-off" in the code, unresolved as of the last commit in range.
-  Base cost in `dev`'s units.ts is 5 — the 4->5 bump landed with the cost-rebalance merge
-  (PR #125, see below), verified directly in the file.
+  **Cost, corrected twice:** the 4->5 bump landed with the cost-rebalance merge (PR #125,
+  see below). A second, separate bump to 6 followed on 2026-07-18 (`30b884c`), after fixing
+  a real measurement bug in `all-unit-value.ts` (issue #127, `14df91c`) that had this unit
+  reading as barely worth fielding (a fake "rising" trend, near-zero every tier) — the
+  script only blended before/after-noon for units with a top-level `ability.condition.
+  timeOfDay` (Dawn/Dusk-Runt's shape); Twilight-Runt's `teamBuffByTime` branches on time
+  INSIDE the effect with no such condition, so the unmodified script measured it with
+  `timeOfDay` unset, where `sim.ts` applies neither half. Fixed, it reads #1 in its tier at
+  every star by a wide margin: 27.2/15.3/9.7 waves-per-100-scrap at cost 5 vs. the next-best
+  unit's 20.1/10.5/7.6 — a structural outlier, not a small-numbers artifact. Jesper's call:
+  price to 6, which keeps it #1 at every tier but with a normal-sized lead (22.7/12.8/8.1),
+  leaving `unlockDay: 3` as the real limiter on how much of it a horde can field this week.
+  A follow-up commit (`1dc5326`) also fixed the same script's `CANDIDATE_IDS` list, which
+  was hand-copied and had gone stale the same way the cost list itself once did (still
+  measuring retired MD-Rattyfock, never measuring returning Warren-Warden) — it now derives
+  from `seasonUnitPool()` so it can't drift from the real shop pool again.
 - **Cellar-Coil:** `1a9500e`/`1b7e4fc` (issue #106), portrait `c674064`. Stats 2/4/cost 5
   and cap table [6,12,18] (`cellarCoilChargeCapForTier`) explicitly flagged tentative.
   Description text polished in `d6cd5de` (bespoke sentence, not the generic template) —
@@ -191,8 +218,8 @@ in battle replays instead of a plain grey block.
 - **Plague-Bearer rework:** `a134b3a` (issue #112). `poisonLastEnemy`, stack table unchanged
   (`poisonStacksForTier`, 1/3/5) — only the target changed, not the amount.
 - **Gutter-Runt retirement:** originally `f84d54a` (`retireDay: 3`, issue #109) — a day-3
-  mid-week fade, not a full pull. Changed this update (uncommitted as of this draft) to
-  `retireDay: 1`, which excludes it from the shop pool before day 1 even rolls: a full-season
+  mid-week fade, not a full pull. Changed to `retireDay: 1` in `701301e` (2026-07-18),
+  which excludes it from the shop pool before day 1 even rolls: a full-season
   retirement via the same day-gating primitive, rather than the Dawn-Runt/Dusk-Runt-style
   flat `SHOP_UNIT_POOL` cut (that path is reserved for units being replaced outright; Gutter-
   Runt isn't). Par-buyback severance (`sellRefund` in shop.ts) still applies from day 1 on,
@@ -204,8 +231,10 @@ in battle replays instead of a plain grey block.
   first written).** PR #125, commit `82a9778`, merged via `fc7535f`. "Jesper approved all
   six rows, 2026-07-17" per the commit body. `dev` still needs to reach `master` before
   this is live for players, same as everything else in this draft, but the cost-rebalance
-  bullet and Twilight-Runt's 4->5 cost claim are no longer contingent on a separate unmerged
-  branch — they're sourced from `dev`'s actual `units.ts` like everything else here.
+  bullet is no longer contingent on a separate unmerged branch — sourced from `dev`'s
+  actual `units.ts` like everything else here. Twilight-Runt's cost moved again after this
+  merge (5->6, see its own sourcing note above) — the player-copy bullet states the net
+  4->6 change, not the two intermediate steps.
 - **Glass Shard:** `ea24651` (issue #122). `firstHitBonusScalesWithWave`, explicitly
   "deliberately left UNCAPPED per Jesper's explicit sign-off" in the commit body — this is
   a disclosed, accepted design risk, not an oversight or a live bug. Worth watching next
@@ -311,6 +340,22 @@ in battle replays instead of a plain grey block.
   Slink-Rat's keyword tag renamed "strike" -> "snipe". Summarized as one small-fixes line.
 - **Sluice-Bulwark art (`63cc786`, #124):** closes the last rect-fallback gap in battle
   replays for a 0.6.0-era enemy. One small-fixes line.
+- **Compendium (issue #136):** `bae91c1` (base feature — Units/Enemies/Relics tabs, full
+  `abilitySentence()` reuse so cards can't drift from the sim), `b9678f8` (day-gate the
+  Units tab so it doesn't leak content), `9e79556` (availability note per rat, cost display,
+  Relics tab), `d0d3a97` (drop rats never actually obtainable — Pup, Blight-Witch,
+  MD-Rattyfock, Dawn/Dusk-Runt — add the Boss Trial boss as its own enemy-tab entry),
+  `82e55c9` (bench-board CSS: one row of 5, matching the horde board's layout — visual only,
+  no capacity change, `BENCH_SIZE` was already 5 since `ef0ca99`).
+  **Update, pre-launch review (`c47d60e`, same day):** two display bugs caught and fixed
+  before this ever reached players, so nothing to disclose as a live issue — the summoner
+  hint ("summoned rats fight beyond your warren's size...") was rendering on ENEMY cards
+  too (Watch-Sergeant, Muster-Captain), describing the player's own combat cap for what are
+  enemy reinforcements; and Midden-Hag's card showed the shared 1/3/5 poison table instead
+  of the flat `stacks * tier` scaling `sim.ts` actually uses for that one effect (its own
+  flagged exemption) — the card claimed ★2 3/★3 5, the sim does ★2 2/★3 3. Both fixed to
+  match the sim exactly, same "one generator, can't drift" guarantee the rest of
+  `abilitySentence()` already had.
 - **Season start:** Monday 06:00 CET is now stated in the player copy's opening line, per
   Jesper's instruction (2026-07-18). Next Monday is 2026-07-20 — the release must be cut
   and prod-verified before then for the notes to be true.
