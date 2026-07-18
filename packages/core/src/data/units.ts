@@ -856,8 +856,17 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   // a unit that's never a dead card regardless of which half of the day it
   // fires in — see `teamBuffByTime`'s doc comment above for the mechanism
   // and the placeholder-magnitude flag.
+  //
+  // COST 4 -> 5 -> 6 (2026-07-18, Jesper's call, pre-launch sign-off): the
+  // #127 fix to all-unit-value.ts's timeOfDay blend (it previously measured
+  // this unit as a near-total no-op) revealed it was the single best T1/T2/T3
+  // solo unit in the game by a wide margin at cost 5 — 27.2/15.3/9.7
+  // waves-per-100-scrap vs. the next-best unit's 20.1/10.5/7.6. 6 keeps it
+  // #1 at every tier but with a normal-sized lead (22.7/12.8/8.1), rather
+  // than a structural outlier, while respecting `unlockDay: 3` as the
+  // primary limiter on how much of it a horde can field this week.
   'twilight-runt': {
-    id: 'twilight-runt', name: 'Twilight-Runt', attack: 1, health: 2, cost: 5,
+    id: 'twilight-runt', name: 'Twilight-Runt', attack: 1, health: 2, cost: 6,
     ability: {
       trigger: 'startOfBattle',
       effect: {
