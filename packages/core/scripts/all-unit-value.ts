@@ -54,20 +54,22 @@ import { generateGauntlet } from '../src/gauntlet';
 import { simulate } from '../src/sim';
 import type { Lineup, TimeOfDay } from '../src/data/units';
 import { UNIT_DEFS } from '../src/data/units';
-import { boardCapForDay } from '../src/shop';
+import { boardCapForDay, seasonUnitPool } from '../src/shop';
 
 const START = '2026-07-06'; // synchronized-week Monday (day 1)
 const SAMPLES = 250;
 
-// Same filter shop.ts's SHOP_UNIT_POOL uses — pup (summon-only) and
-// warren-warden (retired at #52, MD Rattyfock is its stand-in) are excluded.
-// Gutter-Runt is kept: it's the control filler, so it reads ~0 by
-// construction, which is the roster's explicit zero-line.
-const CANDIDATE_IDS = Object.keys(UNIT_DEFS).filter((id) => id !== 'pup' && id !== 'warren-warden');
-
 // Change-invariant control: only ability-less bodies (see header, gap 1).
 const TANK = 'dire-rat';
 const FILLER = 'gutter-runt';
+
+// Measure exactly what a player can obtain this season — issue #127: a
+// hand-copied exclusion list here went stale when #115 retired Rattyfock and
+// brought Warren-Warden back, so the tier list measured a non-purchasable
+// unit and skipped a purchasable one. Deriving from the shop's own pool
+// can't drift. Gutter-Runt is retired but appended anyway: it's the control
+// filler, so it reads ~0 by construction — the roster's explicit zero-line.
+const CANDIDATE_IDS = [...seasonUnitPool().map((u) => u.id), FILLER];
 const TIER_DAY: Record<number, number> = { 1: 2, 2: 4, 3: 6 };
 
 type Position = 'front' | 'behind';
