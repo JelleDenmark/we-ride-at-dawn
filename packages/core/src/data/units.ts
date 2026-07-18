@@ -689,16 +689,17 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   'gutter-runt': {
     id: 'gutter-runt', name: 'Gutter Runt', attack: 1, health: 1, cost: 2,
     tribe: 'runt',
-    // Season unit-churn (issue #109): an honest day-1/2 body and merge
-    // fodder, then leaves the shop rolls from day 3 onward — cheap filler
-    // was polluting late-week rolls (evidence: appeared once across two full
-    // seasons of leaderboard lineups). Day 3, not day 4 (Jesper, 2026-07-15),
-    // to keep the shop from diluting a day sooner. Par-buyback severance
-    // (`sellRefund` in shop.ts) applies once retired, so early greed is
-    // never punished. Watch-item for next season: if all-runt Pack-Caller
-    // boards (#88) want cheap runt bodies late-week, slide the day rather
-    // than pre-solving now.
-    retireDay: 3,
+    // Season unit-churn (issue #109) originally cut this to a day-1/2-only
+    // body (retireDay: 3) — cheap filler was polluting late-week rolls
+    // (evidence: appeared once across two full seasons of leaderboard
+    // lineups). Season 3: retired outright instead (retireDay: 1, so the
+    // shop pool excludes it from day 1 on) — a mid-week fade was still
+    // reading as a schedule tax rather than a decision, and there was no
+    // sign any all-runt Pack-Caller board (#88) actually wanted it late-week
+    // over the other cheap runt bodies. Par-buyback severance (`sellRefund`
+    // in shop.ts) still applies, so any copy carried in from a prior season
+    // sells for exactly what was spent, never a loss.
+    retireDay: 1,
   },
   'rat-piper': {
     id: 'rat-piper', name: 'Rat-Piper', attack: 1, health: 2, cost: 4,
