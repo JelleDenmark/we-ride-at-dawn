@@ -13,15 +13,10 @@ export const SEASON_DAYS = 7;
 /** Bench slots: storage for rats outside the fighting horde (never enter
  * `simulate`). Small on purpose — it's for holding merge candidates and
  * counter-tech, not a second board. */
-export const BENCH_SIZE = 3;
+export const BENCH_SIZE = 5;
 
 // Idle economy: the horde skirmishes hourly, earning scrap per wave cleared.
-// Interest (TFT-style, 5% of the bank, capped) is paid once per DAY at dawn,
-// not per hour — the daily cadence + cap keep the bank from snowballing over
-// the hundreds of hours in an expedition.
 export const SCRAP_PER_DEPTH = 1;
-export const INTEREST_RATE = 0.05;
-export const INTEREST_CAP = 5;
 
 // Income decoupling (issue #90). Income used to be a flat `depth *
 // SCRAP_PER_DEPTH` — every extra wave cleared paid the same, so ANY change
@@ -69,10 +64,6 @@ export function scrapForDepth(depth: number): number {
   const mid = Math.max(0, Math.min(depth, SCRAP_MID_DEPTH) - SCRAP_FULL_DEPTH);
   const far = Math.max(0, depth - SCRAP_MID_DEPTH);
   return Math.floor(full * SCRAP_PER_DEPTH + mid * SCRAP_DEEP_RATE + far * SCRAP_FAR_RATE);
-}
-
-export function interestFor(scrap: number): number {
-  return Math.min(INTEREST_CAP, Math.floor(scrap * INTEREST_RATE));
 }
 
 /** Starting/day-1 board size floor. The board opens at 5 seats on day 1 and
@@ -274,13 +265,42 @@ const SHOP_RELIC_POOL = Object.values(RELIC_DEFS);
  * `unlockDay` and before the earliest `retireDay` in play, this filters down
  * to byte-identical output to the old unconditional pool — existing golden
  * shop rolls for those days are unaffected.
+ *
+ * Exported (issue #136) so the compendium can list exactly the rats a
+ * player can actually obtain this week — same day gate, same permanent
+ * pool exclusions (pup/blight-witch/md-rattyfock/dawn-runt/dusk-runt) — no
+ * second filter to keep in sync.
  */
-function shopUnitPoolForDay(day: number): UnitDef[] {
+export function shopUnitPoolForDay(day: number): UnitDef[] {
   return SHOP_UNIT_POOL.filter(
     (u) =>
       (u.unlockDay === undefined || day >= u.unlockDay) &&
       (u.retireDay === undefined || day < u.retireDay)
   );
+}
+
+/**
+ * Every rat obtainable in the shop on ANY day this season (issue #136
+ * follow-up) — the compendium's "will I ever see this" filter, as opposed to
+ * `shopUnitPoolForDay`'s "right now." A not-yet-unlocked rat still counts
+ * (it unlocks later this week); a rat whose `retireDay` has already passed
+ * for every day 1..SEASON_DAYS (e.g. `retireDay: 1`), or one excluded from
+ * `SHOP_UNIT_POOL` entirely (replaced units — Pup, Blight-Witch, ...),
+ * never does. Union over the season, same underlying rule, no second filter
+ * to keep in sync.
+ */
+export function seasonUnitPool(): UnitDef[] {
+  const seen = new Set<string>();
+  const result: UnitDef[] = [];
+  for (let day = 1; day <= SEASON_DAYS; day++) {
+    for (const u of shopUnitPoolForDay(day)) {
+      if (!seen.has(u.id)) {
+        seen.add(u.id);
+        result.push(u);
+      }
+    }
+  }
+  return result;
 }
 
 /**

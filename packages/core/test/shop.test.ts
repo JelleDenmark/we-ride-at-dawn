@@ -24,10 +24,8 @@ import {
   nextSlotPrice,
   SLOT_PRICES,
   SEASON_DAYS,
-  interestFor,
   weekdayFor,
   seasonIdFor,
-  INTEREST_CAP,
   DAILY_SCRAP,
   REROLL_COST,
   BENCH_SIZE,
@@ -92,11 +90,9 @@ describe('shop basics', () => {
     expect(buyUnit(full, unitSlot(s)).ok).toBe(true);
     const noRoom = {
       ...full,
-      bench: [
-        { defId: 'plague-bearer', tier: 1, relicIds: [] },
-        { defId: 'warren-warden', tier: 1, relicIds: [] },
-        { defId: 'gutter-runt', tier: 1, relicIds: [] },
-      ],
+      bench: ['plague-bearer', 'warren-warden', 'gutter-runt', 'press-kin', 'ward-weaver']
+        .slice(0, BENCH_SIZE)
+        .map((defId) => ({ defId, tier: 1, relicIds: [] as string[] })),
     };
     expect(buyUnit(noRoom, unitSlot(s)).ok).toBe(false);
   });
@@ -127,25 +123,29 @@ describe('shop basics', () => {
   });
 
   it('selling refunds half cost (min 1), scaled by tier² (issue #21)', () => {
+    // Dire-Rat throughout — Gutter-Runt no longer works as the "not yet
+    // retired" example (season 3 set its retireDay to 1, so it's always
+    // retired and sells at the par-buyback rate instead; see the severance
+    // tests for that path).
     const s = {
       ...newBuild('2026-07-03'),
       board: [
         { defId: 'dire-rat', tier: 1, relicIds: [] },
-        { defId: 'gutter-runt', tier: 2, relicIds: [] },
-        { defId: 'gutter-runt', tier: 3, relicIds: [] },
+        { defId: 'dire-rat', tier: 2, relicIds: [] },
+        { defId: 'dire-rat', tier: 3, relicIds: [] },
       ],
     };
-    // dire-rat cost 8 -> floor(8/2)=4, tier 1 -> 4 * 1*1 = 4
+    // dire-rat cost 7 -> floor(7/2)=3, tier 1 -> 3 * 1*1 = 3
     const afterDire = must(sellUnit(s, 0)).state;
-    expect(afterDire.scrap).toBe(DAILY_SCRAP + 4);
+    expect(afterDire.scrap).toBe(DAILY_SCRAP + 3);
     expect(afterDire.board).toHaveLength(2);
-    // gutter-runt cost 2 -> floor(2/2)=1, tier 2 -> 1 * 2*2 = 4 (was 2 linearly)
+    // dire-rat tier 2 -> 3 * 2*2 = 12
     const afterRunt2 = must(sellUnit(s, 1)).state;
-    expect(afterRunt2.scrap).toBe(DAILY_SCRAP + 4);
-    // gutter-runt tier 3 -> 1 * 3*3 = 9 (matches the reporter's math: reaching
+    expect(afterRunt2.scrap).toBe(DAILY_SCRAP + 12);
+    // dire-rat tier 3 -> 3 * 3*3 = 27 (matches the reporter's math: reaching
     // tier 3 costs 9 base copies via merges, so the refund should reflect that).
     const afterRunt3 = must(sellUnit(s, 2)).state;
-    expect(afterRunt3.scrap).toBe(DAILY_SCRAP + 9);
+    expect(afterRunt3.scrap).toBe(DAILY_SCRAP + 27);
   });
 
   it('selling a unit with no relics only refunds the unit (unchanged behavior)', () => {
@@ -711,17 +711,6 @@ describe('synchronized seasons', () => {
   });
 });
 
-describe('idle economy', () => {
-  it('interest is 5% floored and capped, never on a tiny bank', () => {
-    expect(interestFor(0)).toBe(0);
-    expect(interestFor(19)).toBe(0);
-    expect(interestFor(20)).toBe(1);
-    expect(interestFor(74)).toBe(3);
-    expect(interestFor(100)).toBe(INTEREST_CAP);
-    expect(interestFor(9999)).toBe(INTEREST_CAP);
-  });
-});
-
 describe('difficulty escalation', () => {
   it('difficulty no longer scales by expedition day — it is a constant 1', () => {
     const spend = (day: number) =>
@@ -855,11 +844,9 @@ describe('bench', () => {
         { defId: 'brood-mother', tier: 1, relicIds: [] },
         { defId: 'bone-priest', tier: 1, relicIds: [] },
       ],
-      bench: [
-        { defId: 'plague-bearer', tier: 1, relicIds: [] },
-        { defId: 'warren-warden', tier: 1, relicIds: [] },
-        { defId: 'gutter-runt', tier: 1, relicIds: [] },
-      ],
+      bench: ['plague-bearer', 'warren-warden', 'gutter-runt', 'press-kin', 'ward-weaver']
+        .slice(0, BENCH_SIZE)
+        .map((defId) => ({ defId, tier: 1, relicIds: [] as string[] })),
       shop: {
         ...base.shop,
         slots: [{ kind: 'unit' as const, defId: 'dire-rat' }, ...base.shop.slots.slice(1)],
@@ -875,7 +862,7 @@ describe('bench', () => {
     expect(buyUnit(s, 0).ok).toBe(false);
     expect(s.scrap).toBe(20);
     expect(s.board).toHaveLength(5);
-    expect(s.bench).toHaveLength(3);
+    expect(s.bench).toHaveLength(BENCH_SIZE);
   });
 
   it('a 3rd copy merges across board+bench: 2 on bench + buy 1 (board full) lands on the bench', () => {
@@ -929,11 +916,13 @@ describe('bench', () => {
         { defId: 'brood-mother', tier: 1, relicIds: [] },
         { defId: 'bone-priest', tier: 1, relicIds: [] },
       ],
-      // Bench full (BENCH_SIZE = 3): two merge candidates + one bystander.
+      // Bench full: two merge candidates + bystanders padding to BENCH_SIZE.
       bench: [
         { defId: 'gutter-runt', tier: 1, relicIds: ['rusted-nail'] },
         { defId: 'gutter-runt', tier: 1, relicIds: ['tail-charm'] },
-        { defId: 'plague-bearer', tier: 1, relicIds: [] },
+        ...['plague-bearer', 'warren-warden', 'press-kin', 'ward-weaver']
+          .slice(0, BENCH_SIZE - 2)
+          .map((defId) => ({ defId, tier: 1, relicIds: [] as string[] })),
       ],
       shop: {
         ...base.shop,
@@ -944,10 +933,10 @@ describe('bench', () => {
     const res = buyUnit(s, 0);
     expect(res.ok).toBe(true);
     if (res.ok) {
-      // Board untouched; bench shrank from 3 to 2 (the trio collapsed to one).
+      // Board untouched; bench shrank by one (the trio collapsed to one).
       expect(res.state.board).toEqual(s.board);
       expect(res.state.board.length).toBeLessThanOrEqual(boardCapForDay(1));
-      expect(res.state.bench).toHaveLength(2);
+      expect(res.state.bench).toHaveLength(BENCH_SIZE - 1);
       expect(res.state.bench.length).toBeLessThanOrEqual(BENCH_SIZE);
       const merged = res.state.bench.find((u) => u.defId === 'gutter-runt')!;
       expect(merged.tier).toBe(2);
@@ -960,7 +949,7 @@ describe('bench', () => {
     }
     // The original state is never mutated by the (successful) buy.
     expect(s.scrap).toBe(20);
-    expect(s.bench).toHaveLength(3);
+    expect(s.bench).toHaveLength(BENCH_SIZE);
   });
 
   it('buys the 3rd copy for a trio even when board AND bench are full (2 on board)', () => {
@@ -977,11 +966,9 @@ describe('bench', () => {
         { defId: 'brood-mother', tier: 1, relicIds: [] },
         { defId: 'bone-priest', tier: 1, relicIds: [] },
       ],
-      bench: [
-        { defId: 'plague-bearer', tier: 1, relicIds: [] },
-        { defId: 'warren-warden', tier: 1, relicIds: [] },
-        { defId: 'dire-rat', tier: 1, relicIds: [] },
-      ],
+      bench: ['plague-bearer', 'warren-warden', 'dire-rat', 'press-kin', 'ward-weaver']
+        .slice(0, BENCH_SIZE)
+        .map((defId) => ({ defId, tier: 1, relicIds: [] as string[] })),
       shop: {
         ...base.shop,
         slots: [{ kind: 'unit' as const, defId: 'gutter-runt' }, ...base.shop.slots.slice(1)],
@@ -1033,11 +1020,9 @@ describe('bench', () => {
         { defId: 'dire-rat', tier: 1, relicIds: [] },
         { defId: 'gnawer', tier: 1, relicIds: [] },
       ],
-      bench: [
-        { defId: 'rat-piper', tier: 1, relicIds: [] },
-        { defId: 'brood-mother', tier: 1, relicIds: [] },
-        { defId: 'bone-priest', tier: 1, relicIds: [] },
-      ],
+      bench: ['rat-piper', 'brood-mother', 'bone-priest', 'plague-bearer', 'warren-warden']
+        .slice(0, BENCH_SIZE)
+        .map((defId) => ({ defId, tier: 1, relicIds: [] as string[] })),
     };
     expect(benchUnit(s, 0).ok).toBe(false); // bench already at BENCH_SIZE
     const room = { ...s, bench: s.bench.slice(0, BENCH_SIZE - 1) };
@@ -1045,7 +1030,10 @@ describe('bench', () => {
     expect(res.ok).toBe(true);
     if (res.ok) {
       expect(res.state.board.map((u) => u.defId)).toEqual(['gnawer']);
-      expect(res.state.bench.map((u) => u.defId)).toEqual(['rat-piper', 'brood-mother', 'dire-rat']);
+      expect(res.state.bench.map((u) => u.defId)).toEqual([
+        ...room.bench.map((u) => u.defId),
+        'dire-rat',
+      ]);
     }
     expect(benchUnit(s, 99).ok).toBe(false); // nothing there
   });
@@ -1097,26 +1085,28 @@ describe('bench', () => {
   });
 
   it('sellBenchUnit refunds half cost (scaled by tier², issue #21) and removes the unit', () => {
+    // Dire-Rat throughout — Gutter-Runt is retired (retireDay: 1) and sells
+    // at the par-buyback rate instead; see the severance tests for that path.
     const s = {
       ...newBuild('2026-07-03'),
       bench: [
         { defId: 'dire-rat', tier: 1, relicIds: [] },
-        { defId: 'gutter-runt', tier: 2, relicIds: [] },
-        { defId: 'gutter-runt', tier: 3, relicIds: [] },
+        { defId: 'dire-rat', tier: 2, relicIds: [] },
+        { defId: 'dire-rat', tier: 3, relicIds: [] },
       ],
     };
     const afterDire = sellBenchUnit(s, 0);
     expect(afterDire.ok).toBe(true);
     if (afterDire.ok) {
-      expect(afterDire.state.scrap).toBe(DAILY_SCRAP + 4);
+      expect(afterDire.state.scrap).toBe(DAILY_SCRAP + 3); // dire-rat t1: floor(7/2)*1=3
       expect(afterDire.state.bench).toHaveLength(2);
     }
     const afterRunt2 = sellBenchUnit(s, 1);
     expect(afterRunt2.ok).toBe(true);
-    if (afterRunt2.ok) expect(afterRunt2.state.scrap).toBe(DAILY_SCRAP + 4);
+    if (afterRunt2.ok) expect(afterRunt2.state.scrap).toBe(DAILY_SCRAP + 12); // dire-rat t2: floor(7/2)*4=12
     const afterRunt3 = sellBenchUnit(s, 2);
     expect(afterRunt3.ok).toBe(true);
-    if (afterRunt3.ok) expect(afterRunt3.state.scrap).toBe(DAILY_SCRAP + 9);
+    if (afterRunt3.ok) expect(afterRunt3.state.scrap).toBe(DAILY_SCRAP + 27); // dire-rat t3: floor(7/2)*9=27
     expect(sellBenchUnit(s, 99).ok).toBe(false);
   });
 
@@ -1505,20 +1495,18 @@ describe('day-gated shop retirement (issue #108: retireDay primitive)', () => {
     return false;
   };
 
-  it('Gutter-Runt (retireDay: 3, issue #109) appears on days 1-2', () => {
-    expect(everAppears(1, 'gutter-runt')).toBe(true);
-    expect(everAppears(2, 'gutter-runt')).toBe(true);
-  });
-
-  it('Gutter-Runt never appears from day 3 onward (retires, not day-exclusive in reverse — stays gone)', () => {
-    for (const day of [3, 4, 5, 6, 7]) expect(everAppears(day, 'gutter-runt')).toBe(false);
+  it('Gutter-Runt (retireDay: 1, season-3 retirement) never appears in the shop pool, on any day', () => {
+    // Season 3 retired it outright rather than mid-week-fading it (was
+    // retireDay: 3 in issue #109) — retireDay: 1 excludes it from the pool
+    // before day 1 even rolls, same primitive, just moved to the boundary
+    // that means "never this season."
+    for (const day of [1, 2, 3, 4, 5, 6, 7]) expect(everAppears(day, 'gutter-runt')).toBe(false);
   });
 
   it('rerollShop and autoRerollShop respect retirement too, not just newBuild', () => {
-    // A day-3+ build should never roll Gutter-Runt even after many rerolls —
-    // exercises s.day plumbing through rerollShop/autoRerollShop for the
+    // Exercises s.day plumbing through rerollShop/autoRerollShop for the
     // retirement side, mirroring the unlock-side test above.
-    let s = newBuild('2026-07-04', 3);
+    let s = newBuild('2026-07-04', 1);
     for (let i = 0; i < 40; i++) {
       s = { ...s, scrap: 50 };
       const rolled = rerollShop(s);
@@ -1528,17 +1516,8 @@ describe('day-gated shop retirement (issue #108: retireDay primitive)', () => {
     }
   });
 
-  it('upcomingRetirements lists Gutter-Runt while it is still in the pool, soonest first', () => {
-    expect(upcomingRetirements(1).map((u) => u.id)).toContain('gutter-runt');
-    expect(upcomingRetirements(2).map((u) => u.id)).toContain('gutter-runt');
-    // Sorted soonest-first: Gutter-Runt's retireDay (3) should sort before
-    // any later retirement, if/when one exists.
-    const days = upcomingRetirements(1).map((u) => u.retireDay ?? 0);
-    expect([...days]).toEqual([...days].sort((a, b) => a - b));
-  });
-
-  it('upcomingRetirements no longer lists Gutter-Runt once its retireDay has passed', () => {
-    for (const day of [3, 4, 5, 6, 7]) {
+  it('upcomingRetirements never lists Gutter-Runt (already gone before day 1, not "leaving soon")', () => {
+    for (const day of [1, 2, 3, 4, 5, 6, 7]) {
       expect(upcomingRetirements(day).map((u) => u.id)).not.toContain('gutter-runt');
     }
   });
@@ -1607,24 +1586,27 @@ describe('full pool retirement (issue #109: Dawn-Runt/Dusk-Runt), Warren-Warden 
 
 describe('severance: par buyback for retired units (issue #108)', () => {
   it('non-retired units refund byte-identically to before (half cost, tier²)', () => {
-    // Day 1: Gutter-Runt's retireDay (3) has not passed, so this must be the
-    // exact pre-existing quadratic formula, unchanged.
+    // Day 1: Dire-Rat has no retireDay, so this must be the exact
+    // pre-existing quadratic formula, unchanged. (Gutter-Runt no longer
+    // works as the "not yet retired" example here — season 3 set its
+    // retireDay to 1, so it's retired from day 1 onward; see the severance
+    // tests below, which use it as the retired case instead.)
     const s = {
       ...newBuild('2026-07-03'), // day 1
       board: [
         { defId: 'dire-rat', tier: 1, relicIds: [] },
-        { defId: 'gutter-runt', tier: 2, relicIds: [] },
-        { defId: 'gutter-runt', tier: 3, relicIds: [] },
+        { defId: 'dire-rat', tier: 2, relicIds: [] },
+        { defId: 'dire-rat', tier: 3, relicIds: [] },
       ],
     };
-    expect(must(sellUnit(s, 0)).state.scrap).toBe(DAILY_SCRAP + 4); // dire-rat t1: floor(8/2)*1=4
-    expect(must(sellUnit(s, 1)).state.scrap).toBe(DAILY_SCRAP + 4); // gutter-runt t2: floor(2/2)*4=4
-    expect(must(sellUnit(s, 2)).state.scrap).toBe(DAILY_SCRAP + 9); // gutter-runt t3: floor(2/2)*9=9
+    expect(must(sellUnit(s, 0)).state.scrap).toBe(DAILY_SCRAP + 3); // dire-rat t1: floor(7/2)*1=3
+    expect(must(sellUnit(s, 1)).state.scrap).toBe(DAILY_SCRAP + 12); // dire-rat t2: floor(7/2)*4=12
+    expect(must(sellUnit(s, 2)).state.scrap).toBe(DAILY_SCRAP + 27); // dire-rat t3: floor(7/2)*9=27
   });
 
   it('a retired unit refunds exactly cost * 3^(tier-1), the par buyback', () => {
     const gutterRuntCost = UNIT_DEFS['gutter-runt'].cost;
-    // Day 3: Gutter-Runt's retireDay has passed.
+    // Day 3: Gutter-Runt's retireDay (1) has long since passed.
     const s = {
       ...newBuild('2026-07-04', 3),
       scrap: 20,
@@ -1642,7 +1624,7 @@ describe('severance: par buyback for retired units (issue #108)', () => {
   it('the par buyback also applies on the bench, and on the exact retireDay boundary', () => {
     const gutterRuntCost = UNIT_DEFS['gutter-runt'].cost;
     const s = {
-      ...newBuild('2026-07-04', 3), // exactly at retireDay (day >= retireDay)
+      ...newBuild('2026-07-04', 1), // exactly at retireDay (day >= retireDay)
       scrap: 20,
       bench: [{ defId: 'gutter-runt', tier: 2, relicIds: [] }],
     };
@@ -1674,7 +1656,7 @@ describe('severance: par buyback for retired units (issue #108)', () => {
     // buyUnit -> combineAll -> sellUnit pipeline end to end.
     const gutterRuntCost = UNIT_DEFS['gutter-runt'].cost;
     let s: BuildState = {
-      ...newBuild('2026-07-04', 3), // day 3: retireDay has passed
+      ...newBuild('2026-07-04', 3), // day 3: retireDay (1) has long since passed
       scrap: 3 * gutterRuntCost,
       board: [],
     };

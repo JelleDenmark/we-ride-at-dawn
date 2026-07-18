@@ -180,23 +180,99 @@ export type Effect =
    */
   | { kind: 'buffAdjacent'; attack: number; health: number }
   /**
-   * Pack-Caller (issue #88). Same shape as `buffAdjacent` — both board
-   * neighbors (whichever exist), middle placement hits both — but the
-   * magnitude is not a fixed number: it's `attack`/`health` (pre tier-scale,
-   * same as every other effect here) MULTIPLIED by a live count of how many
-   * OTHER rats currently on the board share the source's own `tribe` tag
-   * (see `UnitDef.tribe`). Counted at apply time in sim.ts, not stored on
-   * the effect — the count depends on the board, which isn't known until
-   * the battle actually starts.
+   * Pack-Caller rework (issue #88 follow-up, 2026-07-16 — replaces the
+   * original `buffAdjacentByTribe`). Jesper's read: the original ability was
+   * mechanically a lazy Press-Kin clone (identical "both neighbors, best in
+   * the middle" targeting via `buffAdjacent`), differing only by a magnitude
+   * multiplier keyed off `UnitDef.tribe` — a tag the UI never surfaces
+   * anywhere, so the two units read as interchangeable and the actual
+   * winner was invisible board trivia, not a real player choice.
    *
-   * Compounding-law note: `startOfBattle`-gated exactly like `buffAdjacent`
-   * (see `fireEntryTriggers`) — fires once per unit instance, ever, never
-   * re-fires on a later wave. The count itself is also bounded: it can
-   * never exceed `BOARD_CAP - 1` (every other slot, at most), so a maxed
-   * board with every rat sharing a tribe is the ceiling, not an unbounded
-   * multiplier. Safe under the same reasoning as `buffAdjacent`.
+   * This version drops the tribe dependency entirely and changes the shape:
+   * `faint`-triggered (not `startOfBattle`), it gives away its OWN CURRENT
+   * attack and max health — tier-scaled, relic-buffed, and inflated by
+   * whatever startOfBattle buffs it happened to receive (Warren-Warden,
+   * the Forgotten Backpack relic, ...) — split EVENLY across every other
+   * living teammate, with any remainder (stat % survivor-count) going one
+   * point each to the FRONTMOST survivors first. `receiveCapMultiplier`
+   * (below) is the one tunable number on this effect (unlike
+   * `buffBehind`/`teamBuff`'s literal `attack`/`health`, the payout ITSELF
+   * is always exactly the caster's own live stat line, never a separate
+   * literal) — see the sim.ts case for exactly which fields that reads.
+   *
+   * Compounding-law note (corrected 2026-07-17 — the previous version of
+   * this note was simply wrong; see below): `faint` fires on EVERY death,
+   * not just the first (`resolveDeaths` in sim.ts), so a Bone-Priest-revived
+   * Pack-Caller that dies a second time pays out again — same shape as
+   * Gnawer's `bequeathAttack`. Revive is capped once per corpse, so a single
+   * Pack-Caller instance can pay out at most twice per battle, same bound
+   * Gnawer relies on. Using the LIVE (buffed) value rather than a fixed base
+   * is safe for the same reason it's safe there: every effect that could
+   * have inflated this unit's stats first (buffBehind, teamBuff, relics,
+   * revive itself, ...) is itself already fire-once/bounded under ADR-0003,
+   * so even a twice-paid-out snapshot is bounded — it just varies with board
+   * synergy, which is the intended payoff for building around it. Measured
+   * impact of the revive double-payout on a 6× Pack-Caller + Bone-Priest
+   * board (pre-`receiveCapMultiplier` fix below): a modest ~10-18% higher
+   * peak single-unit attack than the same board without Bone-Priest — not
+   * degenerate on its own.
+   *
+   * A board with several Pack-Callers CAN chain — one's payout can inflate
+   * the live stats a later one gives away when it too falls — bounded by
+   * (up to) twice the board's own size given the revive interaction above,
+   * not by wave count or ride length, AND now further bounded in aggregate
+   * by `totalBudgetMultiplier` below. Zero survivors (last unit standing) is
+   * a no-op, not a crash.
+   *
+   * PAYOUT-CONCENTRATION fix, v1 — RECEIVER-side cap (issue #131, shipped
+   * 2026-07-17, replaced same day): the real Boss Trial risk was never
+   * Pack-Caller-buffing-Pack-Caller — it was PAYOUT CONCENTRATION as a board
+   * thins: as fewer survivors remain, each subsequent faint's split lands on
+   * a shrinking pool, letting a late "sink" unit (which need not be another
+   * Pack-Caller — Corpse-Glutton or even a plain Dire-Rat reproduces it)
+   * accumulate enough attack/health to tank far more escalating-attack Boss
+   * Trial phases than the design assumes — reproduced hitting
+   * `BOSS_TRIAL_MAX_PHASES` (the trial's hard safety cap, which
+   * boss-trial.ts's own comment calls a bug signal, not a valid outcome),
+   * highly sensitive to board ORDER (identical units/tiers scored 7 vs. 60
+   * phases depending purely on ordering). The first fix capped what ANY
+   * single recipient could absorb, tuned empirically against Jesper's actual
+   * reported board (4x Pack-Caller + Warren-Warden + Ward-Weaver, screenshot
+   * 2026-07-17) down to `receiveCapMultiplier: 1` (3x and 1.5x barely moved
+   * it — Warren-Warden's own base stats are already large at tier 3, so a
+   * multiple of THAT stayed enormous), which did bring the reported board to
+   * 10 phases, in line with ordinary strong boards (7-9). But on review
+   * (Jesper, 2026-07-17) this flattened the card's actual strategic choice:
+   * anchoring the cap to each recipient's own (small, early) stats meant
+   * positioning Pack-Caller to die LATE — banking a big payout to dump on
+   * 1-2 chosen units, the card's other intended play pattern alongside early
+   * broad-spread — mostly wasted the payout once survivors thinned, since
+   * the accumulated total vastly exceeded any individual recipient's cap.
+   * Early-spread became the only non-wasteful line, which wasn't the intent.
+   *
+   * PAYOUT-CONCENTRATION fix, v2 — SOURCE-side shared budget (shipped same
+   * day, replacing v1): instead of capping what one recipient can absorb,
+   * cap the TOTAL this effect can move per side over the WHOLE battle,
+   * shared across every Pack-Caller on that side — same cap-not-sum idiom as
+   * the poison-all/Plague-Bearer caps (`poisonAllApplied`/`poisonLastApplied`
+   * in sim.ts), just scoped to the whole battle instead of one wave, since
+   * this exploit plays out across many separate waves as a board thins, not
+   * within one. Budget = `totalBudgetMultiplier` × a single tier-3
+   * Pack-Caller's own base attack/health (see the sim.ts case for the exact
+   * accounting) — sized the same way `poisonStacksForTier(3)` sizes the
+   * poison-all cap: "worth of one strong instance," not tied to whichever
+   * unit happens to receive it. This preserves the actual choice (spread
+   * early across a full board, or bank it and dump it all on 1-2 units
+   * late) since it doesn't care WHO receives, only how much this ability can
+   * inject over a ride in total. Overflow past the remaining budget is
+   * simply lost when the dying unit's own total is clipped, before the
+   * (possibly-reduced) total is split — not redistributed to a later death,
+   * same "clip, don't reroute" shape as everywhere else in this file.
+   * `totalBudgetMultiplier` value: tentative pending Jesper's balance
+   * sign-off like every other new magnitude in this file — re-verify against
+   * the same reported board before trusting a specific number.
    */
-  | { kind: 'buffAdjacentByTribe'; attack: number; health: number }
+  | { kind: 'distributeStatsOnFaint'; totalBudgetMultiplier: number }
   | { kind: 'poisonFrontEnemy'; stacks: number }
   /**
    * Plague-Bearer (issue #112, reworked from `poisonFrontEnemy`). Poisons
@@ -477,7 +553,6 @@ export interface UnitDef {
   attack: number;
   health: number;
   cost: number;
-  desc?: string;
   archetype?: Archetype;
   ability?: Ability;
   /**
@@ -497,14 +572,16 @@ export interface UnitDef {
    */
   unlockDay?: number;
   /**
-   * Build-around tag (issue #88: Pack-Caller). Purely descriptive on every
-   * unit except Pack-Caller — it's the count Pack-Caller's
-   * `buffAdjacentByTribe` scans the board for. Optional and freeform-ish
-   * (kept to a small fixed vocabulary in practice: "runt", "plague",
-   * "brute", "swarm"); a unit with no obvious kinship gets no tag rather
-   * than a forced one. Tagging is a subjective flavor/mechanics read — see
-   * the tagging rationale next to `UNIT_DEFS` below and the PR description
-   * for issue #88.
+   * Build-around tag (issue #88: Pack-Caller). Originally the count Pack-
+   * Caller's `buffAdjacentByTribe` scanned the board for; that ability was
+   * reworked away from tribe entirely (2026-07-16 — see
+   * `distributeStatsOnFaint`'s doc comment), so this is now PURELY
+   * DESCRIPTIVE on every unit, including Pack-Caller — nothing reads it
+   * mechanically. Optional and freeform-ish (kept to a small fixed
+   * vocabulary in practice: "runt", "plague", "brute", "swarm"); a unit with
+   * no obvious kinship gets no tag rather than a forced one. Tagging is a
+   * subjective flavor read — see the tagging rationale next to `UNIT_DEFS`
+   * below and the PR description for issue #88.
    */
   tribe?: string;
   /**
@@ -576,45 +653,50 @@ export interface Lineup {
  *     None of these read as belonging to an obvious kinship group — forcing
  *     a tag on a unit with no real thematic tribe would just be noise (the
  *     issue explicitly says use judgment, not "tag everything").
+ *
+ * NON-MECHANICAL as of the 2026-07-16 Pack-Caller rework: `tribe` was
+ * counting fodder for `buffAdjacentByTribe`, and Pack-Caller was its only
+ * reader — that ability is gone (see `distributeStatsOnFaint`'s doc comment
+ * above), so no unit currently reads this field at all. Left in place as
+ * flavor/taxonomy (the categorization above still describes the roster
+ * honestly) rather than stripped from every tagged unit, since a future
+ * tribe-synergy mechanic may want it — but don't assume it does anything
+ * today.
  */
 export const UNIT_DEFS: Record<string, UnitDef> = {
   pup: { id: 'pup', name: 'Pup', attack: 1, health: 1, cost: 0, tribe: 'runt' },
   'gutter-runt': {
     id: 'gutter-runt', name: 'Gutter Runt', attack: 1, health: 1, cost: 2,
-    desc: 'cheap body',
     tribe: 'runt',
-    // Season unit-churn (issue #109): an honest day-1/2 body and merge
-    // fodder, then leaves the shop rolls from day 3 onward — cheap filler
-    // was polluting late-week rolls (evidence: appeared once across two full
-    // seasons of leaderboard lineups). Day 3, not day 4 (Jesper, 2026-07-15),
-    // to keep the shop from diluting a day sooner. Par-buyback severance
-    // (`sellRefund` in shop.ts) applies once retired, so early greed is
-    // never punished. Watch-item for next season: if all-runt Pack-Caller
-    // boards (#88) want cheap runt bodies late-week, slide the day rather
-    // than pre-solving now.
-    retireDay: 3,
+    // Season unit-churn (issue #109) originally cut this to a day-1/2-only
+    // body (retireDay: 3) — cheap filler was polluting late-week rolls
+    // (evidence: appeared once across two full seasons of leaderboard
+    // lineups). Season 3: retired outright instead (retireDay: 1, so the
+    // shop pool excludes it from day 1 on) — a mid-week fade was still
+    // reading as a schedule tax rather than a decision, and there was no
+    // sign any all-runt Pack-Caller board (#88) actually wanted it late-week
+    // over the other cheap runt bodies. Par-buyback severance (`sellRefund`
+    // in shop.ts) still applies, so any copy carried in from a prior season
+    // sells for exactly what was spent, never a loss.
+    retireDay: 1,
   },
   'rat-piper': {
     id: 'rat-piper', name: 'Rat-Piper', attack: 1, health: 2, cost: 4,
-    desc: 'each wave: pipes in a pup',
     ability: { trigger: 'startOfWave', effect: { kind: 'summon', unitId: 'pup', count: 1 } },
     tribe: 'swarm',
   },
   'brood-mother': {
-    id: 'brood-mother', name: 'Brood-Mother', attack: 2, health: 3, cost: 6,
-    desc: 'faint: births 2 pups',
+    id: 'brood-mother', name: 'Brood-Mother', attack: 2, health: 3, cost: 5,
     ability: { trigger: 'faint', effect: { kind: 'summon', unitId: 'pup', count: 2 } },
     tribe: 'swarm',
   },
   'plague-bearer': {
     id: 'plague-bearer', name: 'Plague-Bearer', attack: 2, health: 2, cost: 4,
-    desc: 'each wave: poisons the back foe (scales ★)',
     ability: { trigger: 'startOfWave', effect: { kind: 'poisonLastEnemy' } },
     tribe: 'plague',
   },
   'blight-witch': {
     id: 'blight-witch', name: 'Blight-Witch', attack: 3, health: 3, cost: 8,
-    desc: 'each wave: poisons the whole enemy line (scales ★)',
     ability: { trigger: 'startOfWave', effect: { kind: 'poisonAllEnemies' } },
     tribe: 'plague',
   },
@@ -630,13 +712,11 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   // kit is tracked in #116 — tune the kit there, since Moe IS that kit.
   'draughtsman-moe': {
     id: 'draughtsman-moe', name: 'Draughtsman Moe', attack: 3, health: 3, cost: 8,
-    desc: "Season 2 champion; an architect who drafts the enemy's ruin from his Svendborg boat and doses the whole line by the draught; each wave: poisons the entire enemy line (scales ★)",
     ability: { trigger: 'startOfWave', effect: { kind: 'poisonAllEnemies' } },
     tribe: 'plague',
   },
   gnawer: {
     id: 'gnawer', name: 'Gnawer', attack: 3, health: 1, cost: 4,
-    desc: 'faint: the rat behind inherits its OWN attack, plus a bonus for the wave it died on (capped)',
     // Issue #111 rework: was a flat `buffBehind` +2 that never aged. Now a
     // `bequeathAttack` (own live attack + capped wave-died-on bonus) — see
     // that effect kind's doc comment above for the full formula and the
@@ -645,24 +725,20 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     tribe: 'runt',
   },
   'corpse-glutton': {
-    id: 'corpse-glutton', name: 'Corpse-Glutton', attack: 3, health: 2, cost: 6,
-    desc: '+1/+1 when an ally faints',
+    id: 'corpse-glutton', name: 'Corpse-Glutton', attack: 3, health: 2, cost: 7,
     ability: { trigger: 'allyFaint', effect: { kind: 'gainStats', attack: 1, health: 1 } },
   },
   'bone-priest': {
-    id: 'bone-priest', name: 'Bone-Priest', attack: 1, health: 4, cost: 6,
-    desc: 'faint: revives first fallen at 1/10/20 HP (tier), capped at their own max',
+    id: 'bone-priest', name: 'Bone-Priest', attack: 1, health: 4, cost: 5,
     ability: { trigger: 'faint', effect: { kind: 'revive' } },
   },
   'warren-warden': {
     id: 'warren-warden', name: 'Warren-Warden', attack: 2, health: 6, cost: 6,
-    desc: 'battle: buffs all rats behind it (scales ★)',
     ability: { trigger: 'startOfBattle', effect: { kind: 'buffBehind', attack: 1, health: 1, all: true } },
     tribe: 'brute',
   },
   'dire-rat': {
-    id: 'dire-rat', name: 'Dire-Rat', attack: 4, health: 5, cost: 8,
-    desc: 'hide like a door: shrugs off 2 from every blow',
+    id: 'dire-rat', name: 'Dire-Rat', attack: 4, health: 5, cost: 7,
     damageReduction: 2,
     // Day-1 shop is deliberately kept plain (Jesper, 2026-07-11): the three
     // strongest early picks — the armored tank, the Season-1 anchor, and the
@@ -676,19 +752,16 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   },
   'md-rattyfock': {
     id: 'md-rattyfock', name: 'MD Rattyfock', attack: 2, health: 6, cost: 6,
-    desc: 'Season 1 survivor, patched and returned; battle: buffs all rats behind it (scales ★)',
     ability: { trigger: 'startOfBattle', effect: { kind: 'buffBehind', attack: 1, health: 1, all: true } },
     unlockDay: 2, // day-1 shop kept plain — see Dire-Rat's note.
     tribe: 'brute',
   },
   'press-kin': {
     id: 'press-kin', name: 'Press-Kin', attack: 2, health: 4, cost: 5,
-    desc: 'battle: buffs the rats beside it, best in the middle (scales ★)',
     ability: { trigger: 'startOfBattle', effect: { kind: 'buffAdjacent', attack: 2, health: 2 } },
   },
   'ward-weaver': {
-    id: 'ward-weaver', name: 'Ward-Weaver', attack: 1, health: 3, cost: 6,
-    desc: 'each wave, blocks the front rat’s hit outright — ★2 blocks 2 hits, ★3 blocks 3; resets every wave',
+    id: 'ward-weaver', name: 'Ward-Weaver', attack: 1, health: 3, cost: 5,
     ability: { trigger: 'startOfWave', effect: { kind: 'blockFrontHits' } },
     unlockDay: 2, // day-1 shop kept plain — see Dire-Rat's note.
   },
@@ -700,7 +773,6 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   // (date, day) with no new per-account state.
   'dawn-runt': {
     id: 'dawn-runt', name: 'Dawn-Runt', attack: 1, health: 2, cost: 4,
-    desc: 'thrives in the grey light before the city wakes; battle (before noon): buffs the horde’s attack (scales ★)',
     ability: {
       trigger: 'startOfBattle',
       effect: { kind: 'teamBuff', attack: 2, health: 0 },
@@ -711,7 +783,6 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   },
   'dusk-runt': {
     id: 'dusk-runt', name: 'Dusk-Runt', attack: 1, health: 2, cost: 4,
-    desc: 'comes alive as the drains go black again, ahead of the next dawn’s ride; battle (after noon): buffs the horde’s health (scales ★)',
     ability: {
       trigger: 'startOfBattle',
       effect: { kind: 'teamBuff', attack: 0, health: 2 },
@@ -720,21 +791,27 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     unlockDay: 3,
     tribe: 'runt',
   },
-  // Issue #88: Pack-Caller — the build-around unit for the new `tribe` tag.
-  // Stats (attack 2 / health 3 / cost 5) are the design doc's rough starting
+  // Issue #88, reworked 2026-07-16 (see `distributeStatsOnFaint`'s doc
+  // comment above for the full rationale — was a lazy Press-Kin clone with
+  // an invisible-mechanic magnitude). Stats (attack 2 / health 3 / cost 5)
+  // are unchanged from the original, still the design doc's rough starting
   // point, NOT final — flagged for Jesper's balance sign-off, same as every
-  // other tentative stat line in this file. Tagged "runt" itself (see the
-  // tagging-rationale comment above `UNIT_DEFS`): it's a rallying caller for
-  // the horde's little guys, and "runt" already has the deepest bench, which
-  // makes an all-runt board an actually-buildable theme.
+  // other tentative stat line in this file. Still tagged "runt" as pure
+  // flavor (see the tagging-rationale comment above `UNIT_DEFS`) — no unit
+  // currently reads `tribe` mechanically now that this was its only reader.
   'pack-caller': {
     id: 'pack-caller', name: 'Pack-Caller', attack: 2, health: 3, cost: 5,
-    desc: 'battle: buffs the rats beside it +1/+1 for each other same-tribe rat on the board (scales ★)',
-    // startOfBattle: fires once per unit instance, ever (see `fireEntryTriggers`
-    // and the compounding-law note on `buffAdjacentByTribe` above) — bounded
-    // by board size (at most BOARD_CAP-1 other rats to count), and cannot
-    // re-fire on a later wave to re-stack. Safe under the compounding law.
-    ability: { trigger: 'startOfBattle', effect: { kind: 'buffAdjacentByTribe', attack: 1, health: 1 } },
+    // faint: fires on every death, so a Bone-Priest-revived Pack-Caller that
+    // dies a second time pays out twice (revive is capped once per corpse,
+    // same as Gnawer's `bequeathAttack`). `totalBudgetMultiplier` (issue
+    // #131 v2, tentative pending balance sign-off, see `distributeStatsOnFaint`'s
+    // doc comment above for the full history — a receiver-side cap shipped
+    // first and was replaced same day for flattening the card's late-death
+    // playstyle): every Pack-Caller on a side shares one lifetime budget for
+    // this effect, sized to one tier-3 Pack-Caller's own base attack/health
+    // — spread it thin early or bank it for one big late payout, your call,
+    // but the total across the whole battle is capped either way.
+    ability: { trigger: 'faint', effect: { kind: 'distributeStatsOnFaint', totalBudgetMultiplier: 3 } },
     tribe: 'runt',
   },
   // Issue #86: Slink-Rat — first consumer of the `backlineDamage` primitive
@@ -744,7 +821,6 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   // front, rewarding a durable front wall built to protect it.
   'slink-rat': {
     id: 'slink-rat', name: 'Slink-Rat', attack: 3, health: 1, cost: 6,
-    desc: 'fights from the dark: each wave, adds its own attack to the clash against the front foe, from any slot — but 1 HP means it dies to almost anything if it ever reaches the front (scales ★)',
     // startOfWave, via `backlineDamage` (see that Effect's doc comment for
     // the full compounding-law note and the four resolved interaction
     // decisions against Marrow-Snap/Ward-Weaver/Gore-Cleaver). Fixed
@@ -760,9 +836,20 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   // see `teamBuffByWave`'s doc comment above for the wave-based mechanism
   // (2026-07-16 rework, replacing the original wall-clock split) and the
   // placeholder-magnitude flag.
+  //
+  // COST 4 -> 5 -> 6 (2026-07-18, Jesper's call, pre-launch sign-off): the
+  // #127 fix to all-unit-value.ts's timeOfDay blend (it previously measured
+  // this unit as a near-total no-op) revealed it was the single best T1/T2/T3
+  // solo unit in the game by a wide margin at cost 5 — 27.2/15.3/9.7
+  // waves-per-100-scrap vs. the next-best unit's 20.1/10.5/7.6. 6 keeps it
+  // #1 at every tier but with a normal-sized lead (22.7/12.8/8.1), rather
+  // than a structural outlier, while respecting `unlockDay: 3` as the
+  // primary limiter on how much of it a horde can field this week. NOTE:
+  // those numbers were measured on the pre-rework 50/50 time blend; the
+  // wave-based version below is cumulative (both doses land in one battle),
+  // so the cost needs re-measuring as part of this rework's balance gate.
   'twilight-runt': {
-    id: 'twilight-runt', name: 'Twilight-Runt', attack: 1, health: 2, cost: 4,
-    desc: 'fused of dawn and dusk, never idle: early waves mostly buff the horde’s attack, wave 15 onward it also buffs health — neither phase is ever a dead stat (scales ★; magnitudes pending balance sign-off, issue #110)',
+    id: 'twilight-runt', name: 'Twilight-Runt', attack: 1, health: 2, cost: 6,
     ability: {
       trigger: 'startOfWave',
       effect: {
@@ -781,7 +868,6 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   // Waves it takes to fill the cap is a real risk, not a free stat stick.
   'cellar-coil': {
     id: 'cellar-coil', name: 'Cellar-Coil', attack: 2, health: 4, cost: 5,
-    desc: 'each wave it survives off the front, permanently banks +attack (hard-capped) — cashes in once the line finally breaks to it (scales ★)',
     // startOfWave + `condition.notFront` (see both doc comments above): fires
     // every Wave the unit survives while NOT at board index 0, and is a
     // no-op the Wave it's front (or the Wave it doesn't survive). The

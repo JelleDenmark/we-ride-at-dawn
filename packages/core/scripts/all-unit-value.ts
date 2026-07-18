@@ -43,8 +43,11 @@
  * that still separates "does real work but it's currently overkill" from
  * "genuinely dead weight."
  *
- * timeOfDay-gated units (Dawn-Runt/Dusk-Runt) are blended 50/50 across the
- * before/after-noon halves, as before, since a real expedition sees both.
+ * Time-sensitive units are blended 50/50 across the before/after-noon halves,
+ * since a real expedition sees both. Only `condition.timeOfDay` gates
+ * (Dawn-Runt/Dusk-Runt) remain time-sensitive — Twilight-Runt's old
+ * `teamBuffByTime` shape was replaced by the wave-keyed `teamBuffByWave`,
+ * which every battle experiences identically (no blend needed).
  *
  * Run from packages/core: npx tsx scripts/all-unit-value.ts
  */
@@ -52,20 +55,22 @@ import { generateGauntlet } from '../src/gauntlet';
 import { simulate } from '../src/sim';
 import type { Lineup, TimeOfDay } from '../src/data/units';
 import { UNIT_DEFS } from '../src/data/units';
-import { boardCapForDay } from '../src/shop';
+import { boardCapForDay, seasonUnitPool } from '../src/shop';
 
 const START = '2026-07-06'; // synchronized-week Monday (day 1)
 const SAMPLES = 250;
 
-// Same filter shop.ts's SHOP_UNIT_POOL uses — pup (summon-only) and
-// warren-warden (retired at #52, MD Rattyfock is its stand-in) are excluded.
-// Gutter-Runt is kept: it's the control filler, so it reads ~0 by
-// construction, which is the roster's explicit zero-line.
-const CANDIDATE_IDS = Object.keys(UNIT_DEFS).filter((id) => id !== 'pup' && id !== 'warren-warden');
-
 // Change-invariant control: only ability-less bodies (see header, gap 1).
 const TANK = 'dire-rat';
 const FILLER = 'gutter-runt';
+
+// Measure exactly what a player can obtain this season — issue #127: a
+// hand-copied exclusion list here went stale when #115 retired Rattyfock and
+// brought Warren-Warden back, so the tier list measured a non-purchasable
+// unit and skipped a purchasable one. Deriving from the shop's own pool
+// can't drift. Gutter-Runt is retired but appended anyway: it's the control
+// filler, so it reads ~0 by construction — the roster's explicit zero-line.
+const CANDIDATE_IDS = [...seasonUnitPool().map((u) => u.id), FILLER];
 const TIER_DAY: Record<number, number> = { 1: 2, 2: 4, 3: 6 };
 
 type Position = 'front' | 'behind';
@@ -102,13 +107,15 @@ function measure(lineup: Lineup, day: number): Measure {
   return { waves: waves / SAMPLES, damage: damage / SAMPLES };
 }
 
-// Blend for timeOfDay-gated units; plain measure otherwise.
-function measureUnit(candidateId: string | null, tier: number, day: number, pos: Position, condition?: TimeOfDay): Measure {
-  if (!condition) return measure(roster(candidateId, tier, day, pos), day);
-  const dormant: TimeOfDay = condition === 'beforeNoon' ? 'afterNoon' : 'beforeNoon';
-  const peak = measure(roster(candidateId, tier, day, pos, condition), day);
-  const off = measure(roster(candidateId, tier, day, pos, dormant), day);
-  return { waves: (peak.waves + off.waves) / 2, damage: (peak.damage + off.damage) / 2 };
+// Blend 50/50 across the two day-halves for any time-sensitive unit; plain
+// measure otherwise. Since the `teamBuffByWave` rework, the only remaining
+// time-sensitive shape is a `condition.timeOfDay` gate (Dawn/Dusk-Runt —
+// active one half, dormant the other).
+function measureUnit(candidateId: string | null, tier: number, day: number, pos: Position, timeSensitive: boolean): Measure {
+  if (!timeSensitive) return measure(roster(candidateId, tier, day, pos), day);
+  const am = measure(roster(candidateId, tier, day, pos, 'beforeNoon'), day);
+  const pm = measure(roster(candidateId, tier, day, pos, 'afterNoon'), day);
+  return { waves: (am.waves + pm.waves) / 2, damage: (am.damage + pm.damage) / 2 };
 }
 
 interface Row {
@@ -136,7 +143,7 @@ function baseline(tier: number, day: number, pos: Position): Measure {
 const rows: Row[] = [];
 for (const id of CANDIDATE_IDS) {
   const def = UNIT_DEFS[id];
-  const condition = def.ability?.condition?.timeOfDay;
+  const timeSensitive = def.ability?.condition?.timeOfDay !== undefined;
   for (let tier = 1; tier <= 3; tier++) {
     const day = TIER_DAY[tier];
     const scrapCost = def.cost * Math.pow(3, tier - 1);
@@ -144,7 +151,7 @@ for (const id of CANDIDATE_IDS) {
     let best: { pos: Position; wavesEff: number; dmgEff: number } | null = null;
     for (const pos of positions) {
       const base = baseline(tier, day, pos);
-      const withUnit = measureUnit(id, tier, day, pos, condition);
+      const withUnit = measureUnit(id, tier, day, pos, timeSensitive);
       const wavesEff = ((withUnit.waves - base.waves) / scrapCost) * 100;
       const dmgEff = ((withUnit.damage - base.damage) / scrapCost) * 100;
       if (best === null || wavesEff > best.wavesEff) best = { pos, wavesEff, dmgEff };

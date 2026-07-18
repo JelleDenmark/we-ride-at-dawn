@@ -11,7 +11,8 @@ import type { Lineup } from '../src/data/units';
 import {
   simulateBossTrial,
   BOSS_TRIAL_BASE_ATTACK,
-  BOSS_TRIAL_HP,
+  BOSS_TRIAL_HP_BASE,
+  BOSS_TRIAL_HP_GROWTH_PER_PHASE,
   BOSS_TRIAL_ESCALATION,
   BOSS_TRIAL_MAX_PHASES,
 } from '../src/boss-trial';
@@ -49,7 +50,7 @@ const BOARDS: Record<string, Lineup> = {
 };
 
 console.log(
-  `Boss Trial probe — base attack ${BOSS_TRIAL_BASE_ATTACK}, HP ${BOSS_TRIAL_HP}, escalation x${BOSS_TRIAL_ESCALATION}/phase, cap ${BOSS_TRIAL_MAX_PHASES} phases\n`
+  `Boss Trial probe — base attack ${BOSS_TRIAL_BASE_ATTACK}, HP ${BOSS_TRIAL_HP_BASE}+${BOSS_TRIAL_HP_GROWTH_PER_PHASE}/phase, escalation x${BOSS_TRIAL_ESCALATION}/phase, cap ${BOSS_TRIAL_MAX_PHASES} phases\n`
 );
 console.log('board                                                          totalDamage   phasesSurvived');
 for (const [name, lineup] of Object.entries(BOARDS)) {

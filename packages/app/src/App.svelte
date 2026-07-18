@@ -23,12 +23,12 @@
     generateGauntlet,
     simulate,
     UNIT_DEFS,
+    ENEMY_POOL,
     RELIC_DEFS,
     newBuild,
     advanceAfterDawn,
     weekdayFor,
     seasonIdFor,
-    interestFor,
     scrapForDepth,
     SEASON_DAYS,
     buyUnit,
@@ -54,6 +54,8 @@
     nextSlotPrice,
     buyBoardSlot,
     upcomingUnlocks,
+    shopUnitPoolForDay,
+    seasonUnitPool,
     tierAttackMultiplier,
     tierHealthMultiplier,
     reviveHpForTier,
@@ -61,6 +63,10 @@
     cellarCoilChargeCapForTier,
     simulateBossTrial,
     simulateBossTrialReplay,
+    bossTrialPhaseAttack,
+    bossTrialPhaseHP,
+    BOSS_TRIAL_ESCALATION,
+    BOSS_TRIAL_HP_GROWTH_PER_PHASE,
     type ActionResult,
     type BattleResult,
     type BuildState,
@@ -447,7 +453,16 @@
   // only one of the two can be armed at a time (arming either clears both).
   let pendingSwap = $state<number | null>(null);
   let inspect = $state<{ area: 'shop' | 'board' | 'bench'; index: number } | null>(null);
+  // Compendium/bestiary (issue #136): browse full stats/abilities for every
+  // UnitDef, own-horde or enemy, without needing an owned copy on the
+  // board/bench/shop. `selected` holds a def id within the active tab's
+  // list; null shows the tab's list, non-null shows that entry's detail.
+  let compendium = $state<{ tab: 'units' | 'enemies' | 'relics'; selected: string | null } | null>(null);
   let notice = $state('');
+
+  // Enemy summon targets (e.g. Watch-Sergeant -> Watch-Whelp) live in
+  // ENEMY_POOL, not UNIT_DEFS — abilitySentence's summon case needs both.
+  const ENEMY_DEFS: Record<string, UnitDef> = Object.fromEntries(ENEMY_POOL.map((e) => [e.id, e]));
 
   const TRIGGER_WHEN: Record<string, string> = {
     startOfBattle: 'At the start of the ride,',
@@ -466,6 +481,16 @@
   // a keyword tag, so THIS is where a player learns what a unit really does —
   // including exactly how much it scales per star. Numbers come from the same
   // core tables the sim uses (never hand-copied), so they can't drift.
+  //
+  // This is also the ONLY place a unit's ability is ever explained to a
+  // player. `UnitDef` in core used to carry its own hand-written `desc`
+  // string too — a second, separately-maintained explanation of the exact
+  // same ability that nothing ever rendered (only RelicDef.desc is actually
+  // shown; see the two `relic.desc` usages elsewhere in this file). It went
+  // stale more than once (silently — nothing broke, it just quietly stopped
+  // matching the mechanic) before being removed entirely. If a unit ever
+  // needs a description again, extend this function, not `UnitDef` — one
+  // generator, one place to keep in sync with sim.ts.
 
   // Shared per-star blurb builder: `mult(t)` is the per-tier stat multiplier,
   // which differs by effect (the 3x `tierAttackMultiplier` curve for fire-once
@@ -499,8 +524,11 @@
     return buffScaleWith(attack, health, (t) => t);
   }
 
-  function abilitySentence(defId: string): string {
-    const def = UNIT_DEFS[defId];
+  function abilitySentence(def: UnitDef | undefined): string {
+    // Takes the def directly (not an id + UNIT_DEFS lookup) so it works for
+    // both rats and enemies — enemies live in ENEMY_POOL, a separate array
+    // not keyed by id (issue #136), and every caller already has the def
+    // object in hand.
     // Passive armor is not an `ability`, but it's absolutely something the
     // player must be told about — Dire-Rat's whole identity lives here.
     const armor = def?.damageReduction ?? 0;
@@ -513,12 +541,32 @@
     }
     const e = def.ability.effect;
     if (e.kind === 'blockFrontHits') {
-      return 'Each wave, blocks the front rat’s first incoming hit outright — whoever is front at the time. ★2 blocks the first 2 hits, ★3 the first 3. Charges reset every wave and never carry over.';
+      return 'Each wave, blocks the front rat’s first hit outright (★2 blocks 2, ★3 blocks 3) — resets every wave.';
+    }
+    if (e.kind === 'chargeWhileBenched') {
+      // Bespoke sentence (not the generic trigger/condition template below):
+      // this effect has TWO separate "nothing happens" cases — at the front,
+      // and once the cap is banked — that read as a confusing bolt-on
+      // ("hard-capped... after which it's a no-op... but only on waves...")
+      // when forced through the generic `${TRIGGER_WHEN} it ${what}${when}`
+      // shape. Leading with the condition, then the gain, then the cap
+      // framed as a ceiling reads as one plain sentence instead.
+      const cap = (t: number) => cellarCoilChargeCapForTier(t);
+      return `Each wave off the front, permanently gains +${e.attackPerWave} attack (★2 +${e.attackPerWave * 2} · ★3 +${e.attackPerWave * 3}) — up to ${cap(1)} total (★2 ${cap(2)} · ★3 ${cap(3)}). No gain at the front, or once capped.`;
+    }
+    if (e.kind === 'distributeStatsOnFaint') {
+      // Bespoke sentence (not the generic template below): the shared-budget
+      // caveat (issue #131) doesn't fit the `${TRIGGER_WHEN} it ${what}` shape
+      // without an awkward bolt-on clause, same reasoning as chargeWhileBenched.
+      return `When it faints, splits its current attack/health evenly across the horde (leftover point to the frontmost rat). All your Pack-Callers share one lifetime budget for this.`;
+    }
+    if (e.kind === 'backlineDamage') {
+      return `At the start of every wave, if not at the front, adds its own attack into the clash against the frontmost enemy — no retaliation. At the front, it just fights normally.`;
     }
     let what = '';
     switch (e.kind) {
       case 'summon': {
-        const name = UNIT_DEFS[e.unitId]?.name ?? e.unitId;
+        const name = UNIT_DEFS[e.unitId]?.name ?? ENEMY_DEFS[e.unitId]?.name ?? e.unitId;
         what = `summons ${e.count} ${name}${e.count > 1 ? 's' : ''} (★2 ${e.count * 2} · ★3 ${e.count * 3}) in front`;
         break;
       }
@@ -526,22 +574,25 @@
         what = `grants ${buffScale(e.attack, e.health)} to ${e.all ? 'every rat behind it' : 'the rat behind it'}`;
         break;
       case 'bequeathAttack':
-        what = `passes its OWN current attack to the rat behind it, plus a bonus for how deep into the ride it fell (capped at ${e.waveBonusCapMultiplier}× its own attack) — the rat right behind it inherits everything; the last slot has nobody to pass it to`;
+        what = `passes its OWN current attack to the rat behind it, plus a bonus for how deep into the ride it fell (capped at ${e.waveBonusCapMultiplier}× its own attack)`;
         break;
       case 'poisonFrontEnemy':
-        what = `applies ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) to the frontmost enemy — poison bites for its full count every clash and clears when the wave falls`;
+        what = `applies ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) to the frontmost enemy — clears when the wave falls`;
         break;
       case 'poisonLastEnemy':
-        what = `applies ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) to the enemy at the back of the line — poison bites for its full count every clash and clears when the wave falls`;
+        what = `applies ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) to the enemy at the back of the line — clears when the wave falls, capped across multiple casters`;
         break;
       case 'poisonTarget':
-        what = `applies ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) to whatever it just struck`;
+        // Flat `stacks * tier`, NOT poisonStacksForTier — mirrors sim.ts's
+        // (flagged-but-live) exemption for this one effect, so the numbers
+        // shown match what the sim actually applies.
+        what = `applies ${e.stacks} poison (★2 ${e.stacks * 2} · ★3 ${e.stacks * 3}) to whatever it just struck`;
         break;
       case 'gainStats':
         what = `gains ${gainStatsScale(e.attack, e.health)}`;
         break;
       case 'revive':
-        what = `revives your first fallen rat at ${reviveHpForTier(1)} health (★2 ${reviveHpForTier(2)} · ★3 ${reviveHpForTier(3)}), never above the rat's own max; each fallen rat can only be raised once`;
+        what = `revives your first fallen rat at ${reviveHpForTier(1)} health (★2 ${reviveHpForTier(2)} · ★3 ${reviveHpForTier(3)}), capped at its own max — once per rat`;
         break;
       case 'buffAdjacent':
         what = `grants ${buffScale(e.attack, e.health)} to the rat(s) beside it — a middle seat buffs both neighbours`;
@@ -550,34 +601,32 @@
         what = `grants ${buffScale(e.attack, e.health)} to the whole horde, itself included`;
         break;
       case 'poisonAllEnemies':
-        what = `rots every enemy in the wave with ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) — poison bites for its full count every clash, ignores armor, and clears when the wave falls`;
-        break;
-      case 'buffAdjacentByTribe':
-        what = `grants ${buffScale(e.attack, e.health)} to the rat(s) beside it (a middle seat buffs both neighbours), multiplied by how many OTHER rats on the board share its tribe — no bonus if it's the only one of its kind`;
-        break;
-      case 'backlineDamage':
-        what = `adds its own current attack straight into the clash against the frontmost enemy, from any slot behind the front — takes no retaliation, but this does nothing the wave it's actually the one at the front`;
+        what = `rots every enemy in the wave with ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) — ignores armor, clears when the wave falls, capped across multiple casters`;
         break;
       case 'teamBuffByWave':
         what = `grants the whole horde ${buffScale(e.early.attack, e.early.health)} on its first wave, plus ${buffScale(e.late.attack, e.late.health)} more from wave ${e.switchWave} onward — both permanent for the rest of the battle`;
         break;
-      case 'chargeWhileBenched': {
-        const cap = (t: number) => cellarCoilChargeCapForTier(t);
-        what = `permanently banks +${e.attackPerWave} attack (★2 +${e.attackPerWave * 2} · ★3 +${e.attackPerWave * 3} per wave) — hard-capped at ${cap(1)} total (★2 ${cap(2)} · ★3 ${cap(3)}), after which it's a no-op for the rest of the ride`;
-        break;
-      }
     }
     const when = def.ability.condition?.timeOfDay
       ? `${TIME_OF_DAY_LABEL[def.ability.condition.timeOfDay] ?? ''}`
-      : def.ability.condition?.notFront
-        ? ' — but only on waves it survives NOT at the front'
-        : '';
+      : '';
     const abilityPart = `${TRIGGER_WHEN[def.ability.trigger]} it ${what}${when}.`;
     return armorSentence ? `${abilityPart} ${armorSentence}` : abilityPart;
   }
 
-  function isSummoner(defId: string): boolean {
-    return UNIT_DEFS[defId]?.ability?.effect.kind === 'summon';
+  function isSummoner(def: UnitDef | undefined): boolean {
+    return def?.ability?.effect.kind === 'summon';
+  }
+
+  // Compendium (issue #136) lists every rat regardless of day-gating (a
+  // bestiary, not just the shop pool), so this tells the player when a
+  // browsed-but-not-yet-owned rat actually shows up — same day-gate rule
+  // the shop rolls use (shopUnitPoolForDay), not a second copy of it.
+  function unitAvailabilityNote(def: UnitDef, day: number): string {
+    if (shopUnitPoolForDay(day).some((u) => u.id === def.id)) return 'available in the shop today';
+    if (def.unlockDay !== undefined && day < def.unlockDay) return `unlocks day ${def.unlockDay}`;
+    if (def.retireDay !== undefined && day >= def.retireDay) return 'retired — no longer offered this season';
+    return 'not currently offered this season';
   }
 
   // Compact tile tag (issue: mobile shop overflow) — the tile shows only a
@@ -596,11 +645,11 @@
           return '❋ summon';
         case 'buffBehind':
         case 'buffAdjacent':
-        case 'buffAdjacentByTribe':
         case 'gainStats':
         case 'bequeathAttack':
         case 'chargeWhileBenched':
         case 'teamBuffByWave':
+        case 'distributeStatsOnFaint':
           return '▲ buff';
         case 'teamBuff': {
           const icon = ability.condition ? (TIME_OF_DAY_ICON[ability.condition.timeOfDay] ?? '▲') : '▲';
@@ -616,7 +665,7 @@
         case 'blockFrontHits':
           return '⛨ block';
         case 'backlineDamage':
-          return '⚔ strike';
+          return '⚔ snipe';
       }
     }
     if ((def.damageReduction ?? 0) > 0) return '⛨ armor';
@@ -781,9 +830,7 @@
           lastRide = ride;
           submitRun({ rideDate: build.date, lineup, result: outcome.result, dev: CHANNEL === 'dev' });
         }
-        const dawnInterest = interestFor(build.scrap);
         build = advanceAfterDawn(build, addDay(build.date));
-        if (dawnInterest > 0) build = { ...build, scrap: build.scrap + dawnInterest };
         advanced = true;
       }
     }
@@ -895,6 +942,37 @@
     notice = '';
   }
 
+  // Dev: repeated `simulateDawn`/`devSkipHours` use can push `build.date`
+  // arbitrarily far ahead of real time (each jump is unbounded, there's no
+  // ceiling tying it back to `currentRideDate()`). Once that happens,
+  // `bossTrialDue`'s dev-fast-forward guard (see its doc comment) correctly
+  // refuses to fire until real time independently catches up — which, for a
+  // date pushed weeks out, means the Boss Trial looks permanently broken on
+  // that device. `freshBuild` does NOT fix this (it deliberately preserves
+  // `build.date`/`build.day`, only clearing shop/board). This button re-anchors
+  // date/day/seasonId to what a genuinely fresh build would have right now,
+  // while keeping the roster/scrap/relics intact (unlike `freshBuild`, which
+  // wipes the board) — the same carry-forward `advanceAfterDawn` uses, just
+  // targeting today instead of build.date's "next day".
+  function resetTestDate() {
+    stopReplay();
+    const today = currentRideDate();
+    const rebuilt = newBuild(today, weekdayFor(today), build.teamRelicIds);
+    build = {
+      ...rebuilt,
+      scrap: build.scrap,
+      board: build.board,
+      bench: build.bench,
+      teamRelicIds: build.teamRelicIds,
+      purchasedSlots: build.purchasedSlots,
+    };
+    saveBuild(build);
+    inspect = null;
+    pendingRelic = null;
+    pendingSwap = null;
+    notice = '';
+  }
+
   function addScrap() {
     build = { ...build, scrap: build.scrap + 10 };
     saveBuild(build);
@@ -916,10 +994,8 @@
     // button can silently skip a still-resolvable trial (see
     // `resolveBossTrialIfDue`'s doc comment).
     resolveBossTrialIfDue(new Date());
-    const dawnInterest = build.day >= SEASON_DAYS ? 0 : interestFor(build.scrap);
     stopReplay();
     build = advanceAfterDawn(build, addDay(build.date));
-    if (dawnInterest > 0) build = { ...build, scrap: build.scrap + dawnInterest };
     saveBuild(build);
     inspect = null;
     pendingRelic = null;
@@ -1149,6 +1225,7 @@
     pendingSwap = null;
     replayKind = 'ride';
     phase = 'riding';
+    stageEl?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     result = null;
     player.speed = speed;
     // Capture the outcome: the hour can flip (or the horde change) while the
@@ -1181,6 +1258,7 @@
     pendingSwap = null;
     replayKind = 'trial';
     phase = 'riding';
+    stageEl?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     result = null;
     player.speed = speed;
     const events = simulateBossTrialReplay(bossTrial.lineup);
@@ -1243,12 +1321,19 @@
       : ''}
   </p>
 
+  <div class="compendium-nav">
+    <button onclick={() => (compendium = { tab: 'units', selected: null })}>📖 Rats</button>
+    <button onclick={() => (compendium = { tab: 'enemies', selected: null })}>📖 Enemies</button>
+    <button onclick={() => (compendium = { tab: 'relics', selected: null })}>📖 Relics</button>
+  </div>
+
   {#if CHANNEL === 'dev'}
   <div class="dev">
     <span class="panel-label">testing</span>
     <button onclick={() => devSkipHours(6)}>⏩ +6h income</button>
     <button onclick={simulateDawn}>⏭ next day</button>
     <button onclick={freshBuild}>fresh build</button>
+    <button onclick={resetTestDate}>↺ reset test date</button>
     <button onclick={addScrap}>+10 scrap</button>
     <span class="dev-theme">theme: {theme.primary} + {theme.secondary} @ wave {theme.pivotWave}</span>
     <span class="dev-sep">·</span>
@@ -1378,9 +1463,14 @@
             <span
               class="freeze"
               role="button"
-              tabindex="-1"
+              tabindex="0"
               onclick={(e) => freeze(i, e)}
-              onkeydown={() => {}}>❄</span>
+              onkeydown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  freeze(i, e);
+                }
+              }}>❄</span>
           </button>
         {:else if slot.kind === 'relic'}
           {@const relic = RELIC_DEFS[slot.relicId]}
@@ -1396,9 +1486,14 @@
             <span
               class="freeze"
               role="button"
-              tabindex="-1"
+              tabindex="0"
               onclick={(e) => freeze(i, e)}
-              onkeydown={() => {}}>❄</span>
+              onkeydown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  freeze(i, e);
+                }
+              }}>❄</span>
           </button>
         {:else}
           <div class="tile empty-tile">sold</div>
@@ -1424,7 +1519,7 @@
       </div>
     {/if}
 
-    {#if build.board.length === 0 && build.scrap > 0}
+    {#if build.board.length === 0 && build.bench.length === 0 && build.scrap > 0}
       <p class="onboarding-hint">your warren is empty — spend your {build.scrap} ⚙ to recruit your first rats</p>
     {/if}
   </div>
@@ -1458,12 +1553,12 @@
         <p class="ride-caption">the next hourly ride · your horde as it stands now</p>
         {#if result}
           <p class="result">
-            Your horde rides to <strong>wave {result.wavesCleared}</strong>
+            Your horde rides to <strong>depth {result.wavesCleared}</strong>
             &middot; {result.survivors.length > 0
               ? `⚑ the drains cleared — ${result.survivors.length} rats ride home`
               : 'until the last rat falls'}
           </p>
-          <p class="result-note">the drains hold steady through the day, changing anew each dawn</p>
+          <p class="result-note">the drains hold steady all week — resets Monday</p>
         {/if}
       {/if}
       <button class="ride" onclick={backToWarren} disabled={phase === 'riding'}>
@@ -1471,7 +1566,7 @@
       </button>
     {:else}
       <div class="idle">
-        <p class="muster-line">Your horde rides the drains <strong>every hour</strong>, hauling back scrap by how deep it pushes. The drains hold steady through the day, changing anew each dawn.</p>
+        <p class="muster-line">Your horde rides the drains <strong>every hour</strong>, hauling back scrap by how deep it pushes. The drains hold steady all week — a new gauntlet awaits each Monday.</p>
         {#if inRecruitmentWindow}
           <p class="onboarding-hint">recruitment window — the horde doesn't ride until <strong>10:00 CET</strong>. Build your board now; the first haul lands at 10:00.</p>
         {/if}
@@ -1484,14 +1579,14 @@
           {#if inRecruitmentWindow}
             "next haul" is a preview of your build, not banked yet — it won't be credited until 10:00 CET · scrap per depth cleared once rides start (deeper waves pay less) · gets tougher deeper
           {:else}
-            scrap per depth cleared, every hour (deeper waves pay less) · +{interestFor(build.scrap)} interest banked each dawn · gets tougher deeper
+            scrap per depth cleared, every hour (deeper waves pay less) · gets tougher deeper
           {/if}
         </p>
         <button class="watch" onclick={watchRide}>▶ watch the next ride</button>
-        <p class="season-best">Deepest ride this week: <strong>wave {seasonBest}</strong> · resets Monday</p>
+        <p class="season-best">Deepest ride this week: <strong>depth {seasonBest}</strong> · resets Monday</p>
         <p class="season-kills">Rats felled this week: <strong>{seasonKills}</strong></p>
         {#if currentDepth > seasonBest}
-          <p class="season-hint">the next ride will reach wave {currentDepth}</p>
+          <p class="season-hint">the next ride will reach depth {currentDepth}</p>
         {/if}
         {#if awaySummary}
           <p class="away">While you were away: {awaySummary.rides} rides · <strong>+{awaySummary.scrap} scrap</strong>.</p>
@@ -1503,7 +1598,7 @@
               {#each rideLog as r}
                 <li class="rl-row" class:deepest={r.depth === seasonBest && r.depth > 0}>
                   <span class="rl-time">{fmtRideHour(r.hour)}</span>
-                  <span class="rl-depth">wave {r.depth}{r.depth === seasonBest && r.depth > 0 ? ' ★' : ''}</span>
+                  <span class="rl-depth">depth {r.depth}{r.depth === seasonBest && r.depth > 0 ? ' ★' : ''}</span>
                   <span class="rl-kills">{r.enemiesDefeated ?? 0} felled</span>
                   <span class="rl-scrap">+{r.scrap} ⚙</span>
                   <!-- Riding until the last rat falls is the normal end of a ride;
@@ -1534,13 +1629,13 @@
             <span class="lb-rank">{i + 1}</span>
             <span class="lb-name">{row.name}{isMe(row) ? ' · you' : ''}</span>
             <span class="lb-kills">{row.kills} felled</span>
-            <span class="lb-depth">wave {row.depth}</span>
+            <span class="lb-depth">depth {row.depth}</span>
           </li>
         {/each}
       </ol>
     {/if}
     {#if myRank !== null && myRank > board.length}
-      <p class="lb-myrank">your rank: <strong>#{myRank}</strong> · wave {seasonBest} · {seasonKills} felled</p>
+      <p class="lb-myrank">your rank: <strong>#{myRank}</strong> · depth {seasonBest} · {seasonKills} felled</p>
     {/if}
     <p class="lb-you">
       riding as <strong>{playerName || '—'}</strong>
@@ -1562,6 +1657,7 @@
         {bossTrialBoardBusy ? '…' : '↻'}
       </button>
     </div>
+    <img class="bt-portrait" src={ART_URL['boss-trial']} alt="" />
     <p class="bt-blurb">
       Every day at {BOSS_TRIAL_HOUR}:00 CET your horde automatically faces a boss — no trigger, no preview. Fell it to reach the next phase — every phase the next boss hits half again as hard, until the horde falls. Score is total damage dealt.
     </p>
@@ -1639,8 +1735,8 @@
                 </div>
               </div>
             </div>
-            <p class="card-ability">{abilitySentence(def.id)}</p>
-            {#if isSummoner(def.id)}
+            <p class="card-ability">{abilitySentence(def)}</p>
+            {#if isSummoner(def)}
               <p class="card-hint">summoned rats fight beyond your warren's size (up to {combatCapForBuild(build)} in the drains)</p>
             {/if}
             <p class="card-hint">recruit three of a kind and they merge into one stronger ★ rat</p>
@@ -1690,8 +1786,8 @@
                 <div class="card-stats">{stats.attack}/{stats.health}</div>
               </div>
             </div>
-            <p class="card-ability">{abilitySentence(unit.defId)}</p>
-            {#if isSummoner(unit.defId)}
+            <p class="card-ability">{abilitySentence(def)}</p>
+            {#if isSummoner(def)}
               <p class="card-hint">summoned rats fight beyond your warren's size (up to {combatCapForBuild(build)} in the drains)</p>
             {/if}
             {#if unit.relicIds.length > 0}
@@ -1719,7 +1815,7 @@
                 <div class="card-stats">{stats.attack}/{stats.health}</div>
               </div>
             </div>
-            <p class="card-ability">{abilitySentence(unit.defId)}</p>
+            <p class="card-ability">{abilitySentence(def)}</p>
             <p class="card-hint">
               {boardFull
                 ? 'the warren is full — swap this one in for a fighting rat'
@@ -1743,6 +1839,120 @@
     </div>
   {/if}
 
+  {#if compendium}
+    {@const comp = compendium}
+    {@const unitList = seasonUnitPool().sort((a, b) => a.cost - b.cost)}
+    {@const relicList = [...Object.values(RELIC_DEFS)].sort((a, b) => a.cost - b.cost)}
+    {@const bossDef = {
+      id: 'boss-trial',
+      name: 'The Gauntlet Boss',
+      attack: Math.round(bossTrialPhaseAttack(0)),
+      health: Math.round(bossTrialPhaseHP(0)),
+      cost: 0,
+    } as UnitDef}
+    {@const enemyList = [...ENEMY_POOL, bossDef]}
+    {@const selectedUnit =
+      comp.tab === 'units' && comp.selected
+        ? UNIT_DEFS[comp.selected]
+        : comp.tab === 'enemies' && comp.selected
+          ? enemyList.find((e) => e.id === comp.selected)
+          : undefined}
+    {@const selectedRelic = comp.tab === 'relics' && comp.selected ? RELIC_DEFS[comp.selected] : undefined}
+    <div class="sheet-backdrop" role="presentation" onclick={() => (compendium = null)}>
+      <div class="sheet compendium-sheet" role="dialog" aria-modal="true" onclick={(e) => e.stopPropagation()}>
+        {#if selectedUnit}
+          {@const armor = selectedUnit.damageReduction ?? 0}
+          <div class="card-head">
+            {#if ART_URL[selectedUnit.id]}<img class="card-portrait" src={ART_URL[selectedUnit.id]} alt="" />{/if}
+            <div>
+              <div class="card-name">{selectedUnit.name}</div>
+              <div class="card-stats">
+                {selectedUnit.attack}/{selectedUnit.health}{comp.tab === 'units' ? ` · ⚙ ${selectedUnit.cost}` : ''}
+              </div>
+              {#if selectedUnit.archetype || armor > 0}
+                <div class="card-sub">
+                  {[selectedUnit.archetype, armor > 0 ? `${armor} armor` : null].filter(Boolean).join(' · ')}
+                </div>
+              {/if}
+              {#if comp.tab === 'units'}
+                <div class="card-sub">{unitAvailabilityNote(selectedUnit, build.day)}</div>
+              {/if}
+            </div>
+          </div>
+          {#if selectedUnit.id === 'boss-trial'}
+            <p class="card-ability">
+              Fought once a day in the Boss Trial, not the weekly gauntlet — a single foe that escalates every phase
+              cleared: attack ×{BOSS_TRIAL_ESCALATION}, health +{BOSS_TRIAL_HP_GROWTH_PER_PHASE}. Stats shown are phase 1.
+            </p>
+          {:else}
+            <p class="card-ability">{abilitySentence(selectedUnit)}</p>
+            {#if comp.tab === 'units' && isSummoner(selectedUnit)}
+              <p class="card-hint">summoned rats fight beyond your warren's size (up to {combatCapForBuild(build)} in the drains)</p>
+            {/if}
+            {#if comp.tab === 'enemies'}
+              <p class="card-hint">shown at ★1 — enemies never star up; the gauntlet may scale their stats by depth</p>
+            {/if}
+          {/if}
+          <div class="card-actions">
+            <button onclick={() => (compendium = { tab: comp.tab, selected: null })}>◀ back</button>
+            <button onclick={() => (compendium = null)}>close</button>
+          </div>
+        {:else if selectedRelic}
+          <div class="card-head">
+            <div class="card-relic-icon">✦</div>
+            <div>
+              <div class="card-name">{selectedRelic.name}</div>
+              <div class="card-stats">⚙ {selectedRelic.cost}</div>
+              <div class="card-sub">{selectedRelic.scope === 'team' ? 'whole team' : 'pin to one rat'}</div>
+            </div>
+          </div>
+          <p class="card-ability">{selectedRelic.desc}.</p>
+          <div class="card-actions">
+            <button onclick={() => (compendium = { tab: 'relics', selected: null })}>◀ back</button>
+            <button onclick={() => (compendium = null)}>close</button>
+          </div>
+        {:else}
+          <div class="compendium-header">
+            <div class="compendium-tabs">
+              <button class:active={comp.tab === 'units'} onclick={() => (compendium = { tab: 'units', selected: null })}>Rats</button>
+              <button class:active={comp.tab === 'enemies'} onclick={() => (compendium = { tab: 'enemies', selected: null })}>Enemies</button>
+              <button class:active={comp.tab === 'relics'} onclick={() => (compendium = { tab: 'relics', selected: null })}>Relics</button>
+            </div>
+            <button class="compendium-close" onclick={() => (compendium = null)} aria-label="close compendium">✕</button>
+          </div>
+          <div class="compendium-list">
+            {#if comp.tab === 'units'}
+              {#each unitList as def (def.id)}
+                <button class="compendium-row" onclick={() => (compendium = { tab: 'units', selected: def.id })}>
+                  {#if ART_URL[def.id]}<img class="compendium-row-portrait" src={ART_URL[def.id]} alt="" />{/if}
+                  <span class="compendium-row-name">{def.name}</span>
+                  <span class="compendium-row-cost">⚙ {def.cost}</span>
+                  <span class="compendium-row-stats">{def.attack}/{def.health}</span>
+                </button>
+              {/each}
+            {:else if comp.tab === 'enemies'}
+              {#each enemyList as def (def.id)}
+                <button class="compendium-row" onclick={() => (compendium = { tab: 'enemies', selected: def.id })}>
+                  {#if ART_URL[def.id]}<img class="compendium-row-portrait" src={ART_URL[def.id]} alt="" />{/if}
+                  <span class="compendium-row-name">{def.name}</span>
+                  <span class="compendium-row-stats">{def.attack}/{def.health}</span>
+                </button>
+              {/each}
+            {:else}
+              {#each relicList as relic (relic.id)}
+                <button class="compendium-row" onclick={() => (compendium = { tab: 'relics', selected: relic.id })}>
+                  <div class="compendium-row-icon">✦</div>
+                  <span class="compendium-row-name">{relic.name}</span>
+                  <span class="compendium-row-cost">⚙ {relic.cost}</span>
+                </button>
+              {/each}
+            {/if}
+          </div>
+        {/if}
+      </div>
+    </div>
+  {/if}
+
   {#if nameEntryOpen}
     <div class="sheet-backdrop" role="presentation">
       <div class="sheet name-sheet" role="dialog" aria-modal="true">
@@ -1757,7 +1967,7 @@
           onkeydown={(e) => e.key === 'Enter' && confirmName()}
         />
         <div class="card-actions">
-          <button class="primary" onclick={confirmName}>ride out</button>
+          <button class="primary" onclick={confirmName}>{playerName ? 'save name' : 'ride out'}</button>
           <button onclick={() => (nameDraft = defaultName())}>↻ new name</button>
           {#if playerName}
             <button onclick={() => (nameEntryOpen = false)}>cancel</button>
@@ -2053,8 +2263,7 @@
   }
 
   .bench-board {
-    grid-template-columns: repeat(3, 1fr);
-    max-width: 280px;
+    grid-template-columns: repeat(5, 1fr);
   }
 
   .bench-tile {
@@ -2117,11 +2326,13 @@
     font-size: 10px;
     color: var(--ink-dim);
     line-height: 1.2;
+    overflow-wrap: break-word;
   }
 
   .tile-cost {
     font-size: 11px;
     color: #d4af37;
+    overflow-wrap: break-word;
   }
 
   .unit-tile.selected {
@@ -2150,8 +2361,14 @@
 
   .freeze {
     position: absolute;
-    top: 3px;
-    right: 6px;
+    top: 0;
+    right: 0;
+    padding: 6px;
+    min-width: 22px;
+    min-height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     font-size: 12px;
     color: #7ba7cc;
     opacity: 0.65;
@@ -2222,6 +2439,17 @@
     background: #241a14;
     border: 1px solid #4a3520;
     border-radius: 10px;
+  }
+
+  .bt-portrait {
+    width: 64px;
+    height: 64px;
+    object-fit: contain;
+    background: #241a14;
+    border: 1px solid #4a3520;
+    border-radius: 10px;
+    display: block;
+    margin: 12px auto;
   }
 
   .card-relic-icon {
@@ -2322,6 +2550,132 @@
     color: #d4af37;
   }
 
+  .compendium-nav {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin: 0 0 16px;
+  }
+
+  .compendium-nav button {
+    padding: 6px 14px;
+    font-family: inherit;
+    font-size: 12px;
+    color: var(--ink);
+    background: #241a14;
+    border: 1px solid #4a3520;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+
+  .compendium-sheet {
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .compendium-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .compendium-tabs {
+    display: flex;
+    gap: 6px;
+  }
+
+  .compendium-tabs button {
+    padding: 6px 14px;
+    font-family: inherit;
+    font-size: 13px;
+    color: var(--ink-dim);
+    background: #241a14;
+    border: 1px solid #4a3520;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+
+  .compendium-tabs button.active {
+    color: #f0e6d2;
+    border-color: var(--accent);
+  }
+
+  .compendium-close {
+    padding: 6px 10px;
+    font-family: inherit;
+    font-size: 14px;
+    color: var(--ink-dim);
+    background: none;
+    border: none;
+    cursor: pointer;
+  }
+
+  .compendium-list {
+    margin-top: 12px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .compendium-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    font-family: inherit;
+    text-align: left;
+    color: var(--ink);
+    background: #241a14;
+    border: 1px solid #4a3520;
+    border-radius: 8px;
+    cursor: pointer;
+  }
+
+  .compendium-row-portrait {
+    width: 36px;
+    height: 36px;
+    object-fit: contain;
+    background: #1a140f;
+    border: 1px solid #4a3520;
+    border-radius: 6px;
+    flex-shrink: 0;
+  }
+
+  .compendium-row-icon {
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    color: #d4af37;
+    background: #1a140f;
+    border: 1px solid #4a3520;
+    border-radius: 6px;
+    flex-shrink: 0;
+  }
+
+  .compendium-row-name {
+    flex: 1;
+    font-size: 14px;
+  }
+
+  .compendium-row-cost {
+    font-size: 12px;
+    color: var(--ink-dim);
+    flex-shrink: 0;
+  }
+
+  .compendium-row-stats {
+    font-size: 13px;
+    font-weight: bold;
+    color: #f0e6d2;
+    flex-shrink: 0;
+  }
+
   .team-relics {
     margin-top: 8px;
     font-size: 12px;
@@ -2338,7 +2692,11 @@
   }
 
   .ride-controls button {
-    padding: 3px 10px;
+    padding: 10px 16px;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     font-family: inherit;
     font-size: 12px;
     color: var(--ink);
@@ -2590,6 +2948,11 @@
   }
 
   .lb-refresh {
+    min-width: 40px;
+    min-height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     padding: 2px 10px;
     font-family: inherit;
     font-size: 13px;
