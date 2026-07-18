@@ -43,8 +43,10 @@
  * that still separates "does real work but it's currently overkill" from
  * "genuinely dead weight."
  *
- * timeOfDay-gated units (Dawn-Runt/Dusk-Runt) are blended 50/50 across the
- * before/after-noon halves, as before, since a real expedition sees both.
+ * Time-sensitive units are blended 50/50 across the before/after-noon halves,
+ * since a real expedition sees both. This covers BOTH shapes: `condition.
+ * timeOfDay` gates (Dawn-Runt/Dusk-Runt) and `teamBuffByTime` (Twilight-Runt),
+ * whose time branch lives inside the effect with no top-level condition.
  *
  * Run from packages/core: npx tsx scripts/all-unit-value.ts
  */
@@ -102,13 +104,19 @@ function measure(lineup: Lineup, day: number): Measure {
   return { waves: waves / SAMPLES, damage: damage / SAMPLES };
 }
 
-// Blend for timeOfDay-gated units; plain measure otherwise.
-function measureUnit(candidateId: string | null, tier: number, day: number, pos: Position, condition?: TimeOfDay): Measure {
-  if (!condition) return measure(roster(candidateId, tier, day, pos), day);
-  const dormant: TimeOfDay = condition === 'beforeNoon' ? 'afterNoon' : 'beforeNoon';
-  const peak = measure(roster(candidateId, tier, day, pos, condition), day);
-  const off = measure(roster(candidateId, tier, day, pos, dormant), day);
-  return { waves: (peak.waves + off.waves) / 2, damage: (peak.damage + off.damage) / 2 };
+// Blend 50/50 across the two day-halves for any time-sensitive unit; plain
+// measure otherwise. Time sensitivity comes in TWO shapes and both need the
+// blend: a `condition.timeOfDay` gate (Dawn/Dusk-Runt — active one half,
+// dormant the other), and `teamBuffByTime` (Twilight-Runt — different buff
+// each half, chosen inside the effect with NO top-level condition). Detecting
+// only the condition shape made Twilight-Runt fall through to a measurement
+// with `timeOfDay` unset, where sim.ts applies NEITHER half — the unit read
+// as a total no-op (~0, rank 18-19/19) purely as a tooling artifact.
+function measureUnit(candidateId: string | null, tier: number, day: number, pos: Position, timeSensitive: boolean): Measure {
+  if (!timeSensitive) return measure(roster(candidateId, tier, day, pos), day);
+  const am = measure(roster(candidateId, tier, day, pos, 'beforeNoon'), day);
+  const pm = measure(roster(candidateId, tier, day, pos, 'afterNoon'), day);
+  return { waves: (am.waves + pm.waves) / 2, damage: (am.damage + pm.damage) / 2 };
 }
 
 interface Row {
@@ -136,7 +144,8 @@ function baseline(tier: number, day: number, pos: Position): Measure {
 const rows: Row[] = [];
 for (const id of CANDIDATE_IDS) {
   const def = UNIT_DEFS[id];
-  const condition = def.ability?.condition?.timeOfDay;
+  const timeSensitive =
+    def.ability?.condition?.timeOfDay !== undefined || def.ability?.effect.kind === 'teamBuffByTime';
   for (let tier = 1; tier <= 3; tier++) {
     const day = TIER_DAY[tier];
     const scrapCost = def.cost * Math.pow(3, tier - 1);
@@ -144,7 +153,7 @@ for (const id of CANDIDATE_IDS) {
     let best: { pos: Position; wavesEff: number; dmgEff: number } | null = null;
     for (const pos of positions) {
       const base = baseline(tier, day, pos);
-      const withUnit = measureUnit(id, tier, day, pos, condition);
+      const withUnit = measureUnit(id, tier, day, pos, timeSensitive);
       const wavesEff = ((withUnit.waves - base.waves) / scrapCost) * 100;
       const dmgEff = ((withUnit.damage - base.damage) / scrapCost) * 100;
       if (best === null || wavesEff > best.wavesEff) best = { pos, wavesEff, dmgEff };
