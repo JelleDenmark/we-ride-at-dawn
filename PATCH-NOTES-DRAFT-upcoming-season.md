@@ -45,15 +45,13 @@ and rebuilt, three old faces leave the stalls for good, and a whole second gaunt
 after dark. read slow, this one's long.
 
 **New rats**
-- **Pack-Caller** — 2/3, cost 5. faint: gives away its own CURRENT attack/health (whatever
-  it's grown to mid-battle — Warren-Warden buffs, relics, all of it) split evenly across
-  the rest of the horde; any odd point left over goes to whoever's furthest forward. build
-  it up, then let it die on purpose. the total the ability can hand out over one ride is
-  capped, and every Pack-Caller you field draws from the same pool — spread it thin early
-  or bank it for the survivors late, both work, but it can't compound forever.
+- **Pack-Caller** — 2/3, cost 5. faint: gives away its own CURRENT attack/health split
+  evenly across the rest of the horde; any odd point left over goes to whoever's furthest
+  forward. build it up, then let it die on purpose. the total it can hand out over one ride
+  is capped — worth about three tier-3 Pack-Callers combined (54 attack / 81 health) — and
+  every Pack-Caller on your board shares that one pool.
 - **Slink-Rat** — 3/1, cost 6. each wave it adds its own attack straight into the clash
-  against the front foe, from anywhere in the back line — no retaliation. 1 HP means it's
-  paper if it ever reaches the front itself; it wants a wall in front of it, not a fight.
+  against the front foe, from anywhere in the back line — no retaliation.
 - **Twilight-Runt** — 1/2, cost 6. fuses Dawn-Runt and Dusk-Runt into one card: before noon
   it mostly hits attack (+3atk/+1hp), after noon it mostly hits health (+1atk/+2hp) — never
   a dead half, whichever hour you're riding in.
@@ -87,13 +85,10 @@ after dark. read slow, this one's long.
 
 **Costs on the ladder** — six of nineteen units were priced wrong for what they actually do;
 this straightens the ladder without touching a single kit:
-- Bone-Priest 6 -> 5 / Brood-Mother 6 -> 5 / Ward-Weaver 6 -> 5 (all three were overpriced
-  for their solo output)
-- Twilight-Runt 4 -> 6 (a scouting-tool blind spot had it reading as barely worth fielding —
-  fixed, it turned out to be the strongest solo unit in the game at every star level, not
-  just t2. priced up to match, twice, before this ever reached a real board)
-- Corpse-Glutton 6 -> 7 (the strongest realistic-board pick in the game was underpriced)
-- Dire-Rat 8 -> 7 (the vanilla tank was priced almost nobody into playing it)
+- Bone-Priest 6 -> 5 / Brood-Mother 6 -> 5 / Ward-Weaver 6 -> 5
+- Twilight-Runt 4 -> 6
+- Corpse-Glutton 6 -> 7
+- Dire-Rat 8 -> 7
 
 **More room on the bench**
 - five bench slots now, up from three. enough to hold a whole merge-trio and change without
