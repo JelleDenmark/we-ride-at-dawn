@@ -83,12 +83,16 @@ after dark. read slow, this one's long.
   and barely showed up in real lineups. Anyone already riding one keeps riding it, and
   selling it refunds every scrap you spent, so nothing already in your warren is punished.
 
-**Costs on the ladder** — six of nineteen units were priced wrong for what they actually do;
+**Costs on the ladder** — five of nineteen units were priced wrong for what they actually do;
 this straightens the ladder without touching a single kit:
-- Bone-Priest 6 -> 5 / Brood-Mother 6 -> 5 / Ward-Weaver 6 -> 5
+- Bone-Priest 6 -> 5 / Brood-Mother 6 -> 5
 - Twilight-Runt 4 -> 6
 - Corpse-Glutton 6 -> 7
 - Dire-Rat 8 -> 7
+
+(Ward-Weaver also moved during this draft — 6 -> 5 in the original rebalance, then back to
+6 after a later pass found it the strongest seat on a real board — so it nets out unchanged
+from what you're playing today. Not listed above since there's nothing for you to notice.)
 
 **More room on the bench**
 - five bench slots now, up from three. enough to hold a whole merge-trio and change without
@@ -229,7 +233,14 @@ in battle replays instead of a plain grey block.
   bullet is no longer contingent on a separate unmerged branch — sourced from `dev`'s
   actual `units.ts` like everything else here. Twilight-Runt's cost moved again after this
   merge (5->6, see its own sourcing note above) — the player-copy bullet states the net
-  4->6 change, not the two intermediate steps.
+  4->6 change, not the two intermediate steps. Ward-Weaver ALSO moved again after this
+  merge, back 5->6 (2026-07-18, same session as the Twilight-Runt wave-rework balance
+  pass on PR #123): the real-board seat-swap probe run for that pass (not the isolated
+  tier-list script — see the balance-blind-spots note on that PR) found Ward-Weaver the
+  single strongest back-seat swap tested, +5.9 waves on a day-7 t2+relics board, clear of
+  every alternative. Net effect for players: unchanged from `master`'s current 6, so it's
+  omitted from the player-copy cost list above (nothing to notice) but disclosed here for
+  the record. `dev` re-tested at 269/269 after the bump.
 - **Glass Shard:** `ea24651` (issue #122). `firstHitBonusScalesWithWave`, explicitly
   "deliberately left UNCAPPED per Jesper's explicit sign-off" in the commit body — this is
   a disclosed, accepted design risk, not an oversight or a live bug. Worth watching next
