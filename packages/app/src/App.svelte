@@ -449,7 +449,7 @@
   // UnitDef, own-horde or enemy, without needing an owned copy on the
   // board/bench/shop. `selected` holds a def id within the active tab's
   // list; null shows the tab's list, non-null shows that entry's detail.
-  let compendium = $state<{ tab: 'units' | 'enemies'; selected: string | null } | null>(null);
+  let compendium = $state<{ tab: 'units' | 'enemies' | 'relics'; selected: string | null } | null>(null);
   let notice = $state('');
 
   // Enemy summon targets (e.g. Watch-Sergeant -> Watch-Whelp) live in
@@ -605,6 +605,17 @@
 
   function isSummoner(def: UnitDef | undefined): boolean {
     return def?.ability?.effect.kind === 'summon';
+  }
+
+  // Compendium (issue #136) lists every rat regardless of day-gating (a
+  // bestiary, not just the shop pool), so this tells the player when a
+  // browsed-but-not-yet-owned rat actually shows up — same day-gate rule
+  // the shop rolls use (shopUnitPoolForDay), not a second copy of it.
+  function unitAvailabilityNote(def: UnitDef, day: number): string {
+    if (shopUnitPoolForDay(day).some((u) => u.id === def.id)) return 'available in the shop today';
+    if (def.unlockDay !== undefined && day < def.unlockDay) return `unlocks day ${def.unlockDay}`;
+    if (def.retireDay !== undefined && day >= def.retireDay) return 'retired — no longer offered this season';
+    return 'not currently offered this season';
   }
 
   // Compact tile tag (issue: mobile shop overflow) — the tile shows only a
@@ -1307,6 +1318,7 @@
   <div class="compendium-nav">
     <button onclick={() => (compendium = { tab: 'units', selected: null })}>📖 Rats</button>
     <button onclick={() => (compendium = { tab: 'enemies', selected: null })}>📖 Enemies</button>
+    <button onclick={() => (compendium = { tab: 'relics', selected: null })}>📖 Relics</button>
   </div>
 
   {#if CHANNEL === 'dev'}
@@ -1823,26 +1835,38 @@
 
   {#if compendium}
     {@const comp = compendium}
-    {@const list = comp.tab === 'units' ? shopUnitPoolForDay(build.day) : ENEMY_POOL}
-    {@const selectedDef = comp.selected ? list.find((d) => d.id === comp.selected) : null}
+    {@const unitList = [...Object.values(UNIT_DEFS)].sort((a, b) => a.cost - b.cost)}
+    {@const relicList = [...Object.values(RELIC_DEFS)].sort((a, b) => a.cost - b.cost)}
+    {@const selectedUnit =
+      comp.tab === 'units' && comp.selected
+        ? UNIT_DEFS[comp.selected]
+        : comp.tab === 'enemies' && comp.selected
+          ? ENEMY_POOL.find((e) => e.id === comp.selected)
+          : undefined}
+    {@const selectedRelic = comp.tab === 'relics' && comp.selected ? RELIC_DEFS[comp.selected] : undefined}
     <div class="sheet-backdrop" role="presentation" onclick={() => (compendium = null)}>
       <div class="sheet compendium-sheet" role="dialog" aria-modal="true" onclick={(e) => e.stopPropagation()}>
-        {#if selectedDef}
-          {@const armor = selectedDef.damageReduction ?? 0}
+        {#if selectedUnit}
+          {@const armor = selectedUnit.damageReduction ?? 0}
           <div class="card-head">
-            {#if ART_URL[selectedDef.id]}<img class="card-portrait" src={ART_URL[selectedDef.id]} alt="" />{/if}
+            {#if ART_URL[selectedUnit.id]}<img class="card-portrait" src={ART_URL[selectedUnit.id]} alt="" />{/if}
             <div>
-              <div class="card-name">{selectedDef.name}</div>
-              <div class="card-stats">{selectedDef.attack}/{selectedDef.health}</div>
-              {#if selectedDef.archetype || armor > 0}
+              <div class="card-name">{selectedUnit.name}</div>
+              <div class="card-stats">
+                {selectedUnit.attack}/{selectedUnit.health}{comp.tab === 'units' ? ` · ⚙ ${selectedUnit.cost}` : ''}
+              </div>
+              {#if selectedUnit.archetype || armor > 0}
                 <div class="card-sub">
-                  {#if selectedDef.archetype}{selectedDef.archetype}{/if}{#if selectedDef.archetype && armor > 0} · {/if}{#if armor > 0}{armor} armor{/if}
+                  {[selectedUnit.archetype, armor > 0 ? `${armor} armor` : null].filter(Boolean).join(' · ')}
                 </div>
+              {/if}
+              {#if comp.tab === 'units'}
+                <div class="card-sub">{unitAvailabilityNote(selectedUnit, build.day)}</div>
               {/if}
             </div>
           </div>
-          <p class="card-ability">{abilitySentence(selectedDef)}</p>
-          {#if isSummoner(selectedDef)}
+          <p class="card-ability">{abilitySentence(selectedUnit)}</p>
+          {#if isSummoner(selectedUnit)}
             <p class="card-hint">summoned rats fight beyond your warren's size (up to {combatCapForBuild(build)} in the drains)</p>
           {/if}
           {#if comp.tab === 'enemies'}
@@ -1852,22 +1876,56 @@
             <button onclick={() => (compendium = { tab: comp.tab, selected: null })}>◀ back</button>
             <button onclick={() => (compendium = null)}>close</button>
           </div>
+        {:else if selectedRelic}
+          <div class="card-head">
+            <div class="card-relic-icon">✦</div>
+            <div>
+              <div class="card-name">{selectedRelic.name}</div>
+              <div class="card-stats">⚙ {selectedRelic.cost}</div>
+              <div class="card-sub">{selectedRelic.scope === 'team' ? 'whole team' : 'pin to one rat'}</div>
+            </div>
+          </div>
+          <p class="card-ability">{selectedRelic.desc}.</p>
+          <div class="card-actions">
+            <button onclick={() => (compendium = { tab: 'relics', selected: null })}>◀ back</button>
+            <button onclick={() => (compendium = null)}>close</button>
+          </div>
         {:else}
           <div class="compendium-header">
             <div class="compendium-tabs">
               <button class:active={comp.tab === 'units'} onclick={() => (compendium = { tab: 'units', selected: null })}>Rats</button>
               <button class:active={comp.tab === 'enemies'} onclick={() => (compendium = { tab: 'enemies', selected: null })}>Enemies</button>
+              <button class:active={comp.tab === 'relics'} onclick={() => (compendium = { tab: 'relics', selected: null })}>Relics</button>
             </div>
             <button class="compendium-close" onclick={() => (compendium = null)} aria-label="close compendium">✕</button>
           </div>
           <div class="compendium-list">
-            {#each list as def (def.id)}
-              <button class="compendium-row" onclick={() => (compendium = { tab: comp.tab, selected: def.id })}>
-                {#if ART_URL[def.id]}<img class="compendium-row-portrait" src={ART_URL[def.id]} alt="" />{/if}
-                <span class="compendium-row-name">{def.name}</span>
-                <span class="compendium-row-stats">{def.attack}/{def.health}</span>
-              </button>
-            {/each}
+            {#if comp.tab === 'units'}
+              {#each unitList as def (def.id)}
+                <button class="compendium-row" onclick={() => (compendium = { tab: 'units', selected: def.id })}>
+                  {#if ART_URL[def.id]}<img class="compendium-row-portrait" src={ART_URL[def.id]} alt="" />{/if}
+                  <span class="compendium-row-name">{def.name}</span>
+                  <span class="compendium-row-cost">⚙ {def.cost}</span>
+                  <span class="compendium-row-stats">{def.attack}/{def.health}</span>
+                </button>
+              {/each}
+            {:else if comp.tab === 'enemies'}
+              {#each ENEMY_POOL as def (def.id)}
+                <button class="compendium-row" onclick={() => (compendium = { tab: 'enemies', selected: def.id })}>
+                  {#if ART_URL[def.id]}<img class="compendium-row-portrait" src={ART_URL[def.id]} alt="" />{/if}
+                  <span class="compendium-row-name">{def.name}</span>
+                  <span class="compendium-row-stats">{def.attack}/{def.health}</span>
+                </button>
+              {/each}
+            {:else}
+              {#each relicList as relic (relic.id)}
+                <button class="compendium-row" onclick={() => (compendium = { tab: 'relics', selected: relic.id })}>
+                  <div class="compendium-row-icon">✦</div>
+                  <span class="compendium-row-name">{relic.name}</span>
+                  <span class="compendium-row-cost">⚙ {relic.cost}</span>
+                </button>
+              {/each}
+            {/if}
           </div>
         {/if}
       </div>
@@ -2566,15 +2624,36 @@
     flex-shrink: 0;
   }
 
+  .compendium-row-icon {
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    color: #d4af37;
+    background: #1a140f;
+    border: 1px solid #4a3520;
+    border-radius: 6px;
+    flex-shrink: 0;
+  }
+
   .compendium-row-name {
     flex: 1;
     font-size: 14px;
+  }
+
+  .compendium-row-cost {
+    font-size: 12px;
+    color: var(--ink-dim);
+    flex-shrink: 0;
   }
 
   .compendium-row-stats {
     font-size: 13px;
     font-weight: bold;
     color: #f0e6d2;
+    flex-shrink: 0;
   }
 
   .team-relics {
