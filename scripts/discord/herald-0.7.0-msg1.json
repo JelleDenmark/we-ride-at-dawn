@@ -1,0 +1,12 @@
+{
+  "embeds": [
+    {
+      "title": "v0.7.0 — the warren turns over (1/3)",
+      "description": "🌒 **New season rides out tomorrow, Monday 06:00 CET.** Five new rats join the warren, two get torn down and rebuilt, three old faces leave the stalls for good — the biggest turnover since v0.6.5. read slow, this one's long.\n\n**New rats**\n• Pack-Caller — cost 5. faint: gives away its own CURRENT attack/health split evenly across the horde, odd point to whoever's furthest forward. total payout capped at three tier-3 Pack-Callers' worth, shared across every one you field.\n• Slink-Rat — cost 6. each wave, snipes the front foe for its own attack straight from the back line — no retaliation.\n• Twilight-Runt — cost 6. the whole horde gains +2atk/+1hp on its first wave, +1atk/+1hp more once wave 15 hits — both permanent for the rest of the ride. never a dead card, whenever you ride. (replaces Dawn-Runt & Dusk-Runt, below.)\n• Cellar-Coil — cost 5. every wave it survives off the front line, it banks permanent attack — capped hard per tier so waiting in the back can't go infinite.\n• Draughtsman Moe — cost 8. a prestige unit honoring **RatMoe**, season 2's champion — carries the exact kit that won that season at wave 45: rots the whole enemy line every wave.\n\n**Reworked**\n• Gnawer — faint now bequeaths its OWN current attack (whatever it actually had), plus a bonus for how deep it died — not a flat +2 that never aged.\n• Plague-Bearer — now reaches the BACK of the enemy line instead of the front, pre-rotting a threat before the grind gets there.\n\n**Leaving the stalls**\nBlight-Witch and MD Rattyfock retire — Draughtsman Moe carries the poison-all kit now, Warren-Warden returns to the tank slot. Dawn-Runt and Dusk-Runt are replaced outright by Twilight-Runt. Gutter-Runt retires too. Anyone already riding any of these keeps riding them; selling refunds in full.\n\n**Costs corrected** — five of nineteen units were priced wrong for what they do: Bone-Priest & Brood-Mother 6→5, Twilight-Runt 4→6, Corpse-Glutton 6→7, Dire-Rat 8→7.",
+      "color": 5793266,
+      "footer": {
+        "text": "we ride at dawn · season resets Monday 06:00 CET"
+      }
+    }
+  ]
+}
