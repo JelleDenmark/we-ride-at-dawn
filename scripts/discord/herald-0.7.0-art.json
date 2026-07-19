@@ -1,0 +1,41 @@
+{
+  "content": "the faces riding in with the new season, and what you'll be fighting in the Boss Trial:",
+  "embeds": [
+    {
+      "title": "Pack-Caller",
+      "description": "faint: gives away its own current attack/health across the horde",
+      "color": 5793266,
+      "image": { "url": "attachment://pack-caller.png" }
+    },
+    {
+      "title": "Slink-Rat",
+      "description": "backline sniper — no retaliation",
+      "color": 5793266,
+      "image": { "url": "attachment://slink-rat.png" }
+    },
+    {
+      "title": "Twilight-Runt",
+      "description": "fused of dawn and dusk, never idle",
+      "color": 5793266,
+      "image": { "url": "attachment://twilight-runt.png" }
+    },
+    {
+      "title": "Cellar-Coil",
+      "description": "positional patience — the longer it waits, the harder it lands",
+      "color": 5793266,
+      "image": { "url": "attachment://cellar-coil.png" }
+    },
+    {
+      "title": "Draughtsman Moe",
+      "description": "season 2 champion's tribute — rots the whole enemy line",
+      "color": 5793266,
+      "image": { "url": "attachment://draughtsman-moe.png" }
+    },
+    {
+      "title": "The Gauntlet Boss",
+      "description": "the thing waiting for you in the Boss Trial, 20:00 CET",
+      "color": 10038562,
+      "image": { "url": "attachment://boss-trial.png" }
+    }
+  ]
+}
