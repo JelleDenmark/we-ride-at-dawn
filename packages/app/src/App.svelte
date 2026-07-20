@@ -561,7 +561,7 @@
       return `When it faints, splits its current attack/health evenly across the horde (leftover point to the frontmost rat). All your Pack-Callers share one lifetime budget for this.`;
     }
     if (e.kind === 'backlineDamage') {
-      return `At the start of every wave, if not at the front, adds its own attack into the clash against the frontmost enemy — no retaliation. At the front, it just fights normally.`;
+      return `At the start of every wave, if not at the front, strikes the frontmost enemy directly for its own attack — a separate hit, landed before that wave's clashing even begins, with no retaliation. At the front, it just fights normally.`;
     }
     let what = '';
     switch (e.kind) {
