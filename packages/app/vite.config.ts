@@ -1,3 +1,5 @@
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { VitePWA } from 'vite-plugin-pwa';
@@ -10,12 +12,53 @@ import { VitePWA } from 'vite-plugin-pwa';
 // "two-channel / base-path gotchas".
 const CHANNEL = process.env.VITE_CHANNEL === 'prod' ? 'prod' : 'dev';
 
+// A fresh value per build, baked into this build's own JS via `define`
+// (`__BUILD_ID__`, below) AND written to a plain `version.txt` in the build
+// output (see `buildVersionPlugin`) — the two sides of the freshness check
+// updateCheck.ts polls with.
+//
+// Replaces an earlier approach (diffing the hashed entry-script filename
+// referenced by a freshly-fetched `./index.html`) that turned out to be
+// blind by construction: `index.html` is itself precached below AND served
+// by a `NavigationRoute` for every navigation, so once a service worker is
+// active — i.e. on essentially every returning client — a plain fetch for
+// it (even with `cache: 'no-store'`) is intercepted and answered from that
+// SAME service worker's own cache, never the network. Both sides of the old
+// comparison always came from the stale bundle, so the poll could never
+// detect an update on exactly the clients that needed it to. Confirmed by
+// reading the built `dist/sw.js`'s `precacheAndRoute`/`NavigationRoute`
+// registration directly (2026-07-20), not inferred.
+//
+// `version.txt` fixes this by being a file no service-worker route is ever
+// allowed to intercept (see `workbox.globIgnores` below) — a request for it
+// always reaches the network, so it always reflects whatever's actually
+// deployed right now, independent of what this tab happens to be running.
+const buildId = String(Date.now());
+
+/** Emits `version.txt` straight into the build output, deliberately outside
+ * Vite/Rollup's normal hashed-asset pipeline. See `buildId`'s comment above
+ * for why this file exists and must never be precached. */
+function buildVersionPlugin() {
+  return {
+    name: 'wrad-build-version',
+    apply: 'build' as const,
+    writeBundle(options: { dir?: string }) {
+      if (!options.dir) return;
+      writeFileSync(join(options.dir, 'version.txt'), buildId);
+    },
+  };
+}
+
 export default defineConfig({
   // Relative asset paths so the build works under any GitHub Pages
   // subpath (e.g. /we-ride-at-dawn/) without hardcoding the repo name.
   base: './',
+  define: {
+    __BUILD_ID__: JSON.stringify(buildId),
+  },
   plugins: [
     svelte(),
+    buildVersionPlugin(),
     VitePWA({
       // 'prompt' (not 'autoUpdate'): a waiting SW must NOT silently take
       // over and reload the page out from under a mid-ride player. This
@@ -61,6 +104,12 @@ export default defineConfig({
         // never served cache-first indefinitely; see PWA-SCOPE.md's "key
         // risk" note.
         navigateFallback: './index.html',
+        // Never precache the freshness-check file (see `buildId`'s comment
+        // above) — if any service-worker route ever intercepted a request
+        // for it, a stale ACTIVE worker would keep answering with its own
+        // old value forever, silently defeating the whole check exactly
+        // like the index.html bug this file replaces.
+        globIgnores: ['version.txt'],
       },
       // Icons/manifest only — Supabase calls are never precached (the app
       // already tolerates offline there; see PWA-SCOPE.md Phase 2 "Offline").
