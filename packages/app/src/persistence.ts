@@ -95,25 +95,48 @@ export function loadPlayerName(): string | null {
   }
 }
 
+/** Everything needed to reproduce the season-best ride deterministically:
+ * simulate(lineup + timeOfDay-from-hour, generateGauntlet(date, day)) ==
+ * the claimed depth. Captured at the moment the best is set, because the
+ * live build keeps mutating afterwards (sells, merges, day advances) — a
+ * submit-time lineup is NOT the lineup that rode (issue #81). */
+export interface BestRideSnapshot {
+  date: string;
+  day: number;
+  lineup: Lineup;
+}
+
 /** Best depth reached this season (headline leaderboard score), plus the
- * hour bucket of the ride that set it (for anti-cheat re-simulation).
- * NOT YET IMPLEMENTED — see issue #81: there is currently no server-side
- * re-simulation, so submitted scores are entirely client-trusted. This
- * field is captured now so that work is a client-side no-op when it lands. */
-export function saveSeasonBest(seasonId: string, best: number, hour?: number): void {
+ * hour bucket of the ride that set it and the exact ride snapshot — the
+ * inputs the server-side anti-cheat re-simulation (issue #81) replays. */
+export function saveSeasonBest(
+  seasonId: string,
+  best: number,
+  hour?: number,
+  snapshot?: BestRideSnapshot
+): void {
   try {
-    localStorage.setItem(`${NS}:best`, JSON.stringify({ seasonId, best, hour }));
+    localStorage.setItem(`${NS}:best`, JSON.stringify({ seasonId, best, hour, snapshot }));
   } catch {
     // Non-fatal.
   }
 }
 
-export function loadSeasonBest(seasonId: string): { best: number; hour?: number } {
+export function loadSeasonBest(seasonId: string): {
+  best: number;
+  hour?: number;
+  snapshot?: BestRideSnapshot;
+} {
   try {
     const raw = localStorage.getItem(`${NS}:best`);
     if (!raw) return { best: 0 };
-    const v = JSON.parse(raw) as { seasonId: string; best: number; hour?: number };
-    return v.seasonId === seasonId ? { best: v.best, hour: v.hour } : { best: 0 };
+    const v = JSON.parse(raw) as {
+      seasonId: string;
+      best: number;
+      hour?: number;
+      snapshot?: BestRideSnapshot;
+    };
+    return v.seasonId === seasonId ? { best: v.best, hour: v.hour, snapshot: v.snapshot } : { best: 0 };
   } catch {
     return { best: 0 };
   }
