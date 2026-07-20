@@ -22,6 +22,7 @@
     dailySeed,
     generateGauntlet,
     simulate,
+    WAVE_COUNT,
     UNIT_DEFS,
     ENEMY_POOL,
     RELIC_DEFS,
@@ -554,11 +555,21 @@
     return buffScaleWith(attack, health, (t) => t);
   }
 
-  function abilitySentence(def: UnitDef | undefined): string {
+  function abilitySentence(def: UnitDef | undefined, side: 'horde' | 'enemy' = 'horde'): string {
     // Takes the def directly (not an id + UNIT_DEFS lookup) so it works for
     // both rats and enemies — enemies live in ENEMY_POOL, a separate array
     // not keyed by id (issue #136), and every caller already has the def
     // object in hand.
+    //
+    // `side` flips the sentence's perspective (issue #146): the copy is
+    // authored horde-side, but the compendium renders it for enemies too, so
+    // words like "horde"/"the frontmost enemy" would be backwards on an enemy
+    // card. `own` = a member of the caster's own team, `foe` = a member of the
+    // opposing team, `team` = the caster's whole side.
+    const isEnemy = side === 'enemy';
+    const own = isEnemy ? 'enemy' : 'rat';
+    const foe = isEnemy ? 'rat' : 'enemy';
+    const team = isEnemy ? 'enemy line' : 'horde';
     // Passive armor is not an `ability`, but it's absolutely something the
     // player must be told about — Dire-Rat's whole identity lives here.
     const armor = def?.damageReduction ?? 0;
@@ -571,7 +582,7 @@
     }
     const e = def.ability.effect;
     if (e.kind === 'blockFrontHits') {
-      return 'Each wave, blocks the front rat’s first hit outright (★2 blocks 2, ★3 blocks 3) — resets every wave.';
+      return `Each wave, blocks the front ${own}’s first hit outright (★2 blocks 2, ★3 blocks 3) — resets every wave.`;
     }
     if (e.kind === 'chargeWhileBenched') {
       // Bespoke sentence (not the generic trigger/condition template below):
@@ -588,7 +599,7 @@
       // Bespoke sentence (not the generic template below): the shared-budget
       // caveat (issue #131) doesn't fit the `${TRIGGER_WHEN} it ${what}` shape
       // without an awkward bolt-on clause, same reasoning as chargeWhileBenched.
-      return `When it faints, splits its current attack/health evenly across the horde (leftover point to the frontmost rat). All your Pack-Callers share one lifetime budget for this.`;
+      return `When it faints, splits its current attack and max health evenly across the surviving horde (any remainder goes to the frontmost survivors first). All your Pack-Callers draw from one shared pool for this, spent across the ride.`;
     }
     if (e.kind === 'backlineDamage') {
       return `At the start of every wave, if not at the front, strikes the frontmost enemy directly for its own attack — a separate hit, landed before that wave's clashing even begins, with no retaliation. At the front, it just fights normally.`;
@@ -601,16 +612,16 @@
         break;
       }
       case 'buffBehind':
-        what = `grants ${buffScale(e.attack, e.health)} to ${e.all ? 'every rat behind it' : 'the rat behind it'}`;
+        what = `grants ${buffScale(e.attack, e.health)} to ${e.all ? `every ${own} behind it` : `the ${own} behind it`}`;
         break;
       case 'bequeathAttack':
         what = `passes its OWN current attack to the rat behind it, plus a bonus for how deep into the ride it fell (capped at ${e.waveBonusCapMultiplier}× its own attack)`;
         break;
       case 'poisonFrontEnemy':
-        what = `applies ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) to the frontmost enemy — clears when the wave falls`;
+        what = `applies ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) to the frontmost ${foe} — clears when the wave falls`;
         break;
       case 'poisonLastEnemy':
-        what = `applies ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) to the enemy at the back of the line — clears when the wave falls, capped across multiple casters`;
+        what = `applies ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) to the ${foe} at the back of the line — clears when the wave falls, capped across multiple casters`;
         break;
       case 'poisonTarget':
         // Flat `stacks * tier`, NOT poisonStacksForTier — mirrors sim.ts's
@@ -625,16 +636,16 @@
         what = `revives your first fallen rat at ${reviveHpForTier(1)} health (★2 ${reviveHpForTier(2)} · ★3 ${reviveHpForTier(3)}), capped at its own max — once per rat`;
         break;
       case 'buffAdjacent':
-        what = `grants ${buffScale(e.attack, e.health)} to the rat(s) beside it — a middle seat buffs both neighbours`;
+        what = `grants ${buffScale(e.attack, e.health)} to the ${own}(s) beside it — a middle seat buffs both neighbours`;
         break;
       case 'teamBuff':
-        what = `grants ${buffScale(e.attack, e.health)} to the whole horde, itself included`;
+        what = `grants ${buffScale(e.attack, e.health)} to the whole ${team}, itself included`;
         break;
       case 'poisonAllEnemies':
-        what = `rots every enemy in the wave with ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) — ignores armor, clears when the wave falls, capped across multiple casters`;
+        what = `rots every ${foe} in the wave with ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) — ignores armor, clears when the wave falls, capped across multiple casters`;
         break;
       case 'teamBuffByWave':
-        what = `grants the whole horde ${buffScale(e.early.attack, e.early.health)} on its first wave, plus ${buffScale(e.late.attack, e.late.health)} more from wave ${e.switchWave} onward — both permanent for the rest of the battle`;
+        what = `grants the whole ${team} ${buffScale(e.early.attack, e.early.health)} on its first wave, plus ${buffScale(e.late.attack, e.late.health)} more from wave ${e.switchWave} onward — both permanent for the rest of the ride`;
         break;
       case 'buffSummoned':
         // Linear (1/2/3) per-star curve, same as gainStats — the trigger
@@ -651,13 +662,20 @@
         break;
       case 'weakenAllEnemies':
         // Linear per-star curve — re-applies to each fresh wave (see sim.ts).
-        what = `saps ${e.attack} attack (★2 ${e.attack * 2} · ★3 ${e.attack * 3}) from every enemy in the wave — they always keep at least 1`;
+        what = `saps ${e.attack} attack (★2 ${e.attack * 2} · ★3 ${e.attack * 3}) from every ${foe} in the wave — they always keep at least 1`;
         break;
     }
     const when = def.ability.condition?.timeOfDay
       ? `${TIME_OF_DAY_LABEL[def.ability.condition.timeOfDay] ?? ''}`
       : '';
-    const abilityPart = `${TRIGGER_WHEN[def.ability.trigger]} it ${what}${when}.`;
+    // startOfBattle reads "at the start of the ride" for the persistent horde
+    // (fires once), but enemies are re-instantiated every wave, so for them it
+    // fires each wave — say so (issue #146 finding #2).
+    const triggerText =
+      isEnemy && def.ability.trigger === 'startOfBattle'
+        ? 'At the start of each wave,'
+        : TRIGGER_WHEN[def.ability.trigger];
+    const abilityPart = `${triggerText} it ${what}${when}.`;
     return armorSentence ? `${abilityPart} ${armorSentence}` : abilityPart;
   }
 
@@ -1617,9 +1635,11 @@
         {#if result}
           <p class="result">
             Your horde rides to <strong>depth {result.wavesCleared}</strong>
-            &middot; {result.survivors.length > 0
+            &middot; {result.wavesCleared >= WAVE_COUNT
               ? `⚑ the drains cleared — ${result.survivors.length} rats ride home`
-              : 'until the last rat falls'}
+              : result.survivors.length > 0
+                ? `${result.survivors.length} rats ride home`
+                : 'until the last rat falls'}
           </p>
           <p class="result-note">the drains hold steady all week — resets Monday</p>
         {/if}
@@ -1647,7 +1667,7 @@
         </p>
         <button class="watch" onclick={watchRide}>▶ watch the next ride</button>
         <p class="season-best">Deepest ride this week: <strong>depth {seasonBest}</strong> · resets Monday</p>
-        <p class="season-kills">Rats felled this week: <strong>{seasonKills}</strong></p>
+        <p class="season-kills">Enemies felled this week: <strong>{seasonKills}</strong></p>
         {#if currentDepth > seasonBest}
           <p class="season-hint">the next ride will reach depth {currentDepth}</p>
         {/if}
@@ -1665,8 +1685,10 @@
                   <span class="rl-kills">{r.enemiesDefeated ?? 0} felled</span>
                   <span class="rl-scrap">+{r.scrap} ⚙</span>
                   <!-- Riding until the last rat falls is the normal end of a ride;
-                       only the rare full clear gets a badge. -->
-                  <span class="rl-surv">{r.survivors > 0 ? '⚑ cleared the drains!' : ''}</span>
+                       only a true full clear (all WAVE_COUNT waves) earns the
+                       badge — survivors alone can mean a stalemate short of the
+                       end (issue #146 finding #1). -->
+                  <span class="rl-surv">{r.depth >= WAVE_COUNT ? '⚑ cleared the drains!' : ''}</span>
                 </li>
               {/each}
             </ul>
@@ -1727,7 +1749,7 @@
     </div>
     <img class="bt-portrait" src={ART_URL['boss-trial']} alt="" />
     <p class="bt-blurb">
-      Every day at {BOSS_TRIAL_HOUR}:00 CET your horde automatically faces a boss — no trigger, no preview. Fell it to reach the next phase — every phase the next boss hits half again as hard, until the horde falls. Score is total damage dealt.
+      Every day at {BOSS_TRIAL_HOUR}:00 CET your horde automatically faces a boss — no trigger, no preview. Fell it to reach the next phase — every phase the next boss hits ×{BOSS_TRIAL_ESCALATION} as hard and carries +{BOSS_TRIAL_HP_GROWTH_PER_PHASE} health, until the horde falls. Score is total damage dealt.
     </p>
     {#if bossTrial && bossTrial.day === build.day}
       <p class="bt-result">Today's damage: <strong>{bossTrial.damage}</strong> · felled {bossTrial.phases} {bossTrial.phases === 1 ? 'boss' : 'bosses'} · back tomorrow</p>
@@ -1792,7 +1814,7 @@
             {@const def = UNIT_DEFS[slot.defId]}
             {@const afford = build.scrap >= def.cost}
             {@const recruitable = canRecruit(build, ins.index)}
-            {@const copies = build.board.filter((u) => u.defId === def.id && u.tier === 1).length}
+            {@const copies = [...build.board, ...build.bench].filter((u) => u.defId === def.id && u.tier === 1).length}
             {@const t2 = unitStats({ defId: def.id, tier: 2, relicIds: [] })}
             {@const t3 = unitStats({ defId: def.id, tier: 3, relicIds: [] })}
             <div class="card-head">
@@ -1956,7 +1978,7 @@
               cleared: attack ×{BOSS_TRIAL_ESCALATION}, health +{BOSS_TRIAL_HP_GROWTH_PER_PHASE}. Stats shown are phase 1.
             </p>
           {:else}
-            <p class="card-ability">{abilitySentence(selectedUnit)}</p>
+            <p class="card-ability">{abilitySentence(selectedUnit, comp.tab === 'enemies' ? 'enemy' : 'horde')}</p>
             {#if comp.tab === 'units' && isSummoner(selectedUnit)}
               <p class="card-hint">summoned rats fight beyond your warren's size (up to {combatCapForBuild(build)} in the drains)</p>
             {/if}

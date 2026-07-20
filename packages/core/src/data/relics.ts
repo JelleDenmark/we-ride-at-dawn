@@ -83,7 +83,7 @@ export const RELIC_DEFS: Record<string, RelicDef> = {
   },
   'marrow-snap': {
     id: 'marrow-snap', name: 'Marrow-Snap', scope: 'unit', cost: 5,
-    desc: 'kills a foe its own hit drops below half health', executeThreshold: 0.5,
+    desc: 'kills a foe its own hit drops to half health or below', executeThreshold: 0.5,
   },
   // Easter egg (issue #24): the name is the whole point — someone else's
   // gear, left behind on an earlier ride, still has a little use left in it.

@@ -70,7 +70,7 @@ _Avoid_: Week, expedition (Expedition appears in older comments/docs as a synony
 A 1-indexed position within a Season (1 through `SEASON_DAYS`). Governs Shop offerings, Board-cap growth (`boardCapForDay`), and unlock gates (`unlockDay`) — but **not** Gauntlet difficulty (see ADR-0003).
 
 **Scrap**:
-The single currency. Earned from Depth on every Ride (`scrapForDepth`) plus daily Interest on the banked total; spent in the Shop on Rats, Relics, rerolls, and Board slots.
+The single currency. Earned from Depth on every Ride (`scrapForDepth`); spent in the Shop on Rats, Relics, rerolls, and Board slots. (Interest on the banked total was removed in #129 — income is depth-only now.)
 
 **Shop**:
 The between-Rides purchasing screen: a rolling set of offered Rats and Relics (`ShopSlot`s) the player can buy, reroll, or freeze with Scrap.
