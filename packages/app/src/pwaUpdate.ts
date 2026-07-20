@@ -2,7 +2,7 @@ import { POLL_INTERVAL_MS } from './updateCheck';
 
 /**
  * PWA Phase 2 (PWA-SCOPE.md) service-worker registration, wired into the
- * Phase 1 "fresh build rode in" banner (updateCheck.ts / App.svelte) instead
+ * Phase 1 "update rode in" banner (updateCheck.ts / App.svelte) instead
  * of introducing a second, competing update UI.
  *
  * `registerType: 'prompt'` (set in vite.config.ts) means a new service

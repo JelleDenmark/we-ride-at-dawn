@@ -1316,7 +1316,7 @@
     {#if updateAvailable && !updateDismissed}
       <div class="update-banner" role="status">
         <button class="update-banner-reload" onclick={reloadForUpdate}>
-          ⚔ a fresh build rode in — tap to reload
+          ⚔ an update rode in — tap to reload
         </button>
         <button class="update-banner-dismiss" onclick={dismissUpdateBanner} aria-label="dismiss"
           >✕</button
@@ -1762,7 +1762,7 @@
               <div>
                 <div class="card-name">{def.name}</div>
                 <div class="card-stats">
-                  {def.attack}/{def.health}
+                  {def.attack}/{def.health} <span class="card-tier">atk/hp</span>
                   <span class="card-tier">★2 {t2.attack}/{t2.health} · ★3 {t3.attack}/{t3.health}</span>
                 </div>
               </div>
@@ -1815,7 +1815,7 @@
               {#if ART_URL[unit.defId]}<img class="card-portrait" src={ART_URL[unit.defId]} alt="" />{/if}
               <div>
                 <div class="card-name">{def.name}{unit.tier > 1 ? ` ★${unit.tier}` : ''}</div>
-                <div class="card-stats">{stats.attack}/{stats.health}</div>
+                <div class="card-stats">{stats.attack}/{stats.health} <span class="card-tier">atk/hp</span></div>
               </div>
             </div>
             <p class="card-ability">{abilitySentence(def)}</p>
@@ -1844,7 +1844,7 @@
               {#if ART_URL[unit.defId]}<img class="card-portrait" src={ART_URL[unit.defId]} alt="" />{/if}
               <div>
                 <div class="card-name">{def.name}{unit.tier > 1 ? ` ★${unit.tier}` : ''}</div>
-                <div class="card-stats">{stats.attack}/{stats.health}</div>
+                <div class="card-stats">{stats.attack}/{stats.health} <span class="card-tier">atk/hp</span></div>
               </div>
             </div>
             <p class="card-ability">{abilitySentence(def)}</p>
@@ -1899,7 +1899,8 @@
             <div>
               <div class="card-name">{selectedUnit.name}</div>
               <div class="card-stats">
-                {selectedUnit.attack}/{selectedUnit.health}{comp.tab === 'units' ? ` · ⚙ ${selectedUnit.cost}` : ''}
+                {selectedUnit.attack}/{selectedUnit.health}
+                <span class="card-tier">atk/hp</span>{comp.tab === 'units' ? ` · ⚙ ${selectedUnit.cost}` : ''}
               </div>
               {#if selectedUnit.archetype || armor > 0}
                 <div class="card-sub">
