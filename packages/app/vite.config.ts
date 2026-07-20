@@ -1,3 +1,4 @@
+import { execSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { defineConfig } from 'vite';
@@ -12,10 +13,20 @@ import { VitePWA } from 'vite-plugin-pwa';
 // "two-channel / base-path gotchas".
 const CHANNEL = process.env.VITE_CHANNEL === 'prod' ? 'prod' : 'dev';
 
-// A fresh value per build, baked into this build's own JS via `define`
-// (`__BUILD_ID__`, below) AND written to a plain `version.txt` in the build
-// output (see `buildVersionPlugin`) — the two sides of the freshness check
-// updateCheck.ts polls with.
+// Identifies the *source* this build came from, baked into the build's own
+// JS via `define` (`__BUILD_ID__`, below) AND written to a plain
+// `version.txt` in the build output (see `buildVersionPlugin`) — the two
+// sides of the freshness check updateCheck.ts polls with.
+//
+// Must be deterministic per commit, NOT per build (issue #145): deploy.yml
+// rebuilds BOTH channels on any push to either branch, so a build-unique
+// value (the original `Date.now()`) changed the *unchanged* channel's
+// `version.txt` too, firing a spurious "update available" banner at every
+// live tab of the other channel on every push. The checkout's commit SHA
+// makes an unchanged channel rebuild byte-identically instead — same
+// `version.txt`, same bundle hashes, silent SW — while any real commit
+// still flips it. Falls back to a timestamp where git isn't available
+// (e.g. a tarball build), which merely degrades back to the old behavior.
 //
 // Replaces an earlier approach (diffing the hashed entry-script filename
 // referenced by a freshly-fetched `./index.html`) that turned out to be
@@ -33,7 +44,13 @@ const CHANNEL = process.env.VITE_CHANNEL === 'prod' ? 'prod' : 'dev';
 // allowed to intercept (see `workbox.globIgnores` below) — a request for it
 // always reaches the network, so it always reflects whatever's actually
 // deployed right now, independent of what this tab happens to be running.
-const buildId = String(Date.now());
+const buildId = (() => {
+  try {
+    return execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim();
+  } catch {
+    return String(Date.now());
+  }
+})();
 
 /** Emits `version.txt` straight into the build output, deliberately outside
  * Vite/Rollup's normal hashed-asset pipeline. See `buildId`'s comment above
