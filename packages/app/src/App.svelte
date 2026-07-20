@@ -85,6 +85,7 @@
     loadLastIncomeHour,
     saveSeasonBest,
     loadSeasonBest,
+    type BestRideSnapshot,
     saveSeasonKills,
     loadSeasonKills,
     savePlayerName,
@@ -200,6 +201,10 @@
   const storedBest = loadSeasonBest(seasonIdFor(currentRideDate()));
   let seasonBest = $state(storedBest.best);
   let seasonBestHour = $state<number | undefined>(storedBest.hour);
+  // Exact (date, day, lineup) of the ride that set seasonBest — what the
+  // server re-simulates for anti-cheat (issue #81). Snapshotted here, not at
+  // submit time: the build keeps mutating after the best ride.
+  let seasonBestSnapshot = $state<BestRideSnapshot | undefined>(storedBest.snapshot);
   // Cumulative season total of enemies felled across every completed ride —
   // only climbs, resets with seasonBest. Leaderboard tiebreak under depth.
   let seasonKills = $state(loadSeasonKills(build.seasonId));
@@ -421,13 +426,19 @@
     const sig = `${build.seasonId}|${playerName}|${seasonBest}|${build.day}|${seasonKills}`;
     if (sig === lastSubmit) return;
     lastSubmit = sig;
+    // Submit the SNAPSHOT of the best ride, not the live build: the server's
+    // re-simulation (issue #81) replays exactly (date, day, lineup, rideHour),
+    // and the live board may have changed since the best was set. Pre-snapshot
+    // saves fall back to the old live-build behavior (server treats those as
+    // unverifiable, not cheating).
     await submitScore({
       seasonId: build.seasonId,
       name: playerName,
       depth: seasonBest,
-      day: build.day,
-      lineup: lineupFromBuild(build),
+      day: seasonBestSnapshot?.day ?? build.day,
+      lineup: seasonBestSnapshot?.lineup ?? lineupFromBuild(build),
       rideHour: seasonBestHour,
+      rideDate: seasonBestSnapshot?.date,
       kills: seasonKills,
     });
     await refreshBoard();
@@ -907,7 +918,8 @@
         if (deepest.depth > seasonBest) {
           seasonBest = deepest.depth;
           seasonBestHour = deepest.hour;
-          saveSeasonBest(build.seasonId, seasonBest, deepest.hour);
+          seasonBestSnapshot = { date: build.date, day: build.day, lineup };
+          saveSeasonBest(build.seasonId, seasonBest, deepest.hour, seasonBestSnapshot);
         }
         seasonKills += rides.reduce((sum, r) => sum + r.enemiesDefeated, 0);
         saveSeasonKills(build.seasonId, seasonKills);
@@ -933,6 +945,7 @@
       bestSeasonId = build.seasonId;
       seasonBest = 0;
       seasonBestHour = undefined;
+      seasonBestSnapshot = undefined;
       seasonKills = 0;
       rideLog = [];
       saveSeasonBest(build.seasonId, 0);
@@ -1077,7 +1090,8 @@
     if (deepest.depth > seasonBest) {
       seasonBest = deepest.depth;
       seasonBestHour = deepest.hour;
-      saveSeasonBest(build.seasonId, seasonBest, deepest.hour);
+      seasonBestSnapshot = { date: build.date, day: build.day, lineup };
+      saveSeasonBest(build.seasonId, seasonBest, deepest.hour, seasonBestSnapshot);
     }
     seasonKills += rides.reduce((sum, r) => sum + r.enemiesDefeated, 0);
     saveSeasonKills(build.seasonId, seasonKills);
