@@ -470,6 +470,8 @@
     faint: 'When it faints,',
     afterAttack: 'After it attacks,',
     allyFaint: 'Whenever a friendly rat faints,',
+    allySummoned: 'Whenever a friendly rat is summoned,',
+    onHurt: 'When a blow lands on it,',
   };
 
   const TIME_OF_DAY_LABEL: Record<string, string> = {
@@ -606,6 +608,23 @@
       case 'teamBuffByWave':
         what = `grants the whole horde ${buffScale(e.early.attack, e.early.health)} on its first wave, plus ${buffScale(e.late.attack, e.late.health)} more from wave ${e.switchWave} onward — both permanent for the rest of the battle`;
         break;
+      case 'buffSummoned':
+        // Linear (1/2/3) per-star curve, same as gainStats — the trigger
+        // repeats every summon, so sim.ts scales it shallow, not 3^(tier-1).
+        what = `trains the newcomer: it arrives with ${gainStatsScale(e.attack, e.health)}`;
+        break;
+      case 'reflectDamage':
+        // Linear per-star curve — repeats every hit taken (see sim.ts).
+        what = `cuts back, dealing ${e.damage} damage (★2 ${e.damage * 2} · ★3 ${e.damage * 3}) to its attacker — a blocked hit draws no blood`;
+        break;
+      case 'healSelf':
+        // Linear per-star curve — repeats every clash survived (see sim.ts).
+        what = `drains ${e.amount} health back (★2 ${e.amount * 2} · ★3 ${e.amount * 3}) if it survived the clash — never past its own max`;
+        break;
+      case 'weakenAllEnemies':
+        // Linear per-star curve — re-applies to each fresh wave (see sim.ts).
+        what = `saps ${e.attack} attack (★2 ${e.attack * 2} · ★3 ${e.attack * 3}) from every enemy in the wave — they always keep at least 1`;
+        break;
     }
     const when = def.ability.condition?.timeOfDay
       ? `${TIME_OF_DAY_LABEL[def.ability.condition.timeOfDay] ?? ''}`
@@ -666,6 +685,14 @@
           return '⛨ block';
         case 'backlineDamage':
           return '⚔ snipe';
+        case 'buffSummoned':
+          return '❋ train';
+        case 'reflectDamage':
+          return '⚔ thorns';
+        case 'healSelf':
+          return '✚ drain';
+        case 'weakenAllEnemies':
+          return '▼ weaken';
       }
     }
     if ((def.damageReduction ?? 0) > 0) return '⛨ armor';

@@ -58,4 +58,51 @@ export const ENEMY_POOL: UnitDef[] = [
     archetype: 'plague',
     ability: { trigger: 'afterAttack', effect: { kind: 'poisonTarget', stacks: 1 } },
   },
+  // ---- Enchanter/support wing (issue #138, season 4) — the pool's first
+  // BUFFERS: every enemy above hits, tanks, spawns, or curses; these two
+  // make their own line stronger, mirroring the player's support wing
+  // (Warren-Warden/Press-Kin/Twilight-Runt). Both reuse existing Effect
+  // kinds (ADR-0004: enemies share the unit engine), so there is zero
+  // combat-engine work here. Compounding-law: a non-issue on this side —
+  // enemies regenerate fresh every wave, so each buff is bounded within
+  // one battle-wave by construction. Gating is both mechanisms the issue
+  // asks for: `minWave` as the deterministic hard floor (the median player
+  // lives at depth ~6-10, so no enchanters where they ride), plus a high
+  // `cost` so they stay rare in the budget rolls when first available.
+  // `rearguard` moves them behind the wall after a wave is rolled (see
+  // generateGauntlet) — a support that rolls into the clash slot dies
+  // doing nothing, and the whole point is the "kill the protected support
+  // first" read that AoE poison and backline snipers exist to answer.
+  // Stats/magnitudes/minWave floors are placeholders pending the usual
+  // balance sign-off (npm run balance + a reachability check).
+  {
+    id: 'muster-herald',
+    name: 'Muster-Herald',
+    attack: 2,
+    health: 4,
+    cost: 8,
+    archetype: 'swarm',
+    minWave: 12,
+    rearguard: true,
+    // teamBuff rather than buffBehind: rearguard parks it at the BACK,
+    // where "behind it" is nobody — the whole-line rally is the Warren-
+    // Warden mirror that actually works from the back seat. startOfBattle
+    // fires fresh each wave for a re-instantiated enemy, bounded within it.
+    ability: { trigger: 'startOfBattle', effect: { kind: 'teamBuff', attack: 1, health: 1 } },
+  },
+  {
+    id: 'sluice-warden',
+    name: 'Sluice-Warden',
+    attack: 2,
+    health: 7,
+    cost: 8,
+    archetype: 'armored',
+    minWave: 12,
+    rearguard: true,
+    // Ward-Weaver's kit on the enemy side: the line no-sells the horde's
+    // opening hit(s) each wave — a check on burst/execute openings that
+    // rewards sustained damage and poison. blockCharges is already keyed
+    // by side in sim.ts, so this works unchanged.
+    ability: { trigger: 'startOfWave', effect: { kind: 'blockFrontHits' } },
+  },
 ];
