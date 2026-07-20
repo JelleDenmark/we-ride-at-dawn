@@ -72,6 +72,12 @@ export type BattleEvent =
   | { type: 'summon'; side: Side; index: number; unit: UnitView }
   | { type: 'revive'; side: Side; index: number; unit: UnitView }
   | { type: 'buff'; targetId: number; attack: number; health: number; newAttack: number; newHealth: number }
+  /** Gutter-Acolyte's attack shred (issue #137): `attack` is the amount
+   * actually removed (post-floor, so it may be less than the caster's full
+   * shred). A separate event from 'buff' on purpose — the replay renders
+   * buffs as green "+N" floats, and a debuff wearing that costume would
+   * read as a gift. */
+  | { type: 'weaken'; targetId: number; attack: number; newAttack: number }
   | { type: 'relicProc'; targetId: number; relicId: string; name: string }
   | { type: 'shieldGranted'; targetId: number; sourceId: number }
   | { type: 'shieldAbsorbed'; targetId: number }
@@ -305,6 +311,54 @@ export function simulate(
   let currentWave = 0;
 
   /**
+   * TARGETED triggers (issue #133/#134: `allySummoned`, `onHurt`): their
+   * effects act on a specific other unit (the newly-summoned body, the
+   * attacker) that the positional `applyEffect` below has no way to name, so
+   * they resolve here instead. Magnitudes scale LINEARLY with the source's
+   * tier (`* tier`, 1/2/3) — both triggers repeat (every summon, every hit),
+   * and a repeating trigger must never also get `tierAttackMultiplier`'s
+   * exponential curve (see `chargeWhileBenched`'s rationale in units.ts).
+   */
+  const applyTargetedEffect = (source: BattleUnit, target: BattleUnit): void => {
+    if (!source.ability) return;
+    const effect = source.ability.effect;
+    const tier = source.tier;
+    switch (effect.kind) {
+      case 'buffSummoned': {
+        // Squeak-Sensei (issue #133). The buff lands on the NEWCOMER only —
+        // that targeting is the ADR-0003 safety (a fresh instance, buffed
+        // once at birth; nothing accumulates on a persistent unit). See the
+        // Effect's doc comment in units.ts before ever widening the target.
+        buff(target, effect.attack * tier, effect.health * tier);
+        break;
+      }
+      case 'reflectDamage': {
+        // Steel-Whisker (issue #134). A normal 'attack' hit back at the
+        // attacker, so the attacker's own armor blunts it and the
+        // MIN_ATTACK_DAMAGE floor applies. Fires whether or not the victim
+        // survived the blow (the bristles cut as it falls), but never lands
+        // on an attacker some earlier source already felled this tick.
+        if (target.health > 0) applyDamage(target, effect.damage * tier, 'attack');
+        break;
+      }
+    }
+  };
+
+  /**
+   * `allySummoned` fire-point (issue #133): called once per summoned body,
+   * right after its 'summon' event, from the `summon` case below. Every
+   * OTHER living unit on that side that watches for summons reacts, in board
+   * order; the newcomer never witnesses its own arrival. `revive` is a
+   * raising, not a summoning, and deliberately never calls this.
+   */
+  const fireAllySummoned = (summoned: BattleUnit): void => {
+    for (const witness of [...boardOf(summoned.side)]) {
+      if (witness === summoned || witness.health <= 0) continue;
+      if (witness.ability?.trigger === 'allySummoned') applyTargetedEffect(witness, summoned);
+    }
+  };
+
+  /**
    * `index` is the source's current board index, or — when `removed` —
    * the index it occupied before dying, which is where "behind" now starts
    * and where summons/revives are inserted.
@@ -324,6 +378,9 @@ export function simulate(
           const summoned = instantiate(def, source.side);
           board.splice(index, 0, summoned);
           events.push({ type: 'summon', side: source.side, index, unit: view(summoned) });
+          // Issue #133: summon-watchers (Squeak-Sensei) react to each body
+          // as it lands, so a multi-pup litter is trained pup by pup.
+          fireAllySummoned(summoned);
         }
         break;
       }
@@ -529,6 +586,45 @@ export function simulate(
       }
       case 'gainStats': {
         buff(source, effect.attack * tier, effect.health * tier);
+        break;
+      }
+      case 'healSelf': {
+        // Grave-Leech (issue #135). `afterAttack`-fired, i.e. every clash
+        // tick this unit is front for — but only a clash it SURVIVED pays
+        // out: at 0 or less health the faint is already owed and a drain
+        // must not quietly resurrect it ahead of resolveDeaths. The clamp
+        // at maxHealth lives HERE, in the effect application (per the
+        // issue), which is the whole ADR-0003 bound: no matter how many of
+        // the 45 waves it fights, it can never bank health past its own
+        // ceiling. Same clamp shape as the healPerTick regen in the tick
+        // loop below (Fat Tick / Forgotten Backpack).
+        if (source.health <= 0) break;
+        const amount = Math.min(effect.amount * tier, source.maxHealth - source.health);
+        if (amount > 0) {
+          source.health += amount;
+          events.push({ type: 'heal', targetId: source.instanceId, amount, newHealth: source.health });
+        }
+        break;
+      }
+      case 'weakenAllEnemies': {
+        // Gutter-Acolyte (issue #137). `startOfWave`-fired, so this runs for
+        // every live Acolyte in board order at the top of the wave, same
+        // firing point as `poisonAllEnemies` — and same compounding bound:
+        // enemies are re-instantiated fresh every wave, so the shred can
+        // never carry across waves. The MIN_ATTACK_DAMAGE floor mirrors the
+        // armor rule (enemies still hit for at least 1), which also bounds
+        // Acolyte stacking: extra casters clip against the floor rather
+        // than zeroing a wave out. `attack` on the event is the amount
+        // actually removed post-floor, so replays never show a bigger shred
+        // than what happened.
+        for (const target of opposing(source.side)) {
+          if (target.health <= 0) continue;
+          const reduced = Math.max(MIN_ATTACK_DAMAGE, target.attack - effect.attack * tier);
+          const delta = target.attack - reduced;
+          if (delta <= 0) continue;
+          target.attack = reduced;
+          events.push({ type: 'weaken', targetId: target.instanceId, attack: delta, newAttack: target.attack });
+        }
         break;
       }
       case 'chargeWhileBenched': {
@@ -923,17 +1019,24 @@ export function simulate(
       // Captured for Marrow-Snap's crossing check below: the execute must
       // compare against the foe's health as it stood BEFORE this clash hit.
       const foeHealthBeforeClash = foe.health;
+      // Whether each side's clash blow actually LANDED this tick — a
+      // Ward-Weaver-absorbed hit never touched the body, so it must not
+      // fire `onHurt` (issue #134) below.
+      let foeTookBlow = false;
+      let frontTookBlow = false;
       if (blockCharges[foe.side] > 0) {
         blockCharges[foe.side]--;
         events.push({ type: 'shieldAbsorbed', targetId: foe.instanceId });
       } else {
         applyDamage(foe, damageOut, 'attack');
+        foeTookBlow = true;
       }
       if (blockCharges[front.side] > 0) {
         blockCharges[front.side]--;
         events.push({ type: 'shieldAbsorbed', targetId: front.instanceId });
       } else {
         applyDamage(front, damageIn, 'attack');
+        frontTookBlow = true;
       }
       damageThisWave += damageOut;
 
@@ -985,6 +1088,20 @@ export function simulate(
 
       if (front.ability?.trigger === 'afterAttack') applyEffect(front, 0, false);
       if (foe.ability?.trigger === 'afterAttack') applyEffect(foe, 0, false);
+
+      // `onHurt` reflect (issue #134: Steel-Whisker) resolves HERE — after
+      // the execute (Marrow-Snap) and cleave (Gore-Cleaver) blocks above,
+      // alongside the other post-clash triggers — deliberately, so the
+      // reflect's extra damage can never be mistaken for part of the
+      // crossing blow (Marrow-Snap compares against the clash hit only) and
+      // never feeds cleave-overkill (computed from the clash hit only,
+      // before this line runs). Only a blow that actually LANDED fires it:
+      // a shield-absorbed hit was never taken (see foeTookBlow/frontTookBlow
+      // above), and poison ticks below are rot, not blows. The reflect is
+      // fired symmetrically so an enemy-side thorns def (ADR-0004) works for
+      // free.
+      if (frontTookBlow && front.ability?.trigger === 'onHurt') applyTargetedEffect(front, foe);
+      if (foeTookBlow && foe.ability?.trigger === 'onHurt') applyTargetedEffect(foe, front);
 
       for (const board of [horde, enemies]) {
         for (const unit of [...board]) {

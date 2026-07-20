@@ -293,6 +293,18 @@ export class ReplayPlayer {
         await this.floatText(sprite.root.x, sprite.root.y - 44, label.trim(), 0x7fb069);
         break;
       }
+      case 'weaken': {
+        // Gutter-Acolyte's attack shred (issue #137) — a debuff, so it must
+        // not wear the buff case's green "+N" costume. Health is untouched
+        // by this event; read the tracked value through.
+        const sprite = this.sprites.get(event.targetId);
+        if (!sprite) break;
+        const health = this.stats.get(event.targetId)?.health ?? 0;
+        this.stats.set(event.targetId, { attack: event.newAttack, health });
+        sprite.setStats(event.newAttack, health);
+        await this.floatText(sprite.root.x, sprite.root.y - 44, `−${event.attack} ATK`, 0xb08bd0);
+        break;
+      }
       case 'death': {
         const sprite = this.sprites.get(event.unitId);
         if (!sprite) break;

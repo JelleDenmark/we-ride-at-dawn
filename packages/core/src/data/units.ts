@@ -116,6 +116,84 @@ export function cellarCoilChargeCapForTier(tier: number): number {
 export type Effect =
   | { kind: 'summon'; unitId: string; count: number }
   /**
+   * Squeak-Sensei (issue #133) — the swarm archetype's first payoff. Wired to
+   * the new `allySummoned` trigger: whenever an ally is summoned onto this
+   * side, the NEWLY-SUMMONED body enters with `+attack/+health`, scaled
+   * LINEARLY by the Sensei's tier (`* tier`, 1/2/3 — the shallow gainStats
+   * curve, NOT `tierAttackMultiplier`'s 3^(tier-1)): the trigger repeats
+   * every summon of every wave, and a repeating trigger must not also get an
+   * exponential per-tier multiplier (same rationale as `chargeWhileBenched`
+   * and `blockHitsForTier`).
+   *
+   * Compounding-law note (ADR-0003, per issue #133's sign-off): safe BY
+   * CONSTRUCTION because the buff lands only on the summoned body — a fresh
+   * instance each time, buffed exactly once at birth. Nothing accumulates on
+   * any persistent unit: the Sensei itself and its permanent teammates are
+   * never targets, so total injected power is bounded by summon count (which
+   * the combat headroom already caps per wave), not by wave count on one
+   * body. The DANGEROUS variant the issue flags — buffing the summoner or
+   * the board per summon — is exactly the Warren-Warden shape and must not
+   * be built without a Cellar-Coil-style hard cap; keep the target the
+   * newcomer. Fired from the `summon` resolution path only — a `revive` is
+   * a raising, not a summoning, and deliberately does NOT fire this.
+   */
+  | { kind: 'buffSummoned'; attack: number; health: number }
+  /**
+   * Steel-Whisker (issue #134) — thorns, the game's first on-hurt reaction.
+   * Wired to the new `onHurt` trigger: when a clash blow actually lands on
+   * this unit (a Ward-Weaver-blocked hit never counts — it was absorbed
+   * before touching the body, and poison is rot, not a blow), it deals
+   * `damage * tier` (linear 1/2/3, repeating-trigger rationale as above)
+   * back to the enemy it clashed with. The reflect is a normal 'attack' hit
+   * on the attacker, so the attacker's own armor blunts it and the
+   * MIN_ATTACK_DAMAGE floor applies — bristles cut, hide still helps.
+   *
+   * Compounding-law note (ADR-0003): STATELESS — a fixed per-hit
+   * contribution against enemies that are re-instantiated every wave, so
+   * nothing carries across the 45-wave ride (same bound as poison and
+   * `backlineDamage`). The dangerous cousin the issue flags — "when hurt,
+   * GAIN stats" — is an unbounded per-tick snowball on the front slot and
+   * must never ship without a hard cap + its own canary. Ship reflect only.
+   */
+  | { kind: 'reflectDamage'; damage: number }
+  /**
+   * Grave-Leech (issue #135) — sustain; the first unit-side heal (the only
+   * other heal in the game is Fat Tick's relic `healPerTick`). Wired to
+   * `afterAttack`: each clash this unit SURVIVES, it drinks `amount * tier`
+   * (linear 1/2/3, repeating-trigger rationale as above) back. The clamp at
+   * `maxHealth` lives in the effect application in sim.ts (per the issue:
+   * in the effect, not left to the caller), and a unit at 0 or less health
+   * never heals — the faint is already owed, drains don't cheat death.
+   *
+   * Compounding-law note (ADR-0003): safe for free — healing clamps at
+   * `maxHealth` (same reason `revive`/`reviveHpForTier` is safe), so there
+   * is no unbounded accumulation no matter how many of the 45 waves it
+   * fights. Balance coupling: the Fat Tick retire/re-scope decision (issue
+   * #135) must be tuned TOGETHER with this drain magnitude — both stack on
+   * one front rat today.
+   */
+  | { kind: 'healSelf'; amount: number }
+  /**
+   * Gutter-Acolyte (issue #137) — the first enemy-STAT debuff (poison races
+   * enemy health; nothing before this lowered the incoming number itself).
+   * Wired to `startOfWave`, same firing point as `poisonAllEnemies`: saps
+   * `attack * tier` (linear 1/2/3) from EVERY living enemy in the wave,
+   * floored at MIN_ATTACK_DAMAGE so a stack of Acolytes can never zero-out
+   * a wave (enemies still hit for at least 1, mirroring the armor rule).
+   * Whole-line, not front-only, by design: a front-only shred inherits the
+   * exact "the front enemy was dying to the clash anyway" dead-weight
+   * problem that forced Plague-Bearer's #112 rework — flagged for Jesper's
+   * sign-off along with the magnitude.
+   *
+   * Compounding-law note (ADR-0003): safe — enemies are re-instantiated
+   * fresh every wave, so a stat debuff cannot carry across the 45-wave ride
+   * (identical bound to `poisonAllEnemies`). Multiple Acolytes stack
+   * additively within a wave, bounded by board size AND by the floor; if
+   * that stacking still probes too strong, cap it per-wave like the
+   * poison-all budget (#116) — noted, not pre-built.
+   */
+  | { kind: 'weakenAllEnemies'; attack: number }
+  /**
    * Buffs the rat(s) behind the source (or `all` of them) by
    * `attack`/`health`, scaled by `tierAttackMultiplier`/`tierHealthMultiplier`
    * (issue #58) rather than a flat `* tier` — Gnawer wires this to `faint`,
@@ -540,7 +618,23 @@ export type TimeOfDay = 'beforeNoon' | 'afterNoon';
  * so it no longer needs its own trigger kind. See `blockCharges` in sim.ts.
  */
 export interface Ability {
-  trigger: 'startOfBattle' | 'startOfWave' | 'faint' | 'afterAttack' | 'allyFaint';
+  /**
+   * `allySummoned` (issue #133) fires from the `summon` resolution path in
+   * sim.ts — once per newly-summoned ally body, for every OTHER living unit
+   * on that side that carries it, with the newcomer as the effect's target
+   * (the summoned body never witnesses its own arrival). A `revive` is not
+   * a summon and never fires it.
+   *
+   * `onHurt` (issue #134) fires from the clash tick in sim.ts — when a
+   * clash blow actually lands on this unit while it is the front (a
+   * Ward-Weaver-blocked hit was absorbed and does not count; poison ticks,
+   * `backlineDamage`, and relic burst (Weeping Boil) are not clash blows and
+   * never fire it), with the attacker as the effect's target. Both are
+   * TARGETED triggers: their effects need a target reference threaded in,
+   * so they resolve through `applyTargetedEffect` in sim.ts rather than the
+   * positional `applyEffect` path every other trigger uses.
+   */
+  trigger: 'startOfBattle' | 'startOfWave' | 'faint' | 'afterAttack' | 'allyFaint' | 'allySummoned' | 'onHurt';
   effect: Effect;
   /**
    * Gate the ability's firing on the real-world half of the day the ride
@@ -613,6 +707,27 @@ export interface UnitDef {
    * it, never a premium, so greeding a unit early is never punished.
    */
   retireDay?: number;
+  /**
+   * Enemy-side depth gate (issue #138), the mirror of the shop's `unlockDay`:
+   * `generateGauntlet`'s pool filter skips this enemy for any wave with
+   * 1-based number below `minWave` — a deterministic hard floor, same
+   * precedent as the secondary-archetype pivot gate already in that filter.
+   * Pairs with a high `cost` for a soft "still rare when first available"
+   * curve on top of the hard floor. Meaningless on player units (the shop
+   * never reads it).
+   */
+  minWave?: number;
+  /**
+   * Enemy-side placement flag (issue #138): after a wave's units are rolled,
+   * `generateGauntlet` moves every `rearguard` enemy to the BACK of the wave
+   * (stable order otherwise). Without this, `spendPhase` spends the primary
+   * archetype first, so a support enemy sharing the primary theme rolls
+   * straight into the front clash slot and dies doing nothing — the reorder
+   * is what creates the "kill the protected support first" tension the
+   * enchanter wing exists for. Meaningless on player units (players place
+   * their own board).
+   */
+  rearguard?: boolean;
 }
 
 export interface LineupUnit {
@@ -908,6 +1023,56 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
       effect: { kind: 'chargeWhileBenched', attackPerWave: 1 },
       condition: { notFront: true },
     },
+  },
+  // ---- Season 4 (issues #133-#135, #137) — every stat line below is a
+  // placeholder pending Jesper's balance sign-off, same as every other new
+  // magnitude ever added to this file. Targeted probes flagged per issue:
+  // a swarm board (Rat-Piper + Brood-Mother + Sensei) for #133, swarm-vs-
+  // brute matchup texture for #134, a wave-40+ ride with/without Fat Tick
+  // for #135 (the Fat Tick retire/re-scope decision is tuned JOINTLY with
+  // the Leech's drain — see relics.ts), brute-heavy waves for #137.
+
+  // Issue #133: Squeak-Sensei — swarm payoff (dojo trainer: every pup that
+  // arrives beside it comes trained). First consumer of the `allySummoned`
+  // trigger; the buff lands on the NEWCOMER only — see `buffSummoned`'s doc
+  // comment above for why that targeting choice IS the compounding-law
+  // safety, and don't move it onto a persistent unit without a hard cap.
+  'squeak-sensei': {
+    id: 'squeak-sensei', name: 'Squeak-Sensei', attack: 2, health: 3, cost: 5,
+    ability: { trigger: 'allySummoned', effect: { kind: 'buffSummoned', attack: 1, health: 1 } },
+    tribe: 'swarm',
+  },
+  // Issue #134: Steel-Whisker — thorns. An armored body whose bristles cut
+  // back: small `damageReduction` so it's a genuine front-line pick, plus a
+  // stateless per-hit reflect (see `reflectDamage`'s doc comment above —
+  // reflect, never gain-on-hurt). Intended matchup texture: shines against
+  // many-small-hits swarms, weak into brutes.
+  'steel-whisker': {
+    id: 'steel-whisker', name: 'Steel-Whisker', attack: 2, health: 6, cost: 6,
+    damageReduction: 1,
+    ability: { trigger: 'onHurt', effect: { kind: 'reflectDamage', damage: 2 } },
+    tribe: 'brute',
+  },
+  // Issue #135: Grave-Leech — sustain; a front tank that drains, NOT the
+  // back-line healer future-minions.md killed (a back unit never gets hit,
+  // so healing it is a no-op — this one heals ITSELF by fighting). Clamped
+  // at maxHealth in the effect application; see `healSelf`'s doc comment.
+  'grave-leech': {
+    id: 'grave-leech', name: 'Grave-Leech', attack: 3, health: 6, cost: 6,
+    ability: { trigger: 'afterAttack', effect: { kind: 'healSelf', amount: 2 } },
+    tribe: 'brute',
+  },
+  // Issue #137: Gutter-Acolyte — anti-brute tech: the roster's first enemy
+  // attack-shred (armor blunts hits, poison races health; nothing lowered
+  // the incoming number itself before this). Whole-line targeting and the
+  // ≥1 floor are design calls documented on `weakenAllEnemies` above, both
+  // flagged for sign-off. Shipping AFTER the compendium (#136, already on
+  // dev) per the issue's readability dependency. Tagged plague for the
+  // Catacombs curse flavor — a soft read, like every tribe tag.
+  'gutter-acolyte': {
+    id: 'gutter-acolyte', name: 'Gutter-Acolyte', attack: 2, health: 3, cost: 5,
+    ability: { trigger: 'startOfWave', effect: { kind: 'weakenAllEnemies', attack: 1 } },
+    tribe: 'plague',
   },
 };
 
