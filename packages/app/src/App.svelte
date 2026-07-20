@@ -712,8 +712,8 @@
 
   // Stale-tab fix (PWA-SCOPE.md Phase 1): a deployed build never reaches an
   // already-open tab on its own. `updateAvailable` flips true when the
-  // poller notices `./index.html` now points at a different entry bundle
-  // than the one this tab booted with; `updateDismissed` hides the banner
+  // poller notices `./version.txt` now differs from the build this tab
+  // booted with (see updateCheck.ts); `updateDismissed` hides the banner
   // until the next detection re-shows it (simple by design). Phase 2
   // (pwaUpdate.ts) feeds the same flag from a waiting service worker, so
   // there's still only ever one banner regardless of which signal fires.
@@ -723,6 +723,9 @@
   // "no SW involved this session" (unsupported browser, or Phase 1's poll
   // fired instead) and reloadForUpdate falls back to a plain reload.
   let applyPwaUpdate: ((reload?: boolean) => Promise<void>) | null = null;
+  // Stops pwaUpdate.ts's periodic registration.update() poll — set once
+  // startPwaUpdate resolves, called from onMount's cleanup below.
+  let stopPwaUpdate: (() => void) | null = null;
 
   function dismissUpdateBanner() {
     updateDismissed = true;
@@ -797,8 +800,9 @@
     void startPwaUpdate(() => {
       updateDismissed = false;
       updateAvailable = true;
-    }).then((updateSW) => {
+    }).then(({ updateSW, stop }) => {
       applyPwaUpdate = updateSW;
+      stopPwaUpdate = stop;
     });
     const stopInstallCapture = startInstallPromptCapture(
       () => {
@@ -820,6 +824,7 @@
       clearInterval(bossTrialBoardId);
       stopUpdateCheck();
       stopInstallCapture();
+      stopPwaUpdate?.();
     };
   });
 
