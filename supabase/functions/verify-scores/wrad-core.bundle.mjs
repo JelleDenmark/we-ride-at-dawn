@@ -439,13 +439,18 @@ var UNIT_DEFS = {
   // back-line healer future-minions.md killed (a back unit never gets hit,
   // so healing it is a no-op — this one heals ITSELF by fighting). Clamped
   // at maxHealth in the effect application; see `healSelf`'s doc comment.
+  // Drain halved 2→1 per the #147 sign-off: at amount 2 it was the only
+  // unit exploit-stress flagged (7×T3 cleared 36/45, the Bone-Priest/
+  // Warren-Warden incident shape) and the only one whose cost-efficiency
+  // ROSE with tier. afterAttack repeats every clash (compounding law), so
+  // the sustain number, not the body, is the lever that compounds.
   "grave-leech": {
     id: "grave-leech",
     name: "Grave-Leech",
     attack: 3,
     health: 6,
     cost: 6,
-    ability: { trigger: "afterAttack", effect: { kind: "healSelf", amount: 2 } },
+    ability: { trigger: "afterAttack", effect: { kind: "healSelf", amount: 1 } },
     tribe: "brute"
   },
   // Issue #137: Gutter-Acolyte — anti-brute tech: the roster's first enemy
