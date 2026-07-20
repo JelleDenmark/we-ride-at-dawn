@@ -265,7 +265,7 @@
     try {
       const [rows, rank] = await Promise.all([
         fetchTop(build.seasonId, 20),
-        fetchRank(build.seasonId, seasonBest, seasonKills),
+        fetchRank(build.seasonId, seasonBest, myBossDamage(), seasonKills),
       ]);
       board = rows;
       myRank = rank;
@@ -287,6 +287,23 @@
   let bossTrialBoard = $state<BossTrialRow[]>([]);
   let bossTrialRank = $state<number | null>(null);
   let bossTrialBoardBusy = $state(false);
+  // The Crown (issue #132): whoever tops the season's Boss Trial board wears a
+  // 👑 next to their name on BOTH boards — visible prestige on the board
+  // everyone reads, and it moves the instant someone out-damages them. Derived
+  // client-side from the already-fetched boss board (ordered damage desc), so
+  // no new state or query; the reigning champion needs a real score (>0) so an
+  // all-empty board crowns nobody.
+  const crownDeviceId = $derived(
+    bossTrialBoard.length > 0 && bossTrialBoard[0].damage > 0 ? bossTrialBoard[0].device_id : null
+  );
+  // This device's season-best boss damage, for the combined-board rank query
+  // (#132). Read from the fetched boss board (the authoritative season best),
+  // falling back to 0 when we're unranked/off the fetched page — a slightly
+  // stale rank self-corrects on the next refresh, same as every other board
+  // number here.
+  function myBossDamage(): number {
+    return bossTrialBoard.find((r) => isMe(r))?.damage ?? 0;
+  }
 
   // Fixed fight hour (issue #120): 20:00 CET, matching the established
   // 06:00 CET dawn/season-boundary convention (`copenhagenSeconds`/
@@ -1669,19 +1686,24 @@
     {#if board.length === 0}
       <p class="lb-empty">{boardBusy ? 'reading the war-drums…' : 'no riders yet this week — be the first'}</p>
     {:else}
+      <p class="lb-tiebreak">ties in depth are broken by best Boss Trial damage · 👑 tops the Boss Trial</p>
       <ol class="lb-rows">
         {#each board as row, i}
           <li class="lb-row" class:me={isMe(row)}>
             <span class="lb-rank">{i + 1}</span>
-            <span class="lb-name">{row.name}{isMe(row) ? ' · you' : ''}</span>
-            <span class="lb-kills">{row.kills} felled</span>
+            <span class="lb-name"
+              >{#if row.device_id === crownDeviceId}<span class="crown" title="tops the Boss Trial board">👑</span> {/if}{row.name}{isMe(row) ? ' · you' : ''}</span
+            >
+            <span class="lb-boss" title="best Boss Trial damage — breaks depth ties"
+              >{row.boss_attempted ? `${row.boss_damage} dmg` : '—'}</span
+            >
             <span class="lb-depth">depth {row.depth}</span>
           </li>
         {/each}
       </ol>
     {/if}
     {#if myRank !== null && myRank > board.length}
-      <p class="lb-myrank">your rank: <strong>#{myRank}</strong> · depth {seasonBest} · {seasonKills} felled</p>
+      <p class="lb-myrank">your rank: <strong>#{myRank}</strong> · depth {seasonBest} · {myBossDamage() > 0 ? `${myBossDamage()} boss dmg` : 'no Boss Trial yet'}</p>
     {/if}
     <p class="lb-you">
       riding as <strong>{playerName || '—'}</strong>
@@ -1732,7 +1754,9 @@
         {#each bossTrialBoard as row, i}
           <li class="bt-row" class:me={isMe(row)}>
             <span class="bt-rank">{i + 1}</span>
-            <span class="bt-name">{row.name}{isMe(row) ? ' · you' : ''}</span>
+            <span class="bt-name"
+              >{#if row.device_id === crownDeviceId}<span class="crown" title="reigning Boss-Breaker">👑</span> {/if}{row.name}{isMe(row) ? ' · you' : ''}</span
+            >
             <span class="bt-phases">{row.phases} felled</span>
             <span class="bt-damage">{row.damage} dmg</span>
           </li>
@@ -3062,12 +3086,22 @@
     white-space: nowrap;
   }
 
-  .lb-kills {
+  .lb-boss {
     flex: 0 0 auto;
     white-space: nowrap;
     font-size: 12px;
     color: var(--ink-dim);
     font-variant-numeric: tabular-nums;
+  }
+
+  .lb-tiebreak {
+    margin: 0 0 6px;
+    font-size: 11px;
+    color: var(--ink-dim);
+  }
+
+  .crown {
+    font-size: 12px;
   }
 
   .lb-depth {
