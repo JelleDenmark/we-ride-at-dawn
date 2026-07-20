@@ -141,6 +141,74 @@ export function loadSeasonKills(seasonId: string): number {
   }
 }
 
+/**
+ * Daily Boss Trial (issue #107, Phase 1; fixed-hour + stored lineup per
+ * issue #120) once-per-day gate. "Day" here reuses the exact same primitive
+ * the rest of this file keys off — `build.day` (1..SEASON_DAYS, the ISO
+ * weekday within the current season/week, see `BuildState.day` in
+ * `shop.ts`) — per the RFC's explicit instruction not to invent a new
+ * day/rollover primitive.
+ *
+ * Only the most recent fight is ever stored, but unlike `best`/`kills` its
+ * `day` is part of the returned record (not just the match key): the caller
+ * needs to tell "today's fight" apart from "the last one that happened,
+ * possibly a day or more ago" to keep a replay watchable across a dawn
+ * rollover (see App.svelte's "previous fight" display) rather than losing
+ * it the moment the calendar day turns over. A season rollover still fully
+ * closes it out — `seasonId` is matched exactly, same as `best`/`kills`.
+ *
+ * Since #120 the trial fights automatically at a fixed hour against
+ * whatever's currently persisted, rather than on a player click, so the
+ * exact `lineup` that fought must be stored alongside the score — issue
+ * #118's replay re-derives the fight by re-simulating this stored lineup,
+ * and (per commit 3ba9b2d) `timeOfDay` is load-bearing *inside* that lineup,
+ * not a separate field.
+ */
+export interface BossTrialToday {
+  day: number;
+  damage: number;
+  phases: number;
+  lineup: Lineup;
+}
+
+/** Record a Boss Trial result for the given day — overwrites whatever was
+ * previously stored (there is only ever one "most recent fight" per season). */
+export function saveBossTrialToday(seasonId: string, day: number, result: Omit<BossTrialToday, 'day'>): void {
+  try {
+    localStorage.setItem(`${NS}:bosstrial`, JSON.stringify({ seasonId, day, ...result }));
+  } catch {
+    // Non-fatal — worst case the trial looks available again this session,
+    // letting it re-resolve automatically (harmless: the server RPC is still
+    // greatest()-monotonic, so a resubmit can't lower the stored score).
+  }
+}
+
+/** The most recent Boss Trial result for this season, or null if none has
+ * run yet — covers "no record at all", "a different season", and "a pre-#120
+ * record with no stored lineup" identically (the last case self-heals: it
+ * just re-resolves next time the fixed hour is checked). Deliberately does
+ * NOT filter by `day` — the caller compares the returned `day` to the
+ * current `build.day` itself, to distinguish "today's fight" (already
+ * resolved) from "the previous fight" (still worth watching, but due to be
+ * superseded at the next BOSS_TRIAL_HOUR). */
+export function loadBossTrialToday(seasonId: string): BossTrialToday | null {
+  try {
+    const raw = localStorage.getItem(`${NS}:bosstrial`);
+    if (!raw) return null;
+    const v = JSON.parse(raw) as {
+      seasonId: string;
+      day: number;
+      damage: number;
+      phases: number;
+      lineup?: Lineup;
+    };
+    if (v.seasonId !== seasonId || !v.lineup) return null;
+    return { day: v.day, damage: v.damage, phases: v.phases, lineup: v.lineup };
+  } catch {
+    return null;
+  }
+}
+
 export interface RideLogEntry {
   /** Absolute hour bucket (Date.now() / 3_600_000, floored). */
   hour: number;

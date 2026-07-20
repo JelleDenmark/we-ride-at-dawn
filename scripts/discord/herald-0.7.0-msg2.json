@@ -1,0 +1,12 @@
+{
+  "embeds": [
+    {
+      "title": "v0.7.0 — the warren turns over (2/3)",
+      "description": "**More room on the bench**\n• five bench slots now, up from three — hold a whole merge-trio and change without selling your counter-tech first.\n\n**Relics**\n• Glass Shard reworked: the first-hit bonus each wave used to be a flat +3. now it scales with the wave number itself — +1 on wave 1, +45 by wave 45, deliberately left uncapped. late-ride, this relic hits harder than almost anything else you can carry.\n\n**Poison, capped**\n• multiple poison-all casters (Blight-Witch, and now Draughtsman Moe) used to stack fully — a few of them on one board could out-rot the whole enemy line hard enough to carry a run on poison alone. capped now: total poison-all stacks per wave top out at what a single tier-3 caster deals. Plague-Bearer gets the same treatment in its own separate cap — stacking either kind alone doesn't multiply anymore, though a Plague-Bearer and a poison-all caster together still out-poison either alone.\n\n**New: Boss Trial**\na second gauntlet, once a day, fixed at 20:00 CET — no clicking to trigger it, your board just fights whatever it's standing as at that hour, same as the hourly ride. a straight DPS check against a boss whose attack escalates hard while its health climbs steadily, scored and ranked on its own leaderboard, with its own replay so you can watch the fight back afterward.",
+      "color": 5793266,
+      "footer": {
+        "text": "we ride at dawn · season resets Monday 06:00 CET"
+      }
+    }
+  ]
+}

@@ -1,5 +1,5 @@
 import type { Side, UnitDef, Ability, Lineup } from './data/units';
-import { UNIT_DEFS, tierAttackMultiplier, tierHealthMultiplier, reviveHpForTier, blockHitsForTier, poisonStacksForTier } from './data/units';
+import { UNIT_DEFS, tierAttackMultiplier, tierHealthMultiplier, reviveHpForTier, blockHitsForTier, poisonStacksForTier, cellarCoilChargeCapForTier } from './data/units';
 import { ENEMY_POOL } from './data/enemies';
 import { RELIC_DEFS, type RelicDef } from './data/relics';
 import type { Gauntlet } from './gauntlet';
@@ -108,6 +108,31 @@ interface BattleUnit {
   startOfBattleFired: boolean;
   /** A corpse may be raised once per battle. Guards the two-reviver loop. */
   raised: boolean;
+  /**
+   * Cellar-Coil's `chargeWhileBenched` (issue #106). How much of this
+   * instance's `cellarCoilChargeCapForTier(tier)` ceiling has already been
+   * banked. Persists across every Wave of the whole Ride the same way
+   * `raised`/`startOfBattleFired` do (this is a per-instance field on the
+   * live `BattleUnit`, never reset mid-Ride) — that persistence is exactly
+   * what lets the cap be a true ceiling on total attack banked over all
+   * `WAVE_COUNT` (45) Waves, not just one Wave. See `cellarCoilChargeCapForTier`
+   * and the `chargeWhileBenched` Effect's doc comments in data/units.ts for
+   * the full ADR-0003 compounding-law sign-off. Init 0 for every unit, not
+   * just Cellar-Coil — harmless dead weight on units without the effect.
+   */
+  chargeStacks: number;
+  /**
+   * Twilight-Runt's `teamBuffByWave` (2026-07-16 rework of issue #110).
+   * Tracks how far this instance has progressed through its two fire-once
+   * team grants — 'none' (neither fired yet), 'early' (only the early-wave
+   * dose fired), 'both' (both doses fired, ever). Each transition happens at
+   * most once per unit instance — same fire-once invariant class as
+   * `startOfBattleFired` — see the `teamBuffByWave` case in `applyEffect`
+   * and its Effect doc comment in data/units.ts for the full compounding-law
+   * reasoning. Init 'none' for every unit, harmless dead weight on units
+   * without the effect.
+   */
+  waveBuffPhase: 'none' | 'early' | 'both';
 }
 
 /** A hit reduced by armor still lands for at least this much. */
@@ -188,6 +213,8 @@ export function simulate(
       damageReduction: (def.damageReduction ?? 0) * tier,
       startOfBattleFired: false,
       raised: false,
+      chargeStacks: 0,
+      waveBuffPhase: 'none',
     };
   };
 
@@ -265,6 +292,19 @@ export function simulate(
   };
 
   /**
+   * 1-based wave number currently in progress, updated at the top of the
+   * outer wave loop below (`currentWave = w + 1`). Threaded in as a mutable
+   * closure variable rather than a parameter because `applyEffect` fires
+   * from several call sites at different points in a wave (entry triggers,
+   * `afterAttack`, death resolution) and all of them should see whatever
+   * wave is actually in progress at that instant — Gnawer's `bequeathAttack`
+   * (issue #111) is the first effect that needs "what wave is this" at
+   * apply time. Read once per `faint`, never accumulated — see that
+   * effect's doc comment in data/units.ts for the compounding-law reasoning.
+   */
+  let currentWave = 0;
+
+  /**
    * `index` is the source's current board index, or — when `removed` —
    * the index it occupied before dying, which is where "behind" now starts
    * and where summons/revives are inserted.
@@ -293,6 +333,24 @@ export function simulate(
         for (const target of targets) buff(target, effect.attack * tierAttackMultiplier(tier), effect.health * tierHealthMultiplier(tier));
         break;
       }
+      case 'bequeathAttack': {
+        // Gnawer rework (issue #111). See the effect's doc comment in
+        // data/units.ts for the full formula and compounding-law reasoning;
+        // this mirrors `buffBehind`'s single-target (`start`/`removed`)
+        // targeting logic but computes the magnitude from the caster's OWN
+        // live `attack` (already tier-scaled and relic-buffed) rather than a
+        // flat effect literal, plus a wave-died-on bonus capped in the def.
+        const start = removed ? index : index + 1;
+        const target = board[start];
+        // Last slot: nobody behind to inherit. Payout evaporates — no crash,
+        // no fallback target (this is the intended "wasted" placement case
+        // the issue's placement puzzle calls out).
+        if (!target) break;
+        const ownAttack = source.attack;
+        const waveBonus = Math.min(currentWave, effect.waveBonusCapMultiplier * ownAttack);
+        buff(target, ownAttack + waveBonus, 0);
+        break;
+      }
       case 'buffAdjacent': {
         // `startOfBattle`-gated (see fireEntryTriggers: fires once per unit
         // instance, ever), so this is the same compounding-law shape as
@@ -308,15 +366,115 @@ export function simulate(
         for (const target of targets) buff(target, effect.attack * tierAttackMultiplier(tier), effect.health * tierHealthMultiplier(tier));
         break;
       }
+      case 'distributeStatsOnFaint': {
+        // Pack-Caller rework (issue #88 follow-up). Only ever wired to
+        // `faint`, so `removed` is always true and `board` has already had
+        // this unit spliced out (same precondition `bequeathAttack` above
+        // relies on) — it's already exactly "the rest of the team," no
+        // manual filtering needed.
+        const survivors = board;
+        if (survivors.length === 0) break; // Last unit standing — no-op, no crash.
+        // Own LIVE stats at the moment of death — `source.attack` (tier-
+        // scaled, relic-buffed, and inflated by any startOfBattle buff this
+        // instance received, e.g. Warren-Warden's buffBehind or the
+        // Forgotten Backpack relic) and `source.maxHealth` (same, but the
+        // buffed CEILING rather than however much current health remains —
+        // a unit whose max was raised gives away that raised max even if
+        // it's about to die at 1 HP). Same "own live stat, not a flat
+        // literal" pattern as Gnawer's `bequeathAttack` above, and safe for
+        // the same reason: every input that could have inflated these
+        // values (buffBehind, teamBuff, relics, ...) is itself already
+        // fire-once/bounded under ADR-0003, so a one-time snapshot at death
+        // is bounded too — just variable with board synergy, which is the
+        // point (the more you've invested in it, the bigger its send-off).
+        // Shared per-side, whole-battle budget (issue #131 v2): clip the
+        // TOTAL this death gives away, before splitting, against whatever
+        // budget every Pack-Caller on this side has left for the rest of the
+        // battle. Deliberately does NOT care who ends up with it — spreading
+        // early across a full board or banking it for one late payout both
+        // draw from the same pool, preserving the card's actual choice.
+        // Same "clip, don't reroute" shape as the poison-all/Plague-Bearer
+        // caps: whatever this death COULD have given beyond the remaining
+        // budget is simply lost, not carried to a later death.
+        const budgetAttack = Math.round(
+          UNIT_DEFS['pack-caller'].attack * tierAttackMultiplier(3) * effect.totalBudgetMultiplier
+        );
+        const budgetHealth = Math.round(
+          UNIT_DEFS['pack-caller'].health * tierHealthMultiplier(3) * effect.totalBudgetMultiplier
+        );
+        const spent = distributeStatsOnFaintSpent[source.side];
+        const totalAttack = Math.max(0, Math.min(source.attack, budgetAttack - spent.attack));
+        const totalHealth = Math.max(0, Math.min(source.maxHealth, budgetHealth - spent.health));
+        spent.attack += totalAttack;
+        spent.health += totalHealth;
+        if (totalAttack <= 0 && totalHealth <= 0) break;
+        const n = survivors.length;
+        const perUnitAttack = Math.floor(totalAttack / n);
+        const perUnitHealth = Math.floor(totalHealth / n);
+        const remainderAttack = totalAttack - perUnitAttack * n;
+        const remainderHealth = totalHealth - perUnitHealth * n;
+        // Remainder (stat % survivor-count) goes one point each to the
+        // FRONTMOST survivors first (board index order), so the (possibly
+        // budget-reduced) total is always fully distributed — nothing lost
+        // to rounding once it's past the budget clip above.
+        survivors.forEach((target, i) => {
+          const atk = perUnitAttack + (i < remainderAttack ? 1 : 0);
+          const hp = perUnitHealth + (i < remainderHealth ? 1 : 0);
+          if (atk > 0 || hp > 0) buff(target, atk, hp);
+        });
+        break;
+      }
       case 'poisonFrontEnemy': {
-        // Plague-Bearer (issue #62): stack count now comes from
-        // `poisonStacksForTier` (1/3/5) instead of a flat `effect.stacks *
-        // tier` (1/2/3), same table Blight-Witch's `poisonAllEnemies` uses.
-        // Deliberately stays single-front-target — this is what keeps
-        // Plague-Bearer (cheap, focused front poison) differentiated from
-        // Blight-Witch (pricier whole-wave rot).
+        // Plague-Doctor (data/enemies.ts), the only remaining user after
+        // issue #112 moved Plague-Bearer to `poisonLastEnemy` below. Stack
+        // count still comes from `poisonStacksForTier` (1/3/5) instead of a
+        // flat `effect.stacks * tier`, same table Blight-Witch's
+        // `poisonAllEnemies` and Plague-Bearer's `poisonLastEnemy` use —
+        // unchanged from before #112, just no longer Plague-Bearer's case.
         const target = opposing(source.side)[0];
         if (target) applyPoisonStacks(target, poisonStacksForTier(tier));
+        break;
+      }
+      case 'poisonLastEnemy': {
+        // Plague-Bearer (issue #112, reworked from `poisonFrontEnemy`).
+        // Stack count comes from `poisonStacksForTier` (1/3/5), same table
+        // Blight-Witch's `poisonAllEnemies` uses — this rework only moves
+        // WHERE the stacks land, never how many. Targets the back of the
+        // enemy line (`enemies[enemies.length - 1]`) instead of the front,
+        // pre-rotting a protected backline threat before the front-to-back
+        // grind reaches it. Single-enemy waves degenerate to last === front,
+        // so this behaves exactly like the old `poisonFrontEnemy` did there.
+        //
+        // Compounding-law check: enemies are re-instantiated every wave and
+        // poison never carries across waves (`waveClear`'s antidote, plus
+        // enemies simply not existing yet next wave), so this cannot
+        // accumulate across the 45-wave battle.
+        //
+        // Multi-caster stack cap (issue #131, same shape as #116's
+        // `poisonAllEnemies` cap): multiple Plague-Bearers used to stack
+        // additively onto the same single last-enemy target with no ceiling
+        // — against a single fixed target (e.g. Boss Trial's one boss per
+        // phase) this let 2-5x Plague-Bearer push well past the trial's
+        // intended "a few dozen phases" ceiling, all the way to its 60-phase
+        // hard cap. Capped at `poisonStacksForTier(3)` via its own budget
+        // (`poisonLastApplied`, separate from `poisonAllApplied`) — same
+        // cap-not-sum precedent as `blockCharges`/`poisonAllEnemies`: one ★3
+        // fills it, extra Plague-Bearers clip rather than add. Kept
+        // independent of the poison-all budget on purpose — a Plague-Bearer
+        // and a poison-all caster (Blight-Witch/Draughtsman Moe) together
+        // should still out-poison either alone; only stacking copies of the
+        // SAME effect is capped.
+        const foes = opposing(source.side);
+        const target = foes[foes.length - 1];
+        if (target) {
+          const cap = poisonStacksForTier(3);
+          const remaining = cap - poisonLastApplied[source.side];
+          const stacks = Math.min(poisonStacksForTier(tier), remaining);
+          if (stacks > 0) {
+            applyPoisonStacks(target, stacks);
+            poisonLastApplied[source.side] += stacks;
+          }
+        }
         break;
       }
       case 'poisonTarget': {
@@ -345,19 +503,53 @@ export function simulate(
         // Compounding-law check: enemies are re-instantiated every wave and
         // poison never persists on the horde (`waveClear`'s antidote), so
         // this per-wave AoE cannot accumulate across the 45-wave battle.
-        // Multiple Blight-Witches stack additively within a single wave
-        // (each re-applies `poisonStacksForTier(tier)` to every enemy), but
-        // that's bounded by fresh enemies next wave and the board cap on
-        // how many Blight-Witches can be fielded at once — not a
-        // persistent-horde compounding vector like the shipped exploits.
-        const stacks = poisonStacksForTier(tier);
-        for (const target of opposing(source.side)) {
-          if (target.health > 0) applyPoisonStacks(target, stacks);
+        //
+        // Multi-caster stack cap (issue #116): multiple poison-all casters
+        // (Blight-Witch / its Draughtsman Moe reskin) used to stack ADDITIVELY
+        // within a wave — the direct cause of RatMoe's season-2 depth-45 run on
+        // 3× Blight-Witch (a probe measured +10 avg depth going 0→3 casters,
+        // poison then >50% of all damage dealt, ignoring armor and the wave HP
+        // curve). We now cap the TOTAL poison-all stacks dispensed to the enemy
+        // side this wave at `poisonStacksForTier(3)` (Jesper's call, 2026-07-16:
+        // "max should equal the tier-3 damage — you can still field 2 tier-2s
+        // but not exploit a stack"). Each caster fires in board order and takes
+        // only the remaining budget: one ★3 fills it (5), two ★2s clip 3+3=6→5,
+        // 3×★3 collapses 15→5. No single caster's `poisonStacksForTier` value
+        // changes, mirroring Ward-Weaver's `blockCharges` cap-not-sum precedent.
+        const cap = poisonStacksForTier(3);
+        const remaining = cap - poisonAllApplied[source.side];
+        const stacks = Math.min(poisonStacksForTier(tier), remaining);
+        if (stacks > 0) {
+          for (const target of opposing(source.side)) {
+            if (target.health > 0) applyPoisonStacks(target, stacks);
+          }
+          poisonAllApplied[source.side] += stacks;
         }
         break;
       }
       case 'gainStats': {
         buff(source, effect.attack * tier, effect.health * tier);
+        break;
+      }
+      case 'chargeWhileBenched': {
+        // Cellar-Coil (issue #106). See this Effect's doc comment in
+        // data/units.ts and `cellarCoilChargeCapForTier`'s doc comment for
+        // the full ADR-0003 compounding-law sign-off — this is the one and
+        // only place the grant is actually applied, and it is a hard
+        // `Math.min` clamp, not a suggestion. `fireEntryTriggers` already
+        // gated this call on `condition.notFront` (the unit is not at board
+        // index 0 this Wave), so nothing here re-checks board position.
+        //
+        // Linear tier scaling (`attackPerWave * tier`, i.e. 1/2/3), NOT
+        // `tierAttackMultiplier`'s exponential `3^(tier-1)` — see the effect
+        // doc comment for why an accumulating per-wave grant must not also
+        // get an exponential per-tier multiplier.
+        const cap = cellarCoilChargeCapForTier(tier);
+        const remaining = cap - source.chargeStacks;
+        if (remaining <= 0) break; // Cap already reached — hard stop, no-op forever after.
+        const grant = Math.min(effect.attackPerWave * tier, remaining);
+        source.chargeStacks += grant;
+        buff(source, grant, 0);
         break;
       }
       case 'teamBuff': {
@@ -371,6 +563,29 @@ export function simulate(
         // buffBehind/buffAdjacent below and the unit's own stat curve
         // (issue #22) — still non-stacking across waves, just steeper per use.
         for (const target of board) buff(target, effect.attack * tierAttackMultiplier(tier), effect.health * tierHealthMultiplier(tier));
+        break;
+      }
+      case 'teamBuffByWave': {
+        // Twilight-Runt wave-based rework (2026-07-16, replaces
+        // teamBuffByTime). `startOfWave`-triggered — fires for every unit,
+        // every wave (see fireEntryTriggers) — so unlike startOfBattle
+        // effects there is no free fire-once gate at the trigger level;
+        // `source.waveBuffPhase` does that job instead. Two grants, each
+        // landing at most once per unit instance ever: the early dose the
+        // first wave this unit is alive for, the late dose the first wave
+        // `currentWave >= effect.switchWave` holds. ADDITIVE, not a swap —
+        // the early dose is never revoked, so once both have fired a battle
+        // holds the sum of both. See the Effect's doc comment in
+        // data/units.ts for the full compounding-law reasoning and why this
+        // is deliberately simpler than a revoke-and-reapply swap.
+        if (source.waveBuffPhase === 'none') {
+          for (const target of board) buff(target, effect.early.attack * tierAttackMultiplier(tier), effect.early.health * tierHealthMultiplier(tier));
+          source.waveBuffPhase = 'early';
+        }
+        if (source.waveBuffPhase === 'early' && currentWave >= effect.switchWave) {
+          for (const target of board) buff(target, effect.late.attack * tierAttackMultiplier(tier), effect.late.health * tierHealthMultiplier(tier));
+          source.waveBuffPhase = 'both';
+        }
         break;
       }
       case 'revive': {
@@ -391,10 +606,15 @@ export function simulate(
         // instead of a flat `health * tier`, capped at the revived corpse's
         // own `maxHealth` so a low-tier ally can't be overhealed past its
         // ceiling. This is a magnitude change only, not a frequency one —
-        // `faint` still fires exactly once per unit instance, ever (a unit
-        // only dies once), so the compounding-law bound above still holds
-        // regardless of how steep the HP table gets or how long the battle
-        // (up to 45 waves) runs.
+        // `faint` fires on EVERY death (see `resolveDeaths` below), so a
+        // revived unit that dies again fires its faint ability a second time
+        // (see Gnawer's `bequeathAttack` doc comment and Pack-Caller's
+        // `distributeStatsOnFaint` doc comment, both in units.ts, for the
+        // per-ability bound this produces). What keeps THIS effect's own
+        // compounding-law bound intact regardless is the `raised` flag two
+        // paragraphs up: revival itself is capped to once per corpse, so no
+        // single unit instance can be revived more than once no matter how
+        // steep the HP table gets or how long the battle (up to 45 waves) runs.
         const corpseIdx = fallen[source.side].findIndex((c) => c !== source && !c.raised);
         if (corpseIdx === -1 || board.length >= combatCap) break;
         const [corpse] = fallen[source.side].splice(corpseIdx, 1);
@@ -418,6 +638,52 @@ export function simulate(
         if (currentFront) {
           events.push({ type: 'shieldGranted', targetId: currentFront.instanceId, sourceId: source.instanceId });
         }
+        break;
+      }
+      case 'backlineDamage': {
+        // Backline damage path (issue #85; the "Slink-Rat option B"
+        // primitive from docs/design/future-minions.md). A non-front unit
+        // adds its own current attack directly to the frontmost enemy,
+        // taking no retaliation — it never becomes `foe`/`front` in the
+        // tick loop below, so there is nothing to hit it back. `index` here
+        // is the source's live board position (this effect is only ever
+        // wired to `startOfWave`, never `faint`, so `removed` is never
+        // true, matching `buffAdjacent`'s reasoning above) — index 0 is
+        // "currently at the front," which already deals damage through the
+        // normal clash every tick, so it's excluded here to keep this
+        // strictly a *backline* contribution, not a double-dip for a unit
+        // that happens to rotate to the front.
+        if (index === 0) break;
+        const target = opposing(source.side)[0];
+        if (!target || target.health <= 0) break;
+        // Deliberately a direct `applyDamage` call, not routed through the
+        // tick loop's clash machinery below — this is what keeps the three
+        // interaction questions answered by construction rather than by a
+        // special-cased guard:
+        //  - Marrow-Snap's execute (relics.ts's `executeThreshold`) only
+        //    checks `foeHealthBeforeClash` captured immediately around the
+        //    tick loop's own clash hit, further down this file. This call
+        //    happens at `startOfWave`, entirely before that tick loop even
+        //    starts for the wave, so it can never be mistaken for "the
+        //    crossing blow" — a swarm of backline snipers cannot cheapen
+        //    Marrow-Snap's execute condition.
+        //  - Ward-Weaver's `blockCharges` pool only guards the tick loop's
+        //    two `applyDamage` calls against `front`/`foe`. This hits the
+        //    enemy side directly and never touches `blockCharges` at all,
+        //    so block charges are neither consumed nor checked here — they
+        //    protect the horde's own front from incoming hits, and this
+        //    effect only ever deals outgoing damage to the enemy.
+        //  - Gore-Cleaver's cleave-overkill spillover is computed only
+        //    right after the tick loop's own front-vs-front clash, reading
+        //    `front.relics` and the foe's post-clash health from that same
+        //    hit. This call never runs inside that block, so it can never
+        //    feed a stacked Gore-Cleaver's overkill carry.
+        // Ordering vs poison: this fires at `startOfWave`, before the first
+        // clash tick and before any poison ticks that wave (poison only
+        // ticks inside the tick loop, after the clash) — so backline damage
+        // always lands first, same relative order as Plague-Bearer's
+        // `poisonFrontEnemy` already establishes for its own startOfWave hit.
+        applyDamage(target, source.attack, 'attack');
         break;
       }
     }
@@ -473,9 +739,14 @@ export function simulate(
       // just means that one shot is a no-op, it does not retry on a later
       // wave once the real-world half-day flips mid-battle.
       const condition = unit.ability?.condition;
-      if (condition && condition.timeOfDay !== timeOfDay) continue;
+      if (condition?.timeOfDay !== undefined && condition.timeOfDay !== timeOfDay) continue;
       const index = board.findIndex((u) => u.instanceId === unit.instanceId);
       if (index === -1) continue;
+      // notFront-conditional abilities (Cellar-Coil, issue #106): only fire
+      // on Waves the unit is present for but NOT at board index 0 — the
+      // clashing slot. A `startOfWave` ability still fires every Wave the
+      // unit survives, it just no-ops the Wave it's currently front.
+      if (condition?.notFront && index === 0) continue;
       applyEffect(unit, index, false);
     }
   };
@@ -503,7 +774,86 @@ export function simulate(
    */
   let blockCharges: Record<Side, number> = { horde: 0, gauntlet: 0 };
 
+  /**
+   * Total `poisonAllEnemies` stacks already dispensed this wave, keyed by the
+   * CASTER's side (issue #116). Reset to 0 every wave (below), then each
+   * poison-all caster's contribution is capped so the running total never
+   * exceeds `poisonStacksForTier(3)` — see the `poisonAllEnemies` case in
+   * `applyEffect`. Same per-wave, `Math.max`/cap-not-sum anti-stack shape as
+   * `blockCharges` above: it stops a stack of poison-all casters (RatMoe's
+   * depth-45 3× Blight-Witch board) from applying additively without touching
+   * a single caster's `poisonStacksForTier` value, so a lone ★3 (or two ★2s,
+   * which sum to 6 and clip to the 5 cap) is essentially unaffected while
+   * 3×★3 (15 → 5) is not. Keyed by caster side so poison-all casters on one
+   * side share one budget. Plague-Bearer's single-target `poisonLastEnemy` is
+   * a different effect and is NOT counted against this cap — it has its own,
+   * separate budget (`poisonLastApplied` below), deliberately independent so
+   * a Plague-Bearer and a poison-all caster (Blight-Witch/Draughtsman Moe) on
+   * the same board still stack with each other; only same-effect stacking is
+   * capped.
+   */
+  let poisonAllApplied: Record<Side, number> = { horde: 0, gauntlet: 0 };
+  /**
+   * Total `poisonLastEnemy` stacks already dispensed this wave, keyed by the
+   * CASTER's side (issue #131 follow-up to #116). Multiple Plague-Bearers all
+   * target the same back-of-line enemy on `startOfWave` — before this cap,
+   * they stacked additively onto that single target with no ceiling, which a
+   * balance-analyst pass found let 2-5x Plague-Bearer + a sustain wall push
+   * Boss Trial to its 60-phase hard cap (a fixed single target is exactly the
+   * shape #116 already fixed for poison-all; Plague-Bearer's single-target
+   * cousin was missed at the time). Same cap-not-sum shape as
+   * `poisonAllApplied`: total capped at `poisonStacksForTier(3)`, one ★3
+   * fills it, extra casters clip rather than add. Kept in a SEPARATE budget
+   * from `poisonAllApplied` (not merged into one shared cap) so a
+   * Plague-Bearer and a poison-all caster together still deal MORE poison
+   * than either alone — only stacking the same effect twice is capped, not
+   * poison in general.
+   */
+  let poisonLastApplied: Record<Side, number> = { horde: 0, gauntlet: 0 };
+
+  /**
+   * Total attack/health every `distributeStatsOnFaint` caster (Pack-Caller)
+   * on a side has EVER given away, across the WHOLE battle — unlike
+   * `poisonAllApplied`/`poisonLastApplied` above, this is deliberately NOT
+   * reset per wave (see the wave loop below: no reset line for this one).
+   * A per-wave reset would be meaningless here anyway, since the exploit
+   * this fixes (issue #131) plays out across MANY separate waves/phases as a
+   * board thins over a long Boss Trial, not within one wave.
+   *
+   * Design history: the first shipped fix (2026-07-17) was a RECEIVER-side
+   * cap (how much any one unit could absorb, tracked per-instance) — it
+   * closed the exploit but, on review, gutted half of Pack-Caller's
+   * intended play pattern: positioning it to die LATE and dump a big
+   * payout onto 1-2 chosen units stopped working, because by the time few
+   * survivors remain the payout has grown far past what those (still
+   * board-average-sized) survivors' own caps allow, wasting most of it.
+   * Early-death broad-spread became the only non-wasteful line, which
+   * wasn't the intent.
+   *
+   * This version caps the SOURCE side instead: total `distributeStatsOnFaint`
+   * output per side per battle is capped at `totalBudgetMultiplier` × a
+   * single tier-3 Pack-Caller's own base attack/health (same "sized to one
+   * strong instance" idiom as `poisonStacksForTier(3)`), shared across every
+   * Pack-Caller on that side — same cap-not-sum precedent as
+   * `poisonAllApplied`/`blockCharges`, just scoped to the whole battle
+   * instead of one wave. This preserves the actual choice the card offers
+   * (spread it early across many survivors, or bank it and dump it all on
+   * one or two late) while still bounding the aggregate power this ability
+   * can inject over a ride — see the `distributeStatsOnFaint` case for the
+   * exact accounting, and that Effect's doc comment in data/units.ts for the
+   * balance-analyst numbers behind the multiplier.
+   */
+  let distributeStatsOnFaintSpent: Record<Side, { attack: number; health: number }> = {
+    horde: { attack: 0, health: 0 },
+    gauntlet: { attack: 0, health: 0 },
+  };
+
   for (let w = 0; w < gauntlet.waves.length && horde.length > 0; w++) {
+    // 1-based wave number, matching the `waveStart`/`waveClear` events below
+    // (`wave: w + 1`) — see `currentWave`'s declaration above `applyEffect`
+    // for why this is a mutable closure variable rather than threaded as a
+    // parameter through every call site.
+    currentWave = w + 1;
     enemies = gauntlet.waves[w].units.map((d) =>
       instantiate(d, 'gauntlet', [], 1, enemyAttackScale(w), enemyHealthScale(w))
     );
@@ -517,6 +867,13 @@ export function simulate(
     // compounding-law note on `blockCharges` above. `fireEntryTriggers`
     // below re-populates it via any `blockFrontHits` watchers present.
     blockCharges = { horde: 0, gauntlet: 0 };
+    // Poison-all's per-wave stack budget resets alongside the block pool (issue
+    // #116) — see `poisonAllApplied` above. Re-filled by any `poisonAllEnemies`
+    // casters in the `fireEntryTriggers` pass below, capped at tier-3's stacks.
+    poisonAllApplied = { horde: 0, gauntlet: 0 };
+    // Plague-Bearer's own separate per-wave budget (issue #131) — see
+    // `poisonLastApplied` above. Independent of `poisonAllApplied`.
+    poisonLastApplied = { horde: 0, gauntlet: 0 };
 
     fireEntryTriggers(horde);
     fireEntryTriggers(enemies);
@@ -547,7 +904,7 @@ export function simulate(
       events.push({ type: 'clash', hordeId: front.instanceId, enemyId: foe.instanceId });
 
       const bonusOf = (u: BattleUnit): number =>
-        u.firstAttackDone ? 0 : u.relics.reduce((s, r) => s + (r.firstHitBonus ?? 0), 0);
+        u.firstAttackDone ? 0 : u.relics.reduce((s, r) => s + (r.firstHitBonusScalesWithWave ? currentWave : (r.firstHitBonus ?? 0)), 0);
       const damageOut = front.attack + bonusOf(front);
       const damageIn = foe.attack + bonusOf(foe);
       front.firstAttackDone = true;
@@ -631,7 +988,15 @@ export function simulate(
 
       for (const board of [horde, enemies]) {
         for (const unit of [...board]) {
-          if (unit.poison > 0 && unit.health > 0) applyDamage(unit, unit.poison, 'poison');
+          if (unit.poison > 0 && unit.health > 0) {
+            // Only poison landed on the gauntlet side counts as damage dealt
+            // (issue #126) — the horde's own poison intake is upkeep, not
+            // output. Poison bypasses armor (see applyDamage), so the amount
+            // dealt always equals unit.poison exactly; no need to read a
+            // return value back out of applyDamage for the true dealt amount.
+            if (board === enemies) totalDamage += unit.poison;
+            applyDamage(unit, unit.poison, 'poison');
+          }
         }
       }
 

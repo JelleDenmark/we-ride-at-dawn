@@ -11,3 +11,7 @@ Default label vocabulary (`needs-triage`, `needs-info`, `ready-for-agent`, `read
 ### Domain docs
 
 Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+### Bot playtest
+
+Multi-agent playtest of the `dev` build (UI/wording/gameplay, phone-first) — agent roster, setup, and known false-positive patterns to check before fixing. See `docs/agents/bot_test.md`.

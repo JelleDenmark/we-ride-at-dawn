@@ -26,21 +26,230 @@ const ofType = <T extends BattleEvent['type']>(events: BattleEvent[], type: T) =
   events.filter((e): e is Extract<BattleEvent, { type: T }> => e.type === type);
 
 describe('unit abilities', () => {
-  it('Plague-Bearer poisons the frontmost enemy at start of battle', () => {
+  it('Plague-Bearer poisons the (only) enemy in a single-enemy wave', () => {
+    // Degenerate case (issue #112): last === front when there's only one
+    // enemy on board, so `poisonLastEnemy` behaves exactly like the old
+    // `poisonFrontEnemy` did here.
     const { events } = simulate(lineup({ defId: 'plague-bearer' }), gauntletOf([dummy(0, 5)]));
     expect(ofType(events, 'poisonApplied').length).toBeGreaterThan(0);
     expect(ofType(events, 'poisonTick').length).toBeGreaterThan(0);
   });
 
-  it('Gnawer gives the rat behind it +2 attack on faint', () => {
+  it('Plague-Bearer poisons the LAST enemy in a multi-enemy wave, not the front (issue #112)', () => {
+    const front: UnitDef = { id: 'front-dummy', name: 'Front', attack: 0, health: 50, cost: 0 };
+    const mid: UnitDef = { id: 'mid-dummy', name: 'Mid', attack: 0, health: 50, cost: 0 };
+    const back: UnitDef = { id: 'back-dummy', name: 'Back', attack: 0, health: 50, cost: 0 };
+    const { events } = simulate(lineup({ defId: 'plague-bearer' }), gauntletOf([front, mid, back]));
+
+    const waveStart = events.find((e) => e.type === 'waveStart');
+    if (waveStart?.type !== 'waveStart') throw new Error('expected a waveStart event');
+    const frontId = waveStart.enemies[0].instanceId;
+    const backId = waveStart.enemies[waveStart.enemies.length - 1].instanceId;
+
+    const applied = ofType(events, 'poisonApplied');
+    expect(applied.length).toBeGreaterThan(0);
+    expect(applied[0].targetId).toBe(backId);
+    expect(applied[0].targetId).not.toBe(frontId);
+  });
+
+  // Issue #116: the total poison-all (Blight-Witch / Draughtsman Moe) stacks
+  // landed on the enemy side per wave are capped at poisonStacksForTier(3) = 5,
+  // so a stack of casters can't apply additively. A single high-HP dummy with 0
+  // attack lets every caster survive to startOfWave and fire; poison-all only
+  // fires at startOfWave, so summing `poisonApplied.stacks` over a one-wave sim
+  // is exactly the total poison-all budget spent that wave.
+  const poisonAllStacks = (units: Lineup['units'], waves = 1): number[] => {
+    const perWave: UnitDef[][] = Array.from({ length: waves }, () => [dummy(0, 30)]);
+    const { events } = simulate(lineup(...units), gauntletOf(...perWave));
+    return ofType(events, 'poisonApplied').map((e) => e.stacks);
+  };
+
+  it('one ★3 poison-all caster lands the full 5 stacks (at the cap, unchanged)', () => {
+    const total = poisonAllStacks([{ defId: 'blight-witch', tier: 3 }]).reduce((a, b) => a + b, 0);
+    expect(total).toBe(5);
+  });
+
+  it('one ★2 poison-all caster lands 3 stacks, untouched (under the cap)', () => {
+    const total = poisonAllStacks([{ defId: 'blight-witch', tier: 2 }]).reduce((a, b) => a + b, 0);
+    expect(total).toBe(3);
+  });
+
+  it('two ★2 casters clip 3+3=6 down to the 5 cap (2× tier-2 still viable)', () => {
+    const stacks = poisonAllStacks([
+      { defId: 'blight-witch', tier: 2 },
+      { defId: 'blight-witch', tier: 2 },
+    ]);
+    expect(stacks).toEqual([3, 2]); // second caster only gets the remaining budget
+    expect(stacks.reduce((a, b) => a + b, 0)).toBe(5);
+  });
+
+  it('three ★3 casters collapse 15 → 5 (the RatMoe stack exploit, capped)', () => {
+    const total = poisonAllStacks([
+      { defId: 'blight-witch', tier: 3 },
+      { defId: 'blight-witch', tier: 3 },
+      { defId: 'blight-witch', tier: 3 },
+    ]).reduce((a, b) => a + b, 0);
+    expect(total).toBe(5);
+  });
+
+  it('the Draughtsman Moe reskin shares the identical cap (same kit)', () => {
+    const total = poisonAllStacks([
+      { defId: 'draughtsman-moe', tier: 3 },
+      { defId: 'draughtsman-moe', tier: 3 },
+    ]).reduce((a, b) => a + b, 0);
+    expect(total).toBe(5);
+  });
+
+  it('the cap resets each wave — 3×★3 spends a fresh 5 every wave, not once', () => {
+    const stacks = poisonAllStacks(
+      [
+        { defId: 'blight-witch', tier: 3 },
+        { defId: 'blight-witch', tier: 3 },
+        { defId: 'blight-witch', tier: 3 },
+      ],
+      2
+    );
+    expect(stacks.reduce((a, b) => a + b, 0)).toBe(10); // 5 per wave × 2 waves
+  });
+
+  // Issue #131: Plague-Bearer's single-target `poisonLastEnemy` gets the same
+  // cap-not-sum treatment as #116 gave poison-all, but via its OWN separate
+  // budget — multiple Plague-Bearers all target the same back-of-line enemy,
+  // so without a cap they stacked additively onto one target with no ceiling
+  // (the direct cause of a balance-analyst-found Boss Trial cap-hit: 2-5x
+  // Plague-Bearer against a single fixed boss target). Same
+  // `poisonAllStacks` idiom, different effect.
+  const poisonLastStacks = (units: Lineup['units'], waves = 1): number[] => {
+    const perWave: UnitDef[][] = Array.from({ length: waves }, () => [dummy(0, 30)]);
+    const { events } = simulate(lineup(...units), gauntletOf(...perWave));
+    return ofType(events, 'poisonApplied').map((e) => e.stacks);
+  };
+
+  it('one ★3 Plague-Bearer lands the full 5 stacks (at the cap, unchanged)', () => {
+    const total = poisonLastStacks([{ defId: 'plague-bearer', tier: 3 }]).reduce((a, b) => a + b, 0);
+    expect(total).toBe(5);
+  });
+
+  it('two ★2 Plague-Bearers clip 3+3=6 down to the 5 cap', () => {
+    const stacks = poisonLastStacks([
+      { defId: 'plague-bearer', tier: 2 },
+      { defId: 'plague-bearer', tier: 2 },
+    ]);
+    expect(stacks).toEqual([3, 2]); // second caster only gets the remaining budget
+    expect(stacks.reduce((a, b) => a + b, 0)).toBe(5);
+  });
+
+  it('three to five ★3 Plague-Bearers all collapse to the same 5-stack cap', () => {
+    for (const count of [3, 4, 5]) {
+      const total = poisonLastStacks(
+        Array.from({ length: count }, () => ({ defId: 'plague-bearer', tier: 3 }) as const)
+      ).reduce((a, b) => a + b, 0);
+      expect(total).toBe(5);
+    }
+  });
+
+  it("Plague-Bearer's cap resets each wave, independently of the wave count", () => {
+    const stacks = poisonLastStacks(
+      [
+        { defId: 'plague-bearer', tier: 3 },
+        { defId: 'plague-bearer', tier: 3 },
+        { defId: 'plague-bearer', tier: 3 },
+      ],
+      2
+    );
+    expect(stacks.reduce((a, b) => a + b, 0)).toBe(10); // 5 per wave × 2 waves
+  });
+
+  it('a Plague-Bearer and a poison-all caster STACK — independent caps, not one shared budget', () => {
+    // Jesper's call (2026-07-17): same-effect stacking is capped, but two
+    // DIFFERENT poison effects on the same board should still add up to more
+    // than either alone. 1× tier-3 Plague-Bearer (5, its own cap) + 1× tier-3
+    // Blight-Witch (5, its own separate cap) = 10, not clipped to 5.
+    const total = poisonLastStacks([
+      { defId: 'plague-bearer', tier: 3 },
+      { defId: 'blight-witch', tier: 3 },
+    ]).reduce((a, b) => a + b, 0);
+    expect(total).toBe(10);
+  });
+
+  // Issue #111 rework: Gnawer's faint payout is no longer a flat literal —
+  // the rat behind inherits Gnawer's OWN current attack (tier-scaled,
+  // relic-buffed) plus a bonus for the wave it died on, capped at
+  // `waveBonusCapMultiplier * ownAttack` (2x, per the def in units.ts).
+  // `filler(n)` builds n zero-health "auto-clear" waves so a test can pin
+  // down the EXACT wave Gnawer dies on: a 0-health enemy is already dead at
+  // wave start (resolveDeaths runs before the tick loop), so the wave
+  // clears for free with no damage dealt, letting the next wave's killer
+  // enemy land on a precisely chosen wave number.
+  const filler = (n: number): UnitDef[][] => Array.from({ length: n }, () => [dummy(0, 0)]);
+
+  it('Gnawer bequeaths its own current attack (tier-scaled, relic-buffed), not a flat literal', () => {
+    // t1 Gnawer with Rusted Nail (+2 attack): ownAttack = 3 + 2 = 5. Dies on
+    // wave 1, so the wave bonus is min(1, cap=2*5=10) = 1. Inherited = 6.
     const { events } = simulate(
-      lineup({ defId: 'gnawer' }, { defId: 'gutter-runt' }),
-      gauntletOf([dummy(1, 50)])
+      lineup({ defId: 'gnawer', relicIds: ['rusted-nail'] }, { defId: 'gutter-runt' }),
+      gauntletOf([dummy(50, 1)])
     );
     const buffs = ofType(events, 'buff');
     expect(buffs.length).toBe(1);
-    expect(buffs[0].attack).toBe(2);
-    expect(buffs[0].newAttack).toBe(3);
+    expect(buffs[0].attack).toBe(6);
+    expect(buffs[0].newAttack).toBe(1 + 6);
+    expect(buffs[0].health).toBe(0);
+  });
+
+  it('Gnawer\'s inherited attack scales with tier via tierAttackMultiplier', () => {
+    // t2 Gnawer: ownAttack = 3 * 3 = 9. Dies wave 1: bonus = min(1, 2*9=18) = 1.
+    // Inherited = 10.
+    const { events } = simulate(
+      lineup({ defId: 'gnawer', tier: 2 }, { defId: 'gutter-runt' }),
+      gauntletOf([dummy(50, 9)])
+    );
+    const buffs = ofType(events, 'buff');
+    expect(buffs.length).toBe(1);
+    expect(buffs[0].attack).toBe(10);
+  });
+
+  it('the wave-died-on bonus grows the later Gnawer falls', () => {
+    // t1 Gnawer, ownAttack = 3, cap = 2*3 = 6 (not yet reached). 4 filler
+    // waves auto-clear for free, so Gnawer dies exactly on wave 5:
+    // bonus = min(5, 6) = 5, inherited = 3 + 5 = 8 — strictly more than the
+    // wave-1 payout (4) a lone early death would grant.
+    const { events } = simulate(
+      lineup({ defId: 'gnawer' }, { defId: 'gutter-runt' }),
+      gauntletOf(...filler(4), [dummy(50, 1)])
+    );
+    const buffs = ofType(events, 'buff');
+    expect(buffs.length).toBe(1);
+    expect(buffs[0].attack).toBe(8);
+    expect(buffs[0].newAttack).toBe(1 + 8);
+  });
+
+  it('the wave bonus is capped at waveBonusCapMultiplier * ownAttack, however late Gnawer falls', () => {
+    // t1 Gnawer, ownAttack = 3, cap = 2*3 = 6. 9 filler waves auto-clear for
+    // free so Gnawer dies exactly on wave 10 — well past the cap. Uncapped,
+    // the bonus would be 10 (inherited 13); capped, it tops out at 6
+    // (inherited 9).
+    const { events } = simulate(
+      lineup({ defId: 'gnawer' }, { defId: 'gutter-runt' }),
+      gauntletOf(...filler(9), [dummy(50, 1)])
+    );
+    const buffs = ofType(events, 'buff');
+    expect(buffs.length).toBe(1);
+    expect(buffs[0].attack).toBe(9);
+    expect(buffs[0].attack).toBeLessThan(3 + 10);
+  });
+
+  it('Gnawer in the last slot has nobody behind it — the payout evaporates, no crash', () => {
+    // Enemy health kept well above Gnawer's own attack (3) so only Gnawer
+    // dies this tick — isolates the "no target" case from an incidental
+    // double-kill.
+    const { events, result } = simulate(
+      lineup({ defId: 'gnawer' }),
+      gauntletOf([dummy(50, 100)])
+    );
+    expect(ofType(events, 'buff').length).toBe(0);
+    expect(ofType(events, 'death').length).toBe(1);
+    expect(result.survivors.length).toBe(0);
   });
 
   it('Corpse-Glutton grows +1/+1 whenever an ally faints', () => {
@@ -153,17 +362,19 @@ describe('relics', () => {
     expect(start.horde[0].attack).toBe(3);
   });
 
-  it('Glass Shard adds +3 to the first hit of each wave', () => {
+  it('Glass Shard adds damage equal to the current wave number to the first hit of each wave', () => {
     const { events } = simulate(
       lineup({ defId: 'gutter-runt', relicIds: ['glass-shard'] }),
       gauntletOf([dummy(0, 10)], [dummy(0, 10)])
     );
     const hits = ofType(events, 'damage').filter((d) => d.amount > 0);
-    // First hit of wave 1 is boosted (1 + 3), the rest are 1...
-    expect(hits[0].amount).toBe(4);
+    // First hit of wave 1 is boosted by the wave number (1 + 1 = 2), the rest are 1...
+    expect(hits[0].amount).toBe(2);
     expect(hits[1].amount).toBe(1);
-    // ...and it fires anew on the first hit of wave 2.
-    expect(hits.filter((h) => h.amount === 4)).toHaveLength(2);
+    // ...and it fires anew on the first hit of wave 2, boosted by wave 2 (1 + 2 = 3).
+    const boosted = hits.filter((h) => h.amount > 1);
+    expect(boosted).toHaveLength(2);
+    expect(boosted[1].amount).toBe(3);
   });
 
   it('Weeping Boil damages all enemies when the bearer faints', () => {
@@ -393,6 +604,57 @@ describe('time-of-day abilities (issue #12: Dawn-Runt/Dusk-Runt)', () => {
   });
 });
 
+describe('Twilight-Runt (issue #110: Dawn/Dusk-Runt fusion; 2026-07-16 wave-based rework of teamBuffByTime)', () => {
+  it('grants the placeholder early dose (+2 attack/+1 health) starting wave 1 (magnitudes pending sign-off)', () => {
+    const { events } = simulate(
+      lineup({ defId: 'twilight-runt' }, { defId: 'gutter-runt' }),
+      gauntletOf([dummy(0, 100)])
+    );
+    const buffs = ofType(events, 'buff');
+    // Whole team, including the caster itself — same shape as teamBuff.
+    expect(buffs.length).toBe(2);
+    expect(buffs.every((b) => b.attack === 2 && b.health === 1)).toBe(true);
+  });
+
+  it('does not grant the late dose before wave 15 (switchWave gate)', () => {
+    const { events } = simulate(
+      lineup({ defId: 'twilight-runt' }, { defId: 'gutter-runt' }),
+      gauntletOf(...Array.from({ length: 14 }, () => [dummy(0, 1)]))
+    );
+    const buffs = ofType(events, 'buff');
+    // Only the wave-1 early dose ever fires across all 14 waves.
+    expect(buffs.length).toBe(2);
+    expect(buffs.every((b) => b.attack === 2 && b.health === 1)).toBe(true);
+  });
+
+  it('adds the placeholder late dose (+1 attack/+1 health) on top of the early dose once wave 15 is reached, and never fires a third time (compounding-law check)', () => {
+    const { events } = simulate(
+      lineup({ defId: 'twilight-runt' }, { defId: 'gutter-runt' }),
+      gauntletOf(...Array.from({ length: 20 }, () => [dummy(0, 1)]))
+    );
+    const buffs = ofType(events, 'buff');
+    // Early dose fires once on wave 1 (2 buffs), late dose fires once more on
+    // wave 15 (2 more buffs) — additive, not a swap — and neither re-fires on
+    // any of waves 16-20 even though the ability runs (startOfWave) every wave.
+    expect(buffs.length).toBe(4);
+    expect(buffs.filter((b) => b.attack === 2 && b.health === 1)).toHaveLength(2);
+    expect(buffs.filter((b) => b.attack === 1 && b.health === 1)).toHaveLength(2);
+  });
+
+  it('scales both doses with tier, like every other teamBuff-family magnitude', () => {
+    const { events } = simulate(
+      lineup({ defId: 'twilight-runt', tier: 2 }, { defId: 'gutter-runt', tier: 2 }),
+      gauntletOf(...Array.from({ length: 15 }, () => [dummy(0, 1)]))
+    );
+    const buffs = ofType(events, 'buff');
+    // tierAttackMultiplier/tierHealthMultiplier(2) === 3, so early +2atk/+1hp
+    // -> +6atk/+3hp, late +1atk/+1hp -> +3atk/+3hp, both tier-scaled.
+    expect(buffs.length).toBe(4);
+    expect(buffs.filter((b) => b.attack === 6 && b.health === 3)).toHaveLength(2);
+    expect(buffs.filter((b) => b.attack === 3 && b.health === 3)).toHaveLength(2);
+  });
+});
+
 describe('wave carry-over', () => {
   it('survivors keep their damage between waves', () => {
     const { result } = simulate(
@@ -548,6 +810,6 @@ describe('combat cap headroom for summons', () => {
 describe('golden log regression', () => {
   it('the full showcase battle produces the pinned event-log hash', () => {
     const { events } = simulate(TEST_HORDE, generateGauntlet('2026-01-01'));
-    expect(fnv1a(JSON.stringify(events))).toMatchInlineSnapshot(`981937699`);
+    expect(fnv1a(JSON.stringify(events))).toMatchInlineSnapshot(`3719755269`);
   });
 });

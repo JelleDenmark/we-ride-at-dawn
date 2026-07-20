@@ -1,0 +1,35 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <!-- Twilight-Runt (issue #110): the Dawn-Runt/Dusk-Runt fusion — "never idle",
+       its team buff flipping at noon (attack before, health after). A small
+       scrappy runt body split down the seam: the back half warm dawn-amber, the
+       front half cool dusk-indigo, so the one unit reads as both halves of the
+       day at once. A rising sun sits low behind it (dawn) and a single star
+       hangs over the head (dusk). Spare per house style: one split, two motifs. -->
+  <!-- rising sun behind, dawn side -->
+  <circle cx="11" cy="34" r="6" fill="#f0b64a"/>
+  <line x1="4" y1="27" x2="6" y2="29" stroke="#f0b64a" stroke-width="1.4" stroke-linecap="round"/>
+  <line x1="3" y1="34" x2="5.6" y2="34" stroke="#f0b64a" stroke-width="1.4" stroke-linecap="round"/>
+  <!-- star over the head, dusk side -->
+  <path d="M50 20 L51 23 L54 24 L51 25 L50 28 L49 25 L46 24 L49 23 Z" fill="#cdd6f2"/>
+  <!-- thin runt tail, over the sun -->
+  <path d="M17 51 Q8 50 10 41 Q10.5 37 14 36" fill="none" stroke="#7a4a22" stroke-width="2.2" stroke-linecap="round"/>
+  <!-- body fills: dawn (back/left half) and dusk (front/right half), split at the seam -->
+  <path d="M15 50 C11 42 16 33 28 31 L29 31.2 L29 53 C22.5 53.6 17.5 52.8 16 51 Z" fill="#d98a3a"/>
+  <path d="M29 31.2 C35 30.5 41 33 44 38 C46 42 44 48 37 51 C34 52.6 31 52.8 29 53 Z" fill="#4c3f6b"/>
+  <!-- seam glow where the two halves meet -->
+  <line x1="29" y1="32" x2="29" y2="52.4" stroke="#f0d08a" stroke-width="0.9" opacity="0.7"/>
+  <!-- body outline over both halves -->
+  <path d="M15 50 C11 42 16 33 28 31 C35 30 41 33 44 38 C46 42 44 48 37 51 C30 54 20 54 16 51 Z"
+        fill="none" stroke="#201209" stroke-width="1.5" stroke-linejoin="round"/>
+  <!-- head (dusk side) -->
+  <circle cx="44" cy="37" r="4.1" fill="#4c3f6b" stroke="#201209" stroke-width="1.5"/>
+  <!-- big runt ear, catching dawn light on its inner edge -->
+  <path d="M42 33.4 C40.5 27.5 44 25 47.5 26.5 C46.5 29.5 46 31.5 45.5 34 Z" fill="#4c3f6b" stroke="#201209" stroke-width="1.1" stroke-linejoin="round"/>
+  <path d="M43 32.6 C42.2 29.4 44 27.8 46 28.4 C45.4 30.2 45 31.4 44.7 33 Z" fill="#d98a3a"/>
+  <!-- eye + nose -->
+  <circle cx="46.2" cy="37.6" r="1.5" fill="#ecb45c"/>
+  <circle cx="48.2" cy="39.2" r="1.1" fill="#201209"/>
+  <!-- legs, each matching its half of the day -->
+  <rect x="24" y="50" width="4.3" height="6.2" rx="2" fill="#7a4a22"/>
+  <rect x="38" y="50" width="4.3" height="6.2" rx="2" fill="#2f2748"/>
+</svg>

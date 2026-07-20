@@ -1,0 +1,12 @@
+{
+  "embeds": [
+    {
+      "title": "v0.7.0 — the warren turns over (3/3)",
+      "description": "**New: Compendium**\nevery rat, enemy, and relic now has a proper reference card. tap \"rats\", \"enemies\", or \"relics\" up top to browse full stats and abilities any time — owned or not, on your board or still sitting in the stalls. rat cards say whether they're in today's stalls, arriving later this week, or off the roster for the season.\n\n**Economy**\ndeep runs pay a little more evenly now — the old scrap curve had a flat dead zone around depth 8-10 that felt like progress stopped paying. income smooths out, your board's score doesn't change. the small daily interest stipend on your banked scrap is gone too — it never amounted to more than a rounding error, cut for a cleaner curve, not a cut to anyone's income.\n\n**Small fixes**\na wave where you and the last enemy die on the same swing now correctly counts as cleared. a bot-run playtest turned up a handful of wording fixes: the leaderboard, ride log, season-best, and your rank line all say \"depth N\" now instead of \"wave N\"; the claim that the drains \"change anew each dawn\" is gone — the gauntlet is fixed for the whole week, it only turns over Monday; the \"your warren is empty\" nudge no longer lingers once you've benched your first rat; shop-tile and ride-speed buttons are easier to hit on a phone now; and renaming your rat says \"save name\" instead of \"ride out\". every rat's ability text got a tightening pass too, and the Sluice-Bulwark finally shows its armored self in battle replays instead of a plain grey block.\n\nnot everything that rode in with this season is written here.",
+      "color": 5793266,
+      "footer": {
+        "text": "we ride at dawn · season resets Monday 06:00 CET"
+      }
+    }
+  ]
+}

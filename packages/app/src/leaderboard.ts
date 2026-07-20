@@ -5,7 +5,9 @@ import { CHANNEL } from './env';
 // Dev builds ride a parallel, prefixed season so testing (and dev-toolbar
 // inflated depths) never touch the public prod board. The UI still shows the
 // real week date; only the stored/queried key differs.
-function boardSeason(seasonId: string): string {
+// Exported so other boards (e.g. boss-trial-board.ts) share the exact same
+// dev-prefix isolation instead of re-deriving it.
+export function boardSeason(seasonId: string): string {
   return CHANNEL === 'dev' ? `dev-${seasonId}` : seasonId;
 }
 
@@ -40,8 +42,11 @@ export interface BoardRow {
   kills: number;
 }
 
-/** True if this row belongs to the player on this device. */
-export function isMe(row: BoardRow): boolean {
+/** True if this row belongs to the player on this device. Typed structurally
+ * (just the device_id column) rather than `BoardRow` so other boards with
+ * different score columns — e.g. boss-trial-board.ts's `BossTrialRow` — can
+ * reuse this instead of redefining the same one-liner. */
+export function isMe(row: { device_id: string }): boolean {
   return row.device_id === deviceId();
 }
 

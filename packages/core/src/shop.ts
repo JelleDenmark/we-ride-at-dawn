@@ -13,25 +13,20 @@ export const SEASON_DAYS = 7;
 /** Bench slots: storage for rats outside the fighting horde (never enter
  * `simulate`). Small on purpose — it's for holding merge candidates and
  * counter-tech, not a second board. */
-export const BENCH_SIZE = 3;
+export const BENCH_SIZE = 5;
 
 // Idle economy: the horde skirmishes hourly, earning scrap per wave cleared.
-// Interest (TFT-style, 5% of the bank, capped) is paid once per DAY at dawn,
-// not per hour — the daily cadence + cap keep the bank from snowballing over
-// the hundreds of hours in an expedition.
 export const SCRAP_PER_DEPTH = 1;
-export const INTEREST_RATE = 0.05;
-export const INTEREST_CAP = 5;
 
 // Income decoupling (issue #90). Income used to be a flat `depth *
 // SCRAP_PER_DEPTH` — every extra wave cleared paid the same, so ANY change
 // that let players push deeper (roster acceleration #91, enemy softening #92)
 // inflated the bank in lockstep, snowballing the economy #70 just tuned. So
-// income is now DIMINISHING in depth: the first `SCRAP_FULL_DEPTH` waves pay
-// full rate, and every wave beyond pays the reduced `SCRAP_DEEP_RATE`. This
-// keeps the LEADERBOARD chase from snowballing the bank (a depth-30 run is
-// still mostly paid at the 0.4 deep rate) while leaving score itself raw,
-// undiminished depth — depth is the prestige metric.
+// income is now DIMINISHING in depth, in three tiers: full rate through
+// `SCRAP_FULL_DEPTH`, then `SCRAP_DEEP_RATE` through `SCRAP_MID_DEPTH`, then
+// `SCRAP_FAR_RATE` beyond. This keeps the LEADERBOARD chase from snowballing
+// the bank while leaving score itself raw, undiminished depth — depth is the
+// prestige metric.
 //
 // full=8 is a DELIBERATE mild surplus, not income-neutral: with #91's deeper
 // median it lands week income ~1140 (~+12% over the pre-#90 ~1020 baseline,
@@ -40,8 +35,22 @@ export const INTEREST_CAP = 5;
 // payoff — rather than banking an unspendable surplus against a too-tight
 // economy. Income is NOT the real T3 gate (fishing RNG is), so this is a small
 // generosity lever to validate with live feedback next season, not a fix.
+//
+// deep=0.5 (was 0.4, 2026-07-14): the flooring at 0.4 created a 3-depth dead
+// zone (e.g. depth 8/9/10 all paid identically) that read as "no reward for
+// progressing." 0.5 halves the worst-case dead zone to 2 depths — feel over
+// precision, per Jesper. This alone would also push a typical week's income
+// to ~1332 (+17% over the 1140 baseline) for players who mostly live in the
+// 8-16 band, which was accepted as a deliberate tradeoff for the improved
+// feel. To keep that from ALSO inflating the elite/leaderboard tail (depth
+// 20-43 runs), `SCRAP_FAR_RATE`=0.34 kicks in past `SCRAP_MID_DEPTH`=16 and
+// pulls deep-run income back to within ~1 scrap of the old flat-0.4 curve
+// (e.g. depth 43: 22 old vs 21 new) — so the generosity lands on the typical
+// player's mid-game, not on runaway leaderboard-depth income.
 export const SCRAP_FULL_DEPTH = 8;
-export const SCRAP_DEEP_RATE = 0.4;
+export const SCRAP_DEEP_RATE = 0.5;
+export const SCRAP_MID_DEPTH = 16;
+export const SCRAP_FAR_RATE = 0.34;
 
 /**
  * Scrap earned for clearing `depth` waves in one ride — the single source of
@@ -52,12 +61,9 @@ export const SCRAP_DEEP_RATE = 0.4;
  */
 export function scrapForDepth(depth: number): number {
   const full = Math.min(depth, SCRAP_FULL_DEPTH);
-  const deep = Math.max(0, depth - SCRAP_FULL_DEPTH);
-  return Math.floor(full * SCRAP_PER_DEPTH + deep * SCRAP_DEEP_RATE);
-}
-
-export function interestFor(scrap: number): number {
-  return Math.min(INTEREST_CAP, Math.floor(scrap * INTEREST_RATE));
+  const mid = Math.max(0, Math.min(depth, SCRAP_MID_DEPTH) - SCRAP_FULL_DEPTH);
+  const far = Math.max(0, depth - SCRAP_MID_DEPTH);
+  return Math.floor(full * SCRAP_PER_DEPTH + mid * SCRAP_DEEP_RATE + far * SCRAP_FAR_RATE);
 }
 
 /** Starting/day-1 board size floor. The board opens at 5 seats on day 1 and
@@ -218,28 +224,83 @@ export interface BuildState {
 
 export type ActionResult = { ok: true; state: BuildState } | { ok: false; reason: string };
 
-// 'warren-warden' is excluded seasonally, not permanently: MD Rattyfock
-// (issue #23) is a same-stats reskin of it, added as a tribute to last
-// season's winner, and having both in rotation at once is redundant. Its
-// UNIT_DEFS entry stays intact (existing tests/golden logs/replays still
-// reference it directly) — only its presence in the purchasable pool is
-// gone. A future season could drop this filter to bring it back.
+// Season-3 reskin rotation (issue #115). The prestige tribute swaps every
+// season, so the reskin exclusions flip with it:
+//   - 'blight-witch' is excluded now: Draughtsman Moe (season-3 tribute to
+//     RatMoe) is a same-kit reskin of it, and having both in rotation is
+//     redundant (no-redundant-kits rule).
+//   - 'md-rattyfock' is excluded, and 'warren-warden' is BROUGHT BACK: last
+//     season Rattyfock reskinned Warren-Warden, but with Rattyfock retired the
+//     pair is no longer redundant, so Warren-Warden returns to the pool.
+// Every excluded def stays intact in UNIT_DEFS (tests/golden logs/replays
+// reference them directly) — only presence in the purchasable pool changes.
+//
+// 'dawn-runt'/'dusk-runt' are excluded the same way (issue #109), but for a
+// different reason: they're being REPLACED by the Twilight fusion unit, not
+// aged out mid-week, so `retireDay` (a pure function of day, still mid-week
+// live) is the wrong tool — a half-day-gated unit already read as "a
+// schedule tax, not a decision" (a player who only rides evenings never
+// bought Dawn-Runt), and the fusion issue's design post-mortem lands on a
+// flat pool cut instead. Ship this at a season boundary only, so no
+// mid-expedition owner is stranded. Their UNIT_DEFS entries stay intact
+// (golden logs) — only the purchasable pool changes.
 const SHOP_UNIT_POOL = Object.values(UNIT_DEFS).filter(
-  (u) => u.id !== 'pup' && u.id !== 'warren-warden'
+  (u) =>
+    u.id !== 'pup' &&
+    u.id !== 'blight-witch' &&
+    u.id !== 'md-rattyfock' &&
+    u.id !== 'dawn-runt' &&
+    u.id !== 'dusk-runt'
 );
 const SHOP_RELIC_POOL = Object.values(RELIC_DEFS);
 
 /**
- * Day-gated shop pool (issue #12: Dawn-Runt/Dusk-Runt), same mechanism as
- * `boardCapForDay` — a pure function of the day number, no new per-account
- * state. Units with no `unlockDay` are available from day 1, exactly as
- * before this feature existed. Preserves `SHOP_UNIT_POOL`'s insertion order,
- * so for any day before the earliest `unlockDay` in play, this filters down
+ * Day-gated shop pool (issue #12: Dawn-Runt/Dusk-Runt originally; now also
+ * issue #108's `retireDay`), same mechanism as `boardCapForDay` — a pure
+ * function of the day number, no new per-account state. Units with no
+ * `unlockDay`/`retireDay` are available every day, exactly as before either
+ * feature existed. A unit is in the pool for `unlockDay <= day < retireDay`
+ * (both bounds optional/inclusive-exclusive as written). Preserves
+ * `SHOP_UNIT_POOL`'s insertion order, so for any day before the earliest
+ * `unlockDay` and before the earliest `retireDay` in play, this filters down
  * to byte-identical output to the old unconditional pool — existing golden
  * shop rolls for those days are unaffected.
+ *
+ * Exported (issue #136) so the compendium can list exactly the rats a
+ * player can actually obtain this week — same day gate, same permanent
+ * pool exclusions (pup/blight-witch/md-rattyfock/dawn-runt/dusk-runt) — no
+ * second filter to keep in sync.
  */
-function shopUnitPoolForDay(day: number): UnitDef[] {
-  return SHOP_UNIT_POOL.filter((u) => u.unlockDay === undefined || day >= u.unlockDay);
+export function shopUnitPoolForDay(day: number): UnitDef[] {
+  return SHOP_UNIT_POOL.filter(
+    (u) =>
+      (u.unlockDay === undefined || day >= u.unlockDay) &&
+      (u.retireDay === undefined || day < u.retireDay)
+  );
+}
+
+/**
+ * Every rat obtainable in the shop on ANY day this season (issue #136
+ * follow-up) — the compendium's "will I ever see this" filter, as opposed to
+ * `shopUnitPoolForDay`'s "right now." A not-yet-unlocked rat still counts
+ * (it unlocks later this week); a rat whose `retireDay` has already passed
+ * for every day 1..SEASON_DAYS (e.g. `retireDay: 1`), or one excluded from
+ * `SHOP_UNIT_POOL` entirely (replaced units — Pup, Blight-Witch, ...),
+ * never does. Union over the season, same underlying rule, no second filter
+ * to keep in sync.
+ */
+export function seasonUnitPool(): UnitDef[] {
+  const seen = new Set<string>();
+  const result: UnitDef[] = [];
+  for (let day = 1; day <= SEASON_DAYS; day++) {
+    for (const u of shopUnitPoolForDay(day)) {
+      if (!seen.has(u.id)) {
+        seen.add(u.id);
+        result.push(u);
+      }
+    }
+  }
+  return result;
 }
 
 /**
@@ -252,6 +313,18 @@ function shopUnitPoolForDay(day: number): UnitDef[] {
 export function upcomingUnlocks(day: number): UnitDef[] {
   return SHOP_UNIT_POOL.filter((u) => u.unlockDay !== undefined && u.unlockDay > day).sort(
     (a, b) => (a.unlockDay ?? 0) - (b.unlockDay ?? 0)
+  );
+}
+
+/**
+ * Units still in the pool on `day` but leaving later this week, soonest
+ * first (issue #108) — mirrors `upcomingUnlocks` so the app can show a
+ * "leaving soon" hint before a unit quietly vanishes from the rolls. Pure
+ * function of `day`, same shape as `upcomingUnlocks`/`shopUnitPoolForDay`.
+ */
+export function upcomingRetirements(day: number): UnitDef[] {
+  return SHOP_UNIT_POOL.filter((u) => u.retireDay !== undefined && u.retireDay > day).sort(
+    (a, b) => (a.retireDay ?? 0) - (b.retireDay ?? 0)
   );
 }
 
@@ -478,7 +551,7 @@ export function sellUnit(state: BuildState, boardIndex: number): ActionResult {
   if (!unit) return fail('nothing to sell');
   const s = clone(state);
   s.board.splice(boardIndex, 1);
-  s.scrap += sellRefund(unit);
+  s.scrap += sellRefund(unit, state.day);
   // Any relics pinned to the sold unit would otherwise vanish for free —
   // refund each at the same half-cost rate as the merge-dedup discard path.
   for (const relicId of unit.relicIds) s.scrap += relicRefund(relicId);
@@ -490,7 +563,7 @@ export function sellBenchUnit(state: BuildState, benchIndex: number): ActionResu
   if (!unit) return fail('nothing to sell');
   const s = clone(state);
   s.bench.splice(benchIndex, 1);
-  s.scrap += sellRefund(unit);
+  s.scrap += sellRefund(unit, state.day);
   for (const relicId of unit.relicIds) s.scrap += relicRefund(relicId);
   return { ok: true, state: s };
 }
@@ -501,10 +574,24 @@ export function sellBenchUnit(state: BuildState, benchIndex: number): ActionResu
  * so a tier-3 unit represents 9 base copies), so a linear-in-tier refund
  * significantly undervalued merged units relative to the scrap actually
  * spent building them. Quadratic scaling matches that merge-cost economics.
+ *
+ * SEVERANCE (issue #108): once a unit's `retireDay` has passed — it needs
+ * `day` for that, hence this function's second parameter — the quadratic
+ * discount is replaced by a par buyback: `cost * 3^(tier-1)`, exactly the
+ * scrap spent reaching that tier (1/3/9 base copies per tier, same curve as
+ * `tierAttackMultiplier`). This is deliberately PAR, never above: a naive
+ * `cost * tier²` would pay 4x cost for a tier-2 that only cost 3x to build —
+ * a repeatable scrap printer via buy-3 -> merge -> sell (the compounding-law
+ * risk this feature is guarded against, see compounding-law.test.ts's
+ * canary). Non-retired units are completely untouched by this — same
+ * `Math.max(1, floor(cost/2)) * tier²` as before, byte-identical.
  */
-export function sellRefund(unit: BoardUnit): number {
-  const cost = UNIT_DEFS[unit.defId].cost;
-  return Math.max(1, Math.floor(cost / 2)) * unit.tier * unit.tier;
+export function sellRefund(unit: BoardUnit, day: number): number {
+  const def = UNIT_DEFS[unit.defId];
+  if (def.retireDay !== undefined && day >= def.retireDay) {
+    return def.cost * Math.pow(3, unit.tier - 1);
+  }
+  return Math.max(1, Math.floor(def.cost / 2)) * unit.tier * unit.tier;
 }
 
 export function rerollShop(state: BuildState): ActionResult {

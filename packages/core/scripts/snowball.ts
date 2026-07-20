@@ -7,9 +7,8 @@
  *
  *   each hour: earn scrapForDepth(depth) scrap for that hour's ride
  *              (simulate() against generateGauntlet(date, day, hour))
- *   at dawn (every 24 rides): interestFor(scrap) is added, then
- *              advanceAfterDawn() rolls the day forward (board/bench/relics
- *              carry, shop refreshes, boardCapForDay grows)
+ *   at dawn (every 24 rides): advanceAfterDawn() rolls the day forward
+ *              (board/bench/relics carry, shop refreshes, boardCapForDay grows)
  *   between rides: a GREEDY SPEND POLICY spends available scrap via the
  *              real buyUnit/buyRelic/rerollShop/combineAll shop functions.
  *
@@ -29,7 +28,6 @@ import {
   rerollShop,
   buyBoardSlot,
   effectiveBoardCap,
-  interestFor,
   lineupFromBuild,
   boardCapForDay,
   DAILY_SCRAP,
@@ -235,7 +233,6 @@ interface HourSample {
 interface RunResult {
   samples: HourSample[];
   totalIncome: number;
-  totalInterest: number;
 }
 
 function addDay(date: string, n = 1): string {
@@ -254,7 +251,6 @@ function runWeek(startDate: string, startingScrapBonus = 0): RunResult {
 
   const samples: HourSample[] = [];
   let totalIncome = 0;
-  let totalInterest = 0;
 
   for (let h = 0; h < TOTAL_HOURS; h++) {
     const lineup = lineupFromBuild(build);
@@ -269,15 +265,12 @@ function runWeek(startDate: string, startingScrapBonus = 0): RunResult {
 
     // Dawn boundary: every 24th hour (h=23,47,...) ends a day.
     if ((h + 1) % HOURS_PER_DAY === 0 && h + 1 < TOTAL_HOURS) {
-      const dawnInterest = interestFor(build.scrap);
-      totalInterest += dawnInterest;
       build = advanceAfterDawn(build, addDay(build.date, build.day));
-      if (dawnInterest > 0) build = { ...build, scrap: build.scrap + dawnInterest };
       build = spendGreedily(build);
     }
   }
 
-  return { samples, totalIncome, totalInterest };
+  return { samples, totalIncome };
 }
 
 interface BoardMaxRunResult extends RunResult {
@@ -300,7 +293,6 @@ function runWeekBoardMaxing(startDate: string): BoardMaxRunResult {
 
   const samples: HourSample[] = [];
   let totalIncome = 0;
-  let totalInterest = 0;
   const slotBoughtOnDay: number[] = [];
   let lastPurchasedSlots = build.purchasedSlots ?? 0;
 
@@ -320,10 +312,7 @@ function runWeekBoardMaxing(startDate: string): BoardMaxRunResult {
     }
 
     if ((h + 1) % HOURS_PER_DAY === 0 && h + 1 < TOTAL_HOURS) {
-      const dawnInterest = interestFor(build.scrap);
-      totalInterest += dawnInterest;
       build = advanceAfterDawn(build, addDay(build.date, build.day));
-      if (dawnInterest > 0) build = { ...build, scrap: build.scrap + dawnInterest };
       build = spendGreedily(build, true);
       if ((build.purchasedSlots ?? 0) > lastPurchasedSlots) {
         slotBoughtOnDay.push(build.day);
@@ -332,7 +321,7 @@ function runWeekBoardMaxing(startDate: string): BoardMaxRunResult {
     }
   }
 
-  return { samples, totalIncome, totalInterest, slotBoughtOnDay, finalPurchasedSlots: build.purchasedSlots ?? 0 };
+  return { samples, totalIncome, slotBoughtOnDay, finalPurchasedSlots: build.purchasedSlots ?? 0 };
 }
 
 /** A lucky early merge: the player's first few shop rolls happened to hand
@@ -357,7 +346,6 @@ function runWeekWithEarlyMerge(startDate: string): RunResult {
 
   const samples: HourSample[] = [];
   let totalIncome = 0;
-  let totalInterest = 0;
 
   for (let h = 0; h < TOTAL_HOURS; h++) {
     const lineup = lineupFromBuild(build);
@@ -368,14 +356,11 @@ function runWeekWithEarlyMerge(startDate: string): RunResult {
     samples.push({ hour: h, day: build.day, depth, scrapEarned: earned, bank: build.scrap });
     build = spendGreedily(build);
     if ((h + 1) % HOURS_PER_DAY === 0 && h + 1 < TOTAL_HOURS) {
-      const dawnInterest = interestFor(build.scrap);
-      totalInterest += dawnInterest;
       build = advanceAfterDawn(build, addDay(build.date, build.day));
-      if (dawnInterest > 0) build = { ...build, scrap: build.scrap + dawnInterest };
       build = spendGreedily(build);
     }
   }
-  return { samples, totalIncome, totalInterest };
+  return { samples, totalIncome };
 }
 
 // ---------------------------------------------------------------------------
@@ -665,65 +650,11 @@ console.log(
 console.log(`\nranked by best-placement depth delta: ${relicRows.map((r) => r.id).join(' > ')}`);
 
 // ---------------------------------------------------------------------------
-// 5) INTEREST'S SHARE of total income over the week.
-// ---------------------------------------------------------------------------
-console.log('\n=== 5) INTEREST SHARE OF TOTAL INCOME ===\n');
-const interestRuns = SEED_DATES.map((d) => runWeek(d, 0));
-const totalIncomeAll = avg(interestRuns.map((r) => r.totalIncome));
-const totalInterestAll = avg(interestRuns.map((r) => r.totalInterest));
-console.log(`avg total ride income over the week: ${totalIncomeAll.toFixed(1)} scrap`);
-console.log(`avg total interest over the week:    ${totalInterestAll.toFixed(1)} scrap`);
-console.log(`interest share of total income:      ${((totalInterestAll / (totalIncomeAll + totalInterestAll)) * 100).toFixed(1)}%`);
-// Per-day breakdown to show WHEN it matters (early, when the bank is small
-// and depth-derived income hasn't ramped, is where a 5%-capped-at-5 stipend
-// would matter most in relative terms, if at all).
-console.log('\nper-day: bank at day-start, interest paid entering the day, that day\'s ride income, interest share of that day');
-for (let day = 1; day <= 7; day++) {
-  const bankAtDayStart: number[] = [];
-  const interestPaid: number[] = [];
-  const rideIncomeThatDay: number[] = [];
-  for (const d of SEED_DATES) {
-    let build = newBuild(d, 1);
-    build = spendGreedily(build);
-    let dayStartBank = build.scrap; // day 1's starting bank (post first spend)
-    let dayIncome = 0;
-    for (let h = 0; h < TOTAL_HOURS; h++) {
-      const currentDay = build.day;
-      const lineup = lineupFromBuild(build);
-      const depth = lineup.units.length > 0 ? simulate(lineup, generateGauntlet(build.date, build.day, h)).result.wavesCleared : 0;
-      const earned = scrapForDepth(depth);
-      build = { ...build, scrap: build.scrap + earned };
-      if (currentDay === day) dayIncome += earned;
-      build = spendGreedily(build);
-      if ((h + 1) % HOURS_PER_DAY === 0 && h + 1 < TOTAL_HOURS) {
-        const dawnInterest = interestFor(build.scrap);
-        // dawnInterest is paid entering the NEXT day (build.day + 1 after
-        // advanceAfterDawn), so attribute it there.
-        if (build.day + 1 === day) interestPaid.push(dawnInterest);
-        build = advanceAfterDawn(build, addDay(build.date, build.day));
-        if (dawnInterest > 0) build = { ...build, scrap: build.scrap + dawnInterest };
-        if (build.day === day) dayStartBank = build.scrap; // bank right as this day begins
-        build = spendGreedily(build);
-      }
-    }
-    bankAtDayStart.push(dayStartBank);
-    rideIncomeThatDay.push(dayIncome);
-  }
-  const avgBank = avg(bankAtDayStart);
-  const avgInterest = interestPaid.length > 0 ? avg(interestPaid) : 0;
-  const avgRideIncome = avg(rideIncomeThatDay);
-  const share = (avgInterest / (avgInterest + avgRideIncome)) * 100;
-  console.log(
-    `day ${day}: bank@start ${avgBank.toFixed(0).padStart(4)}  interest ${avgInterest.toFixed(2).padStart(4)}  rideIncome ${avgRideIncome.toFixed(1).padStart(6)}  share ${share.toFixed(1)}%`
-  );
-}
-
-// ---------------------------------------------------------------------------
-// 6) BOARD-SLOT REACHABILITY (issue #70) — does a strong, deliberately
+// 5) BOARD-SLOT REACHABILITY (issue #70) — does a strong, deliberately
 //    board-maxing player reach BOARD_CAP=8 within the 7-day expedition, and
 //    is the FIRST slot gated well past day 1 (not trivially affordable)?
 // ---------------------------------------------------------------------------
-console.log('\n=== 6) BOARD-SLOT REACHABILITY (issue #70) ===\n');
+console.log('\n=== 5) BOARD-SLOT REACHABILITY (issue #70) ===\n');
 const boardMaxRuns = SEED_DATES.map((d) => runWeekBoardMaxing(d));
 const reachedFull = boardMaxRuns.filter((r) => r.finalPurchasedSlots >= 3).length;
 console.log(`board-maxing player reaches BOARD_CAP=8 (buys all 3 slots) by day 7: ${reachedFull}/${boardMaxRuns.length} seeds`);
@@ -758,7 +689,7 @@ console.log('the full ladder is a genuine multi-day investment, and a player who
 //    shifts the whole economy with it — the exact tension to weigh before
 //    touching WAVE_BUDGET_QUADRATIC / WAVE_UNIT_CAP.
 // ---------------------------------------------------------------------------
-console.log('\n=== 7) EXPECTED DEPTH PER DAY (default player, board floor 5, NO purchased slots) ===\n');
+console.log('\n=== 6) EXPECTED DEPTH PER DAY (default player, board floor 5, NO purchased slots) ===\n');
 console.log('day  avgDepth  [min..max across seeds]   avgScrap/day   (shop tier: t1 d1-3, t2 d4-5, t3 d6-7)');
 for (let day = 1; day <= 7; day++) {
   const perSeedDepth = baselineRuns.map((r) => dayAvgDepth(r.samples, day));

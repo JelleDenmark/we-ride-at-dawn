@@ -1,0 +1,31 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <!-- Draughtsman Moe: Blight-Witch reskin, Season 2 champion's tribute (issue #115,
+       honours RatMoe). Same kit (poison the whole enemy line) and body/pose as
+       blight-witch.svg, re-costumed as an "architect of rot" — the "draught" pun:
+       a draughtsman draws plans (architect), a ship's draught is how deep she sits
+       (his boat in Svendborg), a draught is an archaic dose of poison (the kit).
+       Deliberately spare after a first pass ran too busy: architect = slate coat +
+       one rolled blueprint; kit = purple poison eye + a green draught-phial; the
+       ponytail is RatMoe himself. Muted palette per house style; the ink-blue
+       blueprint is the only prestige richness. -->
+  <!-- tail -->
+  <path d="M17 51 Q5 50 7 37 Q7 31 12 30" fill="none" stroke="#4a3a45" stroke-width="2.6" stroke-linecap="round"/>
+  <!-- body (Blight-Witch geometry, muted plague grey) -->
+  <path d="M17 51 C13 42 17 32 28 30 C36 29 42 33 45 39 L54 44 C55.3 45 54.4 46.4 53 46.4 L46 46.5 C43 51 35 54 27 54 C20 54 18.5 53.5 17 51 Z" fill="#6a5560" stroke="#201209" stroke-width="1.5" stroke-linejoin="round"/>
+  <!-- architect's drafting-coat over the back (replaces the ragged hood) -->
+  <path d="M16 48 C13 41 17 32 27 30 C33 29.5 38 32 41 36 L40 44 C36 49 28 51.5 21 51 C18.5 50.7 17 49.8 16 48 Z" fill="#3b4a5c" stroke="#1c2530" stroke-width="1.2" stroke-linejoin="round"/>
+  <!-- one rolled blueprint slung on the back: clean ink-blue tube, faint paper core -->
+  <path d="M18 44 L29 30" fill="none" stroke="#2f4a63" stroke-width="4.6" stroke-linecap="round"/>
+  <path d="M19.4 43.4 L28.6 31.4" fill="none" stroke="#6d90ac" stroke-width="0.8"/>
+  <!-- head + purple poison eye (surviving Blight-Witch signature) -->
+  <circle cx="40" cy="35" r="4.4" fill="#6a5560" stroke="#201209" stroke-width="1.5"/>
+  <circle cx="44.4" cy="39.6" r="1.9" fill="#9a5fb0"/>
+  <!-- RatMoe's ponytail: bound tuft off the crown, trailing up-left -->
+  <path d="M38.5 30.5 C36 24 33 20.5 29.5 18.5 C31.5 22 32.5 26.5 36.5 31.5 Z" fill="#2b2230" stroke="#160e1a" stroke-width="0.8" stroke-linejoin="round"/>
+  <!-- the draught: a corked phial of green rot at the rear claw (poison-as-dose) -->
+  <rect x="20.4" y="51" width="4.2" height="7" rx="1.6" fill="#6fae3a" stroke="#201209" stroke-width="1"/>
+  <rect x="21.1" y="49.4" width="2.8" height="2" rx="0.6" fill="#4a3a45"/>
+  <!-- legs -->
+  <rect x="28" y="52" width="4.6" height="6.5" rx="2" fill="#4a3a45"/>
+  <rect x="42" y="51" width="4.6" height="6.5" rx="2" fill="#4a3a45"/>
+</svg>

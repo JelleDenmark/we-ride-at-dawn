@@ -53,10 +53,4 @@ describe('MD Rattyfock (issue #23)', () => {
     }
     expect(found).toBe(true);
   });
-
-  it('is described as a Season 1 tribute/survivor', () => {
-    const md = UNIT_DEFS['md-rattyfock'];
-    expect(md.desc).toBeDefined();
-    expect(md.desc).toMatch(/Season 1|survivor|tribute/i);
-  });
 });
