@@ -339,16 +339,39 @@ describe('unit abilities', () => {
     expect(buffs.every((b) => b.attack === 1 && b.health === 1)).toBe(true);
   });
 
-  it('Rat-Piper summons a Pup in front each wave', () => {
+  it('Rat-Piper maintains a litter: summons up to target, then nothing while it is full (issue #105)', () => {
+    // Harmless dummies (0 attack) — the pups never die, so after the wave-1
+    // fill the litter is always full and the maintenance summon is a no-op.
+    // Target at ★1 is count(2)*tier(1) = 2 pups.
     const { events } = simulate(
       lineup({ defId: 'rat-piper' }),
-      gauntletOf([dummy(0, 1)], [dummy(0, 1)])
+      gauntletOf([dummy(0, 1)], [dummy(0, 1)], [dummy(0, 1)])
     );
     const summons = ofType(events, 'summon');
-    expect(summons.length).toBe(2);
+    expect(summons.length).toBe(2); // two pups, ONCE — NOT two per wave
     expect(summons.every((s) => s.unit.defId === 'pup')).toBe(true);
     expect(summons[0].index).toBe(0);
-    expect(summons[1].index).toBe(1);
+  });
+
+  it('Rat-Piper tops the litter back up when a pup falls', () => {
+    // A 1-attack dummy kills the front summoned pup (health 1) each wave; the
+    // piper itself (health 2) survives, so it re-summons the shortfall.
+    const { events } = simulate(
+      lineup({ defId: 'rat-piper' }),
+      gauntletOf([dummy(1, 1)], [dummy(1, 1)], [dummy(1, 1)])
+    );
+    const summons = ofType(events, 'summon');
+    expect(summons.length).toBeGreaterThan(2); // wave-1 fill (2) plus refills as pups die
+    expect(summons.every((s) => s.unit.defId === 'pup')).toBe(true);
+  });
+
+  it('Rat-Piper maintains count*tier pups (2/4/6 by tier)', () => {
+    const { events } = simulate(
+      lineup({ defId: 'rat-piper', tier: 2 }),
+      gauntletOf([dummy(0, 1)])
+    );
+    const summons = ofType(events, 'summon');
+    expect(summons.length).toBe(4); // target 2*2 = 4 pups on the opening wave
   });
 });
 
@@ -716,8 +739,13 @@ describe('startOfBattle fires once per unit, startOfWave every wave', () => {
     expect(ofType(events, 'buff')).toHaveLength(1);
   });
 
-  it('Rat-Piper still pipes in a pup every wave', () => {
-    const { events } = simulate(lineup({ defId: 'rat-piper' }), grinder(5));
+  it('Rat-Piper re-pipes every wave when its pups keep dying (startOfWave still fires; #105 maintenance)', () => {
+    // Lethal grinder (1 attack kills the health-1 pup each wave), so the
+    // maintenance summon has a shortfall to refill every wave — proving the
+    // startOfWave trigger still fires each wave, it just no-ops when the
+    // litter is already full (covered separately in the Rat-Piper suite).
+    const lethal = gauntletOf(...Array.from({ length: 5 }, () => [dummy(1, 1)]));
+    const { events } = simulate(lineup({ defId: 'rat-piper' }), lethal);
     expect(ofType(events, 'summon').length).toBeGreaterThan(1);
   });
 
@@ -802,14 +830,16 @@ describe('combat cap headroom for summons', () => {
   });
 
   it('combatCap gives the pups somewhere to land', () => {
+    // Board 8, cap 10 → 2 slots of headroom, and Rat-Piper's ★1 target is 2
+    // pups (count 2 * tier 1), so both land.
     const { events } = simulate({ units: fullBoard(), combatCap: 10 }, gauntletOf([dummy(0, 100)]));
-    expect(ofType(events, 'summon')).toHaveLength(1);
+    expect(ofType(events, 'summon')).toHaveLength(2);
   });
 });
 
 describe('golden log regression', () => {
   it('the full showcase battle produces the pinned event-log hash', () => {
     const { events } = simulate(TEST_HORDE, generateGauntlet('2026-01-01'));
-    expect(fnv1a(JSON.stringify(events))).toMatchInlineSnapshot(`3719755269`);
+    expect(fnv1a(JSON.stringify(events))).toMatchInlineSnapshot(`3786831272`);
   });
 });

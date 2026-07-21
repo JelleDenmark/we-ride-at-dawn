@@ -1,0 +1,12 @@
+{
+  "embeds": [
+    {
+      "title": "first Boss Trial — tonight, 20:00 CET",
+      "description": "the drains open something new tonight — 20:00 CET, first ever Boss Trial.\n\nonce a day, one foe. it gets meaner every phase — harder hits, more health, no ceiling until your horde breaks. it fights automatically at the bell with whatever board you're standing at 20:00 — no button, no warning shot. new leaderboard too: scored on damage dealt, not depth.\n\nhow it fights, since it's not the gauntlet: each phase is a fresh wave — a new, stronger boss every time, not one long brawl. so every start-of-wave trick re-arms each phase and only compounds the longer you last: poison re-seeps, ward-weaver's shields refresh, rat-piper pipes another pup. but once-a-ride openers — warren-warden's rally, press-kin — fire on phase one and never again; they don't scale with the climb. one boss, no chaff: single-target hits land in full, splash has nothing to spread across, and your wounds carry phase to phase. build for the long grind, not the opening swing.\n\nfirst bell rings tonight. don't be caught resting.",
+      "color": 5793266,
+      "footer": {
+        "text": "we ride at dawn · Boss Trial fires daily at 20:00 CET"
+      }
+    }
+  ]
+}

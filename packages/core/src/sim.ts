@@ -21,8 +21,18 @@ export const BOARD_CAP = 8;
  * per issue #69 (deployed-count + bonus, not board-cap + bonus) so the
  * headroom is always useful on a thin board but never a runaway ceiling on a
  * full one. See `combatCapForBuild` in shop.ts.
+ *
+ * Raised 2 -> 6 for the issue #105 summon rework: this bonus is no longer the
+ * summon *firewall* it used to be. Its old job — stopping Rat-Piper's per-wave
+ * summon from filling the board with permanent pups — now belongs at the
+ * source (Rat-Piper's `maintainSummons` self-bounds to `count * tier`). So
+ * the bonus is free to be "how many momentary bodies fit at once," sized to
+ * fit Brood-Mother's babushka cascade (finite by construction — see her def).
+ * PLACEHOLDER pending the balance pass; the exploit-stress probe and the
+ * enemy-wave body-count check (this cap also gates enemy summoners, who share
+ * the loop) are the guardrails on the exact number.
  */
-export const COMBAT_CAP_BONUS = 2;
+export const COMBAT_CAP_BONUS = 6;
 export const SCORE_PER_WAVE = 100;
 /** Stalemate guard (e.g. two healers out-sustaining each other): the wave is abandoned. */
 export const MAX_TICKS_PER_WAVE = 1000;
@@ -139,6 +149,15 @@ interface BattleUnit {
    * without the effect.
    */
   waveBuffPhase: 'none' | 'early' | 'both';
+  /**
+   * instanceId of the summoner that owns this body, if it was summoned by a
+   * `maintainSummons` caster (Rat-Piper, issue #105). Lets that caster count
+   * how many of its OWN pups are still alive and top the litter back up to
+   * target instead of adding a fresh one every wave — the source-level bound
+   * that makes a raised `COMBAT_CAP_BONUS` safe. Undefined for recruited
+   * units and for one-shot summons (Brood-Mother's cascade doesn't maintain).
+   */
+  summonedBy?: number;
 }
 
 /** A hit reduced by armor still lands for at least this much. */
@@ -359,6 +378,24 @@ export function simulate(
   };
 
   /**
+   * Insert one summoned body at `index` on `side`, respecting the combat cap.
+   * Returns false (and does nothing) when the side is already at the cap, so
+   * callers can stop their litter loop. `owner` tags the body's `summonedBy`
+   * for `maintainSummons` accounting (Rat-Piper); omit it for one-shot summons
+   * (Brood-Mother's cascade). Fires `allySummoned` (Squeak-Sensei) per body.
+   */
+  const spawn = (def: UnitDef, index: number, side: Side, owner?: number): boolean => {
+    const board = boardOf(side);
+    if (board.length >= combatCap) return false;
+    const summoned = instantiate(def, side);
+    summoned.summonedBy = owner;
+    board.splice(index, 0, summoned);
+    events.push({ type: 'summon', side, index, unit: view(summoned) });
+    fireAllySummoned(summoned);
+    return true;
+  };
+
+  /**
    * `index` is the source's current board index, or — when `removed` —
    * the index it occupied before dying, which is where "behind" now starts
    * and where summons/revives are inserted.
@@ -374,13 +411,24 @@ export function simulate(
       case 'summon': {
         const def = DEF_LOOKUP[effect.unitId];
         for (let i = 0; i < effect.count * tier; i++) {
-          if (board.length >= combatCap) break;
-          const summoned = instantiate(def, source.side);
-          board.splice(index, 0, summoned);
-          events.push({ type: 'summon', side: source.side, index, unit: view(summoned) });
-          // Issue #133: summon-watchers (Squeak-Sensei) react to each body
-          // as it lands, so a multi-pup litter is trained pup by pup.
-          fireAllySummoned(summoned);
+          if (!spawn(def, index, source.side)) break;
+        }
+        break;
+      }
+      case 'maintainSummons': {
+        // Rat-Piper (issue #105): top the litter up to `count * tier`, don't
+        // pile on a fresh one every wave. Only bodies THIS caster summoned
+        // and that are still alive count toward the target, so re-summoning
+        // fills the shortfall left by pups that fell — and does nothing when
+        // the litter is already full. That caps this per-wave summoner's
+        // permanent contribution at `count * tier`, ever.
+        const def = DEF_LOOKUP[effect.unitId];
+        const target = effect.count * tier;
+        const living = board.filter(
+          (u) => u.summonedBy === source.instanceId && u.health > 0
+        ).length;
+        for (let i = 0; i < target - living; i++) {
+          if (!spawn(def, index, source.side, source.instanceId)) break;
         }
         break;
       }

@@ -116,6 +116,21 @@ export function cellarCoilChargeCapForTier(tier: number): number {
 export type Effect =
   | { kind: 'summon'; unitId: string; count: number }
   /**
+   * Rat-Piper's maintenance summon (issue #105 rework). Unlike `summon`,
+   * which adds `count * tier` fresh bodies every time it fires, this TOPS UP
+   * to a target of `count * tier` living pups that THIS caster owns
+   * (tracked via `BattleUnit.summonedBy`): it re-summons only the shortfall,
+   * summoning nothing when its litter is already full. That bounds a
+   * per-wave (`startOfWave`) summoner's PERMANENT body contribution at the
+   * source — at most `count * tier` pups, ever — instead of accumulating a
+   * fresh litter every wave. This is the ADR-0003 rule that lets the global
+   * combat cap (`COMBAT_CAP_BONUS`) rise to fit Brood-Mother's cascade
+   * without a per-wave summoner turning that headroom into a runaway board.
+   * Any FUTURE per-wave summoner must be self-bounded this way (or with a
+   * hard per-instance cap like `cellarCoilChargeCapForTier`).
+   */
+  | { kind: 'maintainSummons'; unitId: string; count: number }
+  /**
    * Squeak-Sensei (issue #133) — the swarm archetype's first payoff. Wired to
    * the new `allySummoned` trigger: whenever an ally is summoned onto this
    * side, the NEWLY-SUMMONED body enters with `+attack/+health`, scaled
@@ -810,15 +825,45 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     // sells for exactly what was spent, never a loss.
     retireDay: 1,
   },
+  // Rat-Piper (issue #105 rework): maintenance summoner. Keeps a litter of
+  // `count * tier` = 1/2/3 pups topped up — summons only the shortfall each
+  // wave, nothing when the litter is full. Its permanent contribution is
+  // bounded at the source (see `maintainSummons`), which is what lets the
+  // global combat cap rise for Brood-Mother's cascade.
   'rat-piper': {
     id: 'rat-piper', name: 'Rat-Piper', attack: 1, health: 2, cost: 4,
-    ability: { trigger: 'startOfWave', effect: { kind: 'summon', unitId: 'pup', count: 1 } },
+    // Target 2/4/6 pups (count*tier). count is 2, not 1, per the #105 balance
+    // read: the OLD `summon 1/wave` accidentally accumulated ~2 pups against
+    // the tiny +2 cap before no-op'ing, so a target of 1 was a stealth nerf
+    // (T1 value rank fell 15->18). Two restores its effective power while
+    // keeping the litter bounded at the source. Still nowhere near flagged in
+    // exploit-stress (weak 1/1 bodies, hard-capped by combatCap).
+    ability: { trigger: 'startOfWave', effect: { kind: 'maintainSummons', unitId: 'pup', count: 2 } },
     tribe: 'swarm',
   },
+  // Brood-Mother (issue #105 rework): the babushka. On faint she spawns two
+  // Brood-Broodlings; each broodling, on ITS faint, spawns two Brood-Runts;
+  // runts are terminal. A matryoshka cascade that is finite BY CONSTRUCTION
+  // — the terminal def carries no faint-summon, so there is no depth counter
+  // to get wrong and nothing to cap (each generation is a distinct, smaller
+  // def, not a decrementing self-summon). `faint` fires once per instance, so
+  // this was never the compounding risk the old tiny combat cap policed; it
+  // was only ever starved by it. Count scales with the MOTHER's tier; the
+  // child generations stay tier-1 (fixed small bodies), so the cascade grows
+  // in width with her star level, not in unbounded depth.
   'brood-mother': {
     id: 'brood-mother', name: 'Brood-Mother', attack: 2, health: 3, cost: 5,
-    ability: { trigger: 'faint', effect: { kind: 'summon', unitId: 'pup', count: 2 } },
+    ability: { trigger: 'faint', effect: { kind: 'summon', unitId: 'brood-broodling', count: 2 } },
     tribe: 'swarm',
+  },
+  'brood-broodling': {
+    id: 'brood-broodling', name: 'Brood-Broodling', attack: 1, health: 2, cost: 0,
+    ability: { trigger: 'faint', effect: { kind: 'summon', unitId: 'brood-runt', count: 2 } },
+    tribe: 'runt',
+  },
+  'brood-runt': {
+    id: 'brood-runt', name: 'Brood-Runt', attack: 1, health: 1, cost: 0,
+    tribe: 'runt',
   },
   'plague-bearer': {
     id: 'plague-bearer', name: 'Plague-Bearer', attack: 2, health: 2, cost: 4,
