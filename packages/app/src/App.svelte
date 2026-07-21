@@ -182,15 +182,30 @@
   // counts is the 10:00–11:00 bucket. Every other day already has a real
   // roster earning through any gap, so this only applies to day 1.
   const DAY1_CUTOFF_SEC = 10 * 3600;
+  // The ride-date/season boundary: currentRideDate shifts the clock back 6h,
+  // so a ride-date runs dawn-to-dawn (06:00–05:59 Copenhagen), not
+  // midnight-to-midnight.
+  const DAWN_SEC = 6 * 3600;
 
   /** Whether hour bucket `h` (epoch hours) falls inside the day-1 freeze:
    * its ride-date is the season's Monday and its Copenhagen local time is
-   * before 10:00. Checked per hour (not just "now") so offline catch-up on
-   * day 1 skips only the frozen hours, not the ones after 10:00 — and stays
-   * correct even if catch-up crosses into day 2 before it's credited. */
+   * in [06:00, 10:00). The dawn lower bound matters: Monday's ride-date
+   * extends past midnight to Tuesday 05:59, and without it those overnight
+   * hours also matched "Monday before 10:00" and were wrongly frozen (the
+   * 2026-07-21 no-rides-overnight bug). Compared against the season id's
+   * 10-char date prefix so a reissued id (e.g. 2026-07-13.2) still freezes
+   * its day 1 instead of silently never matching a plain ride-date. Checked
+   * per hour (not just "now") so offline catch-up on day 1 skips only the
+   * frozen hours, not the ones after 10:00 — and stays correct even if
+   * catch-up crosses into day 2 before it's credited. */
   function isFrozenHour(h: number, seasonId: string): boolean {
     const instant = new Date(h * HOUR_MS);
-    return currentRideDate(instant) === seasonId && copenhagenSeconds(instant) < DAY1_CUTOFF_SEC;
+    const sec = copenhagenSeconds(instant);
+    return (
+      currentRideDate(instant) === seasonId.slice(0, 10) &&
+      sec >= DAWN_SEC &&
+      sec < DAY1_CUTOFF_SEC
+    );
   }
 
   // build.date is the current expedition day's date; the horde rides its
