@@ -246,7 +246,11 @@ export type ActionResult = { ok: true; state: BuildState } | { ok: false; reason
 // (golden logs) — only the purchasable pool changes.
 const SHOP_UNIT_POOL = Object.values(UNIT_DEFS).filter(
   (u) =>
-    u.id !== 'pup' &&
+    // Internal summon-only bodies (pup, and issue #105's brood-broodling /
+    // brood-runt cascade) are all cost-0 and must never be shop-rollable or
+    // browsable — excluding by cost covers every current and future one
+    // without an ever-growing id blocklist.
+    u.cost > 0 &&
     u.id !== 'blight-witch' &&
     u.id !== 'md-rattyfock' &&
     u.id !== 'dawn-runt' &&

@@ -49,17 +49,21 @@ describe('Squeak-Sensei (issue #133: allySummoned swarm payoff)', () => {
     expect(buffs[0].newHealth).toBe(2);
   });
 
-  it("trains Brood-Mother's whole faint-litter, one buff per body", () => {
-    // Brood-Mother (front) dies to the opening clash and births 2 pups;
-    // each gets its own training buff as it lands.
+  it("trains Brood-Mother's whole babushka cascade, one buff per body (#105 interaction)", () => {
+    // Brood-Mother (front) dies to the opening clash and births 2 broodlings;
+    // they die to the same 50-attack dummy and each births 2 runts — the full
+    // matryoshka. Every body, at every generation, gets its own training buff
+    // as it lands. This is the #105 probe the design flagged: the Sensei buffs
+    // the whole cascade, so the invariant that must hold is one-buff-per-body,
+    // not a fixed count.
     const { events } = simulate(
       lineup({ defId: 'brood-mother' }, { defId: 'squeak-sensei' }),
       gauntletOf([dummy(50, 100)])
     );
     const summons = ofType(events, 'summon');
-    expect(summons.length).toBe(2);
+    expect(summons.length).toBeGreaterThan(2); // 2 broodlings + their runts — a real cascade
     const buffs = ofType(events, 'buff');
-    expect(buffs.length).toBe(2);
+    expect(buffs.length).toBe(summons.length); // one buff per summoned body, no more
     const summonedIds = summons.map((s) => s.unit.instanceId);
     expect(buffs.map((b) => b.targetId).sort()).toEqual(summonedIds.sort());
   });
@@ -79,13 +83,16 @@ describe('Squeak-Sensei (issue #133: allySummoned swarm payoff)', () => {
 
   it('the buff count tracks the SUMMON count across waves — one per newcomer, never more', () => {
     const waves = 6;
+    // Lethal dummies (1 attack) kill the health-1 pup each wave, so Rat-Piper's
+    // maintenance summon refills the shortfall wave after wave (#105) — several
+    // summons across the grind, each training exactly one newcomer.
     const { events } = simulate(
       lineup({ defId: 'rat-piper' }, { defId: 'squeak-sensei' }),
-      gauntletOf(...Array.from({ length: waves }, () => [dummy(0, 1)]))
+      gauntletOf(...Array.from({ length: waves }, () => [dummy(1, 1)]))
     );
     const summons = ofType(events, 'summon');
     const buffs = ofType(events, 'buff');
-    expect(summons.length).toBeGreaterThan(1); // Rat-Piper pipes every wave
+    expect(summons.length).toBeGreaterThan(1); // refilled across waves as pups fall
     expect(buffs.length).toBe(summons.length);
   });
 

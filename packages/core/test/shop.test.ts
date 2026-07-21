@@ -38,7 +38,7 @@ import { UNIT_DEFS } from '../src/data/units';
 import { RELIC_DEFS } from '../src/data/relics';
 import { simulate } from '../src/sim';
 import { generateGauntlet, difficultyForDay } from '../src/gauntlet';
-import { BOARD_CAP } from '../src/sim';
+import { BOARD_CAP, COMBAT_CAP_BONUS } from '../src/sim';
 
 const unitSlot = (s: BuildState): number => s.shop.slots.findIndex((x) => x.kind === 'unit');
 const relicSlot = (s: BuildState): number => s.shop.slots.findIndex((x) => x.kind === 'relic');
@@ -777,7 +777,7 @@ describe('tiers in battle', () => {
     expect(lineupFromBuild(s)).toEqual({
       units: [{ defId: 'gnawer', tier: 2, relicIds: ['rusted-nail'] }],
       teamRelicIds: ['filth-totem'],
-      combatCap: 3, // 1 deployed rat + COMBAT_CAP_BONUS(2), issue #69
+      combatCap: 1 + COMBAT_CAP_BONUS, // 1 deployed rat + summon headroom, issue #69
     });
   });
 
@@ -1396,26 +1396,26 @@ describe('buyable horde slots (issue #9)', () => {
   it('combatCapForBuild is deployed board size plus summon headroom (issue #69), not board-cap-derived', () => {
     for (let boardSize = 0; boardSize <= 8; boardSize++) {
       const build = { board: new Array(boardSize).fill({ defId: 'gutter-runt', tier: 1, relicIds: [] }) };
-      expect(combatCapForBuild(build)).toBe(boardSize + 2);
+      expect(combatCapForBuild(build)).toBe(boardSize + COMBAT_CAP_BONUS);
     }
   });
 
-  it('a summoner on a small board gets exactly 2 summon slots of headroom', () => {
+  it('a summoner on a small board gets exactly COMBAT_CAP_BONUS slots of headroom', () => {
     const build = { board: [{ defId: 'rat-piper', tier: 1, relicIds: [] }] };
-    expect(combatCapForBuild(build)).toBe(3); // 1 deployed + 2
+    expect(combatCapForBuild(build)).toBe(1 + COMBAT_CAP_BONUS);
   });
 
-  it('a summoner on a full board still gets +2, no more and no less', () => {
+  it('a summoner on a full board still gets exactly COMBAT_CAP_BONUS, no more and no less', () => {
     const build = { board: new Array(8).fill({ defId: 'gutter-runt', tier: 1, relicIds: [] }) };
-    expect(combatCapForBuild(build)).toBe(10); // 8 deployed + 2
+    expect(combatCapForBuild(build)).toBe(8 + COMBAT_CAP_BONUS);
   });
 
   it('lineupFromBuild derives combatCap from the actually-deployed board, not effectiveBoardCap or purchased slots', () => {
     let s: BuildState = { ...newBuild('2026-07-04', 1), scrap: 200, board: [{ defId: 'gutter-runt', tier: 1, relicIds: [] }] };
     s = (buyBoardSlot(s) as { ok: true; state: BuildState }).state; // effectiveBoardCap now 6, but only 1 rat deployed
     const lineup = lineupFromBuild(s);
-    expect(lineup.combatCap).toBe(3); // 1 deployed + 2, unaffected by the purchased slot
-    expect(lineup.combatCap).toBeLessThan(effectiveBoardCap(s) + 2);
+    expect(lineup.combatCap).toBe(1 + COMBAT_CAP_BONUS); // 1 deployed + bonus, unaffected by the purchased slot
+    expect(lineup.combatCap).toBeLessThan(effectiveBoardCap(s) + COMBAT_CAP_BONUS);
   });
 });
 

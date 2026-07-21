@@ -15,7 +15,7 @@
 // parametrizes over UNIT_DEFS itself so any new startOfBattle buff-effect
 // unit is automatically covered, no one has to remember to add a test.
 import { describe, expect, it } from 'vitest';
-import { simulate, type BattleEvent } from '../src/sim';
+import { simulate, COMBAT_CAP_BONUS, type BattleEvent } from '../src/sim';
 import type { Gauntlet } from '../src/gauntlet';
 import type { Lineup, UnitDef } from '../src/data/units';
 import { UNIT_DEFS } from '../src/data/units';
@@ -126,7 +126,17 @@ describe('compounding-law: allyFaint stat-farming stays capped by the combat hea
   // check — repeating on allyFaint is Corpse-Glutton's intended identity;
   // what must stay true is that the loop stays *bounded*.)
   it('a maxed feeder + Corpse-Glutton board cannot full-clear a 45-wave grind', () => {
-    const feeders = Object.values(UNIT_DEFS).filter((u) => u.ability?.effect.kind === 'summon');
+    // RECRUITABLE feeders only (cost > 0): the issue #105 babushka added
+    // cost-0 internal cascade bodies (brood-broodling summons brood-runts) —
+    // those are never on a real board, so a canary that recruited one
+    // standalone would be measuring a fiction. Both summon shapes feed
+    // allyFaint: `summon` (Brood-Mother's cascade) and `maintainSummons`
+    // (Rat-Piper's litter, which keeps re-feeding dead pups).
+    const feeders = Object.values(UNIT_DEFS).filter(
+      (u) =>
+        u.cost > 0 &&
+        (u.ability?.effect.kind === 'summon' || u.ability?.effect.kind === 'maintainSummons')
+    );
     const farmers = Object.values(UNIT_DEFS).filter(
       (u) => u.ability?.trigger === 'allyFaint' && u.ability.effect.kind === 'gainStats'
     );
@@ -139,8 +149,11 @@ describe('compounding-law: allyFaint stat-farming stays capped by the combat hea
       ...Array.from({ length: 3 }, () => ({ defId: farmers[0].id, tier: 3 })),
     ].slice(0, 8);
     const { result } = simulate(
-      // Full purchasable board (8) with the real summon headroom (+2).
-      { units, combatCap: units.length + 2 },
+      // Full purchasable board (8) with the REAL summon headroom — track the
+      // live constant (raised to +6 for the #105 rework), not a stale literal,
+      // so this canary guards actual play. Probe at +6: this combo reaches
+      // 17/45, so the raised cap did NOT unlock the loop.
+      { units, combatCap: units.length + COMBAT_CAP_BONUS },
       grinder(45)
     );
     expect(result.wavesCleared).toBeLessThan(45);

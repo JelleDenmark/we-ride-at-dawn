@@ -623,7 +623,18 @@
     switch (e.kind) {
       case 'summon': {
         const name = UNIT_DEFS[e.unitId]?.name ?? ENEMY_DEFS[e.unitId]?.name ?? e.unitId;
-        what = `summons ${e.count} ${name}${e.count > 1 ? 's' : ''} (★2 ${e.count * 2} · ★3 ${e.count * 3}) in front`;
+        // Brood-Mother's summon (issue #105) births Brood-Broodlings that
+        // themselves birth Brood-Runts on faint — call out the cascade so the
+        // matryoshka reads, rather than looking like a flat litter.
+        const cascades = UNIT_DEFS[e.unitId]?.ability?.effect.kind === 'summon';
+        const litter = `summons ${e.count} ${name}${e.count > 1 ? 's' : ''} (★2 ${e.count * 2} · ★3 ${e.count * 3}) in front`;
+        what = cascades ? `${litter} — and each births smaller young of its own when it falls` : litter;
+        break;
+      }
+      case 'maintainSummons': {
+        const name = UNIT_DEFS[e.unitId]?.name ?? ENEMY_DEFS[e.unitId]?.name ?? e.unitId;
+        // Rat-Piper (issue #105): maintenance, not a fresh litter every wave.
+        what = `keeps ${e.count} ${name}${e.count > 1 ? 's' : ''} (★2 ${e.count * 2} · ★3 ${e.count * 3}) at its side, piping in a fresh one whenever one falls`;
         break;
       }
       case 'buffBehind':
@@ -695,7 +706,8 @@
   }
 
   function isSummoner(def: UnitDef | undefined): boolean {
-    return def?.ability?.effect.kind === 'summon';
+    const kind = def?.ability?.effect.kind;
+    return kind === 'summon' || kind === 'maintainSummons';
   }
 
   // Compendium (issue #136) lists every rat regardless of day-gating (a
@@ -722,6 +734,7 @@
     if (ability) {
       switch (ability.effect.kind) {
         case 'summon':
+        case 'maintainSummons':
           return '❋ summon';
         case 'buffBehind':
         case 'buffAdjacent':
