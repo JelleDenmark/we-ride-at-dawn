@@ -34,19 +34,19 @@ describe('Squeak-Sensei (issue #133: allySummoned swarm payoff)', () => {
     expect(def.ability?.effect.kind).toBe('buffSummoned');
   });
 
-  it('trains each pup Rat-Piper pipes in: the newcomer arrives at +1/+1', () => {
+  it('trains each pup Rat-Piper pipes in: every newcomer arrives at +1/+1', () => {
     const { events } = simulate(
       lineup({ defId: 'rat-piper' }, { defId: 'squeak-sensei' }),
       gauntletOf([dummy(0, 100)])
     );
     const summons = ofType(events, 'summon');
-    expect(summons.length).toBe(1);
+    expect(summons.length).toBe(2); // ★1 litter target is 2 pups (#105)
     const buffs = ofType(events, 'buff');
-    expect(buffs.length).toBe(1);
-    expect(buffs[0].targetId).toBe(summons[0].unit.instanceId);
-    // Pup base 1/1 + the Sensei's +1/+1.
-    expect(buffs[0].newAttack).toBe(2);
-    expect(buffs[0].newHealth).toBe(2);
+    expect(buffs.length).toBe(2); // one training buff per pup
+    const summonedIds = summons.map((s) => s.unit.instanceId).sort();
+    expect(buffs.map((b) => b.targetId).sort()).toEqual(summonedIds);
+    // Each pup: base 1/1 + the Sensei's +1/+1.
+    expect(buffs.every((b) => b.newAttack === 2 && b.newHealth === 2)).toBe(true);
   });
 
   it("trains Brood-Mother's whole babushka cascade, one buff per body (#105 interaction)", () => {
@@ -76,9 +76,8 @@ describe('Squeak-Sensei (issue #133: allySummoned swarm payoff)', () => {
       gauntletOf([dummy(0, 100)])
     );
     const buffs = ofType(events, 'buff');
-    expect(buffs.length).toBe(1);
-    expect(buffs[0].attack).toBe(2);
-    expect(buffs[0].health).toBe(2);
+    expect(buffs.length).toBe(2); // ★1 Piper's two pups, each trained once
+    expect(buffs.every((b) => b.attack === 2 && b.health === 2)).toBe(true);
   });
 
   it('the buff count tracks the SUMMON count across waves — one per newcomer, never more', () => {

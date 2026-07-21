@@ -832,7 +832,13 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   // global combat cap rise for Brood-Mother's cascade.
   'rat-piper': {
     id: 'rat-piper', name: 'Rat-Piper', attack: 1, health: 2, cost: 4,
-    ability: { trigger: 'startOfWave', effect: { kind: 'maintainSummons', unitId: 'pup', count: 1 } },
+    // Target 2/4/6 pups (count*tier). count is 2, not 1, per the #105 balance
+    // read: the OLD `summon 1/wave` accidentally accumulated ~2 pups against
+    // the tiny +2 cap before no-op'ing, so a target of 1 was a stealth nerf
+    // (T1 value rank fell 15->18). Two restores its effective power while
+    // keeping the litter bounded at the source. Still nowhere near flagged in
+    // exploit-stress (weak 1/1 bodies, hard-capped by combatCap).
+    ability: { trigger: 'startOfWave', effect: { kind: 'maintainSummons', unitId: 'pup', count: 2 } },
     tribe: 'swarm',
   },
   // Brood-Mother (issue #105 rework): the babushka. On faint she spawns two

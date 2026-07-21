@@ -151,8 +151,9 @@ describe('compounding-law: allyFaint stat-farming stays capped by the combat hea
     const { result } = simulate(
       // Full purchasable board (8) with the REAL summon headroom — track the
       // live constant (raised to +6 for the #105 rework), not a stale literal,
-      // so this canary guards actual play. Probe at +6: this combo reaches
-      // 17/45, so the raised cap did NOT unlock the loop.
+      // so this canary guards actual play. Clears only a handful of waves here
+      // (well under the 45 the assertion guards); the exploit-stress script is
+      // the stronger headroom guard, this pins the specific allyFaint-farm loop.
       { units, combatCap: units.length + COMBAT_CAP_BONUS },
       grinder(45)
     );

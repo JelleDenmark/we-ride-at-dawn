@@ -340,37 +340,38 @@ describe('unit abilities', () => {
   });
 
   it('Rat-Piper maintains a litter: summons up to target, then nothing while it is full (issue #105)', () => {
-    // Harmless dummies (0 attack) — the pup never dies, so after the wave-1
-    // summon the litter is always full and the maintenance summon is a no-op.
+    // Harmless dummies (0 attack) — the pups never die, so after the wave-1
+    // fill the litter is always full and the maintenance summon is a no-op.
+    // Target at ★1 is count(2)*tier(1) = 2 pups.
     const { events } = simulate(
       lineup({ defId: 'rat-piper' }),
       gauntletOf([dummy(0, 1)], [dummy(0, 1)], [dummy(0, 1)])
     );
     const summons = ofType(events, 'summon');
-    expect(summons.length).toBe(1); // one pup, ever — NOT one per wave
-    expect(summons[0].unit.defId).toBe('pup');
+    expect(summons.length).toBe(2); // two pups, ONCE — NOT two per wave
+    expect(summons.every((s) => s.unit.defId === 'pup')).toBe(true);
     expect(summons[0].index).toBe(0);
   });
 
   it('Rat-Piper tops the litter back up when a pup falls', () => {
-    // A 1-attack dummy kills the summoned pup (health 1) each wave; the piper
-    // itself (health 2) survives, so next wave it re-summons the shortfall.
+    // A 1-attack dummy kills the front summoned pup (health 1) each wave; the
+    // piper itself (health 2) survives, so it re-summons the shortfall.
     const { events } = simulate(
       lineup({ defId: 'rat-piper' }),
       gauntletOf([dummy(1, 1)], [dummy(1, 1)], [dummy(1, 1)])
     );
     const summons = ofType(events, 'summon');
-    expect(summons.length).toBeGreaterThan(1); // refills across waves as pups die
+    expect(summons.length).toBeGreaterThan(2); // wave-1 fill (2) plus refills as pups die
     expect(summons.every((s) => s.unit.defId === 'pup')).toBe(true);
   });
 
-  it('Rat-Piper maintains count*tier pups (a ★2 keeps two)', () => {
+  it('Rat-Piper maintains count*tier pups (2/4/6 by tier)', () => {
     const { events } = simulate(
       lineup({ defId: 'rat-piper', tier: 2 }),
       gauntletOf([dummy(0, 1)])
     );
     const summons = ofType(events, 'summon');
-    expect(summons.length).toBe(2); // target 1*2 = 2 pups on the opening wave
+    expect(summons.length).toBe(4); // target 2*2 = 4 pups on the opening wave
   });
 });
 
@@ -829,8 +830,10 @@ describe('combat cap headroom for summons', () => {
   });
 
   it('combatCap gives the pups somewhere to land', () => {
+    // Board 8, cap 10 → 2 slots of headroom, and Rat-Piper's ★1 target is 2
+    // pups (count 2 * tier 1), so both land.
     const { events } = simulate({ units: fullBoard(), combatCap: 10 }, gauntletOf([dummy(0, 100)]));
-    expect(ofType(events, 'summon')).toHaveLength(1);
+    expect(ofType(events, 'summon')).toHaveLength(2);
   });
 });
 
