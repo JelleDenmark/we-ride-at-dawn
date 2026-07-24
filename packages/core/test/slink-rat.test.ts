@@ -45,15 +45,27 @@ describe('Slink-Rat (issue #86)', () => {
     expect(damages.every((d) => d.amount === 3)).toBe(true);
   });
 
-  it('scales with tier', () => {
+  it('merge scaling grows target count, not per-hit damage (issue #86 follow-up)', () => {
+    // ★2 hits the first 2 enemies (backlineTargetsForTier), each for the
+    // unit's flat base attack (3) — not one enemy for a tier-multiplied 9.
     const t2 = simulate(
       lineup({ defId: 'dire-rat' }, { defId: 'slink-rat', tier: 2 }),
-      gauntletOf([dummy(0, 1000)])
+      gauntletOf([dummy(0, 1000), dummy(0, 1000)])
     );
-    const foeId = ofType(t2.events, 'waveStart')[0].enemies[0].instanceId;
-    const firstHit = ofType(t2.events, 'damage').filter((d) => d.targetId === foeId)[0];
-    // tierAttackMultiplier(2) = 3x -> attack 3 * 3 = 9.
-    expect(firstHit.amount).toBe(9);
+    const enemies = ofType(t2.events, 'waveStart')[0].enemies;
+    const hitOn = (foeId: number) => ofType(t2.events, 'damage').find((d) => d.targetId === foeId);
+    expect(hitOn(enemies[0].instanceId)?.amount).toBe(3);
+    expect(hitOn(enemies[1].instanceId)?.amount).toBe(3);
+  });
+
+  it('★1 only ever hits the frontmost enemy, even against a multi-enemy wave', () => {
+    const { events } = simulate(
+      lineup({ defId: 'dire-rat' }, { defId: 'slink-rat' }),
+      gauntletOf([dummy(0, 1000), dummy(0, 1000)])
+    );
+    const enemies = ofType(events, 'waveStart')[0].enemies;
+    const preTickDamages = ofType(events, 'damage').slice(0, 1);
+    expect(preTickDamages).toEqual([expect.objectContaining({ targetId: enemies[0].instanceId, amount: 3 })]);
   });
 
   it('multiple Slink-Rats stack additively, bounded by board size', () => {

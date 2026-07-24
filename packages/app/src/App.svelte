@@ -62,6 +62,7 @@
     reviveHpForTier,
     poisonStacksForTier,
     cellarCoilChargeCapForTier,
+    backlineTargetsForTier,
     wardArmorForTier,
     simulateBossTrial,
     simulateBossTrialReplay,
@@ -585,6 +586,7 @@
     const isEnemy = side === 'enemy';
     const own = isEnemy ? 'enemy' : 'rat';
     const foe = isEnemy ? 'rat' : 'enemy';
+    const foes = isEnemy ? 'rats' : 'enemies';
     const team = isEnemy ? 'enemy line' : 'horde';
     // Passive armor is not an `ability`, but it's absolutely something the
     // player must be told about — Dire-Rat's whole identity lives here.
@@ -622,7 +624,13 @@
       return `When it faints, splits its current attack and max health evenly across the surviving horde (any remainder goes to the frontmost survivors first). All your Pack-Callers draw from one shared pool for this, spent across the ride.`;
     }
     if (e.kind === 'backlineDamage') {
-      return `At the start of every wave, if not at the front, strikes the frontmost enemy directly for its own attack — a separate hit, landed before that wave's clashing even begins, with no retaliation. At the front, it just fights normally.`;
+      // Merge scaling grows target count, not per-hit damage (issue #86
+      // follow-up) — see `backlineTargetsForTier`'s doc comment in
+      // data/units.ts for why the exponential attack curve is deliberately
+      // left out here.
+      const base = def?.attack ?? 0;
+      const targets = (t: number) => backlineTargetsForTier(t);
+      return `At the start of every wave, if not at the front, strikes the first ${foe} for ${base} (★2 hits the first ${targets(2)} ${foes} for ${base} each · ★3 hits the first ${targets(3)} ${foes} for ${base} each) — separate hits, landed before that wave's clashing even begins, with no retaliation. At the front, it just fights normally.`;
     }
     let what = '';
     switch (e.kind) {

@@ -143,6 +143,27 @@ export function cellarCoilChargeCapForTier(tier: number): number {
   return table[tier - 1] ?? table[table.length - 1];
 }
 
+/**
+ * Number of enemies (from the front) Slink-Rat's `backlineDamage` hits per
+ * Wave, by tier (issue #86 merge-scaling follow-up). Deliberately linear
+ * (1/2/3), same shape and same reasoning as `blockHitsForTier`: this magnitude
+ * resets every Wave, so it isn't subject to `tierAttackMultiplier`'s
+ * compounding curve.
+ *
+ * Per-hit damage is deliberately NOT also run through `tierAttackMultiplier`
+ * — see the `backlineDamage` case in sim.ts's `applyEffect` for how the
+ * per-hit amount is computed. Stacking the exponential 1x/3x/9x attack curve
+ * on top of a growing target count would let a single ★3 Slink-Rat output
+ * ~9x today's damage AND spread it across 3 enemies — effectively turning a
+ * "backline sniper" into wave-clearing AOE, which most Gauntlet waves (often
+ * 1-2 enemies) can't survive regardless of front-line investment. Target
+ * count is the sole tier axis instead: reach, not raw magnitude.
+ */
+export function backlineTargetsForTier(tier: number): number {
+  const table = [1, 2, 3];
+  return table[tier - 1] ?? table[table.length - 1];
+}
+
 export type Effect =
   | { kind: 'summon'; unitId: string; count: number }
   /**
@@ -1066,9 +1087,11 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     id: 'slink-rat', name: 'Slink-Rat', attack: 3, health: 1, cost: 6,
     // startOfWave, via `backlineDamage` (see that Effect's doc comment for
     // the full compounding-law note and the four resolved interaction
-    // decisions against Marrow-Snap/Ward-Weaver/Gore-Cleaver). Fixed
-    // per-wave damage equal to this unit's own (tier-scaled) attack — no
-    // accumulation; multiple Slink-Rats stack additively, bounded by board size.
+    // decisions against Marrow-Snap/Ward-Weaver/Gore-Cleaver). Merge scaling
+    // (issue #86 follow-up) grows the number of enemies hit — 1/2/3 by tier,
+    // see `backlineTargetsForTier` — not the per-hit damage, which stays this
+    // unit's flat base attack (3) regardless of tier. No accumulation across
+    // waves; multiple Slink-Rats stack additively, bounded by board/wave size.
     ability: { trigger: 'startOfWave', effect: { kind: 'backlineDamage' } },
   },
   // Issue #110: single-unit fusion of the Dawn-Runt/Dusk-Runt pair above —

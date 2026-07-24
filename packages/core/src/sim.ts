@@ -1,5 +1,5 @@
 import type { Side, UnitDef, Ability, Lineup } from './data/units';
-import { UNIT_DEFS, tierAttackMultiplier, tierHealthMultiplier, reviveHpForTier, blockHitsForTier, poisonStacksForTier, cellarCoilChargeCapForTier, wardArmorForTier } from './data/units';
+import { UNIT_DEFS, tierAttackMultiplier, tierHealthMultiplier, reviveHpForTier, blockHitsForTier, poisonStacksForTier, cellarCoilChargeCapForTier, backlineTargetsForTier, wardArmorForTier } from './data/units';
 import { ENEMY_POOL } from './data/enemies';
 import { RELIC_DEFS, type RelicDef } from './data/relics';
 import type { Gauntlet } from './gauntlet';
@@ -147,6 +147,20 @@ interface BattleUnit {
    */
   chargeStacks: number;
   /**
+   * Running total of every runtime attack buff this instance has ever
+   * received via `buff()` (Warren-Warden's `buffBehind`, Twilight-Runt's
+   * `teamBuffByWave`, Gnawer's `bequeathAttack`, etc.) — everything added to
+   * `attack` AFTER `instantiate` sets its tier-scaled base. `backlineDamage`
+   * needs this to build a flat, tier-multiplier-free per-hit magnitude
+   * (`def.attack` + relics + team relic attack) that still honors these
+   * runtime buffs the same way `source.attack` already does for every other
+   * attack-based effect — without it, a buffed Slink-Rat would silently deal
+   * less backline damage than an identical unit hitting through the normal
+   * clash. Never itself run through `tierAttackMultiplier` — `buff()` already
+   * tier-scales its callers' inputs before adding here.
+   */
+  attackBuffs: number;
+  /**
    * Twilight-Runt's `teamBuffByWave` (2026-07-16 rework of issue #110).
    * Tracks how far this instance has progressed through its two fire-once
    * team grants — 'none' (neither fired yet), 'early' (only the early-wave
@@ -249,6 +263,7 @@ export function simulate(
       raised: false,
       chargeStacks: 0,
       waveBuffPhase: 'none',
+      attackBuffs: 0,
     };
   };
 
@@ -313,6 +328,7 @@ export function simulate(
 
   const buff = (target: BattleUnit, attack: number, health: number): void => {
     target.attack += attack;
+    target.attackBuffs += attack;
     target.health += health;
     target.maxHealth += health;
     events.push({
@@ -816,47 +832,67 @@ export function simulate(
       case 'backlineDamage': {
         // Backline damage path (issue #85; the "Slink-Rat option B"
         // primitive from docs/design/future-minions.md). A non-front unit
-        // adds its own current attack directly to the frontmost enemy,
-        // taking no retaliation — it never becomes `foe`/`front` in the
-        // tick loop below, so there is nothing to hit it back. `index` here
-        // is the source's live board position (this effect is only ever
-        // wired to `startOfWave`, never `faint`, so `removed` is never
-        // true, matching `buffAdjacent`'s reasoning above) — index 0 is
-        // "currently at the front," which already deals damage through the
-        // normal clash every tick, so it's excluded here to keep this
-        // strictly a *backline* contribution, not a double-dip for a unit
-        // that happens to rotate to the front.
+        // hits the front of the enemy line directly, taking no retaliation
+        // — it never becomes `foe`/`front` in the tick loop below, so there
+        // is nothing to hit it back. `index` here is the source's live board
+        // position (this effect is only ever wired to `startOfWave`, never
+        // `faint`, so `removed` is never true, matching `buffAdjacent`'s
+        // reasoning above) — index 0 is "currently at the front," which
+        // already deals damage through the normal clash every tick, so it's
+        // excluded here to keep this strictly a *backline* contribution, not
+        // a double-dip for a unit that happens to rotate to the front.
         if (index === 0) break;
-        const target = opposing(source.side)[0];
-        if (!target || target.health <= 0) break;
-        // Deliberately a direct `applyDamage` call, not routed through the
-        // tick loop's clash machinery below — this is what keeps the three
-        // interaction questions answered by construction rather than by a
-        // special-cased guard:
-        //  - Marrow-Snap's execute (relics.ts's `executeThreshold`) only
-        //    checks `foeHealthBeforeClash` captured immediately around the
-        //    tick loop's own clash hit, further down this file. This call
-        //    happens at `startOfWave`, entirely before that tick loop even
-        //    starts for the wave, so it can never be mistaken for "the
-        //    crossing blow" — a swarm of backline snipers cannot cheapen
-        //    Marrow-Snap's execute condition.
-        //  - Ward-Weaver's `blockCharges` pool only guards the tick loop's
-        //    two `applyDamage` calls against `front`/`foe`. This hits the
-        //    enemy side directly and never touches `blockCharges` at all,
-        //    so block charges are neither consumed nor checked here — they
-        //    protect the horde's own front from incoming hits, and this
-        //    effect only ever deals outgoing damage to the enemy.
-        //  - Gore-Cleaver's cleave-overkill spillover is computed only
-        //    right after the tick loop's own front-vs-front clash, reading
-        //    `front.relics` and the foe's post-clash health from that same
-        //    hit. This call never runs inside that block, so it can never
-        //    feed a stacked Gore-Cleaver's overkill carry.
-        // Ordering vs poison: this fires at `startOfWave`, before the first
-        // clash tick and before any poison ticks that wave (poison only
-        // ticks inside the tick loop, after the clash) — so backline damage
-        // always lands first, same relative order as Plague-Bearer's
-        // `poisonFrontEnemy` already establishes for its own startOfWave hit.
-        applyDamage(target, source.attack, 'attack');
+        // Merge scaling (issue #86 follow-up): tier grows how many enemies
+        // get hit (backlineTargetsForTier: 1/2/3), NOT how hard each hit
+        // lands. Per-hit damage is the unit's own def base attack plus its
+        // relics, the team-attack pool (horde units), and any runtime attack
+        // buffs it's received (`attackBuffs` — Warren-Warden's `buffBehind`,
+        // Twilight-Runt's `teamBuffByWave`, etc.), but with
+        // `tierAttackMultiplier` deliberately left out — see
+        // `backlineTargetsForTier`'s doc comment for why stacking the
+        // exponential 1x/3x/9x attack curve on top of a growing target count
+        // was rejected as an AOE-nuke risk. `attackBuffs` mirrors
+        // `source.attack` for every OTHER attack-based effect in this file —
+        // omitting it would make a buffed Slink-Rat silently under-hit.
+        const def = UNIT_DEFS[source.defId];
+        const perHitAttack =
+          (def?.attack ?? 0) +
+          source.relics.reduce((s, r) => s + (r.attack ?? 0), 0) +
+          (source.side === 'horde' ? teamAttack : 0) +
+          source.attackBuffs;
+        if (perHitAttack <= 0) break;
+        const targets = opposing(source.side).slice(0, backlineTargetsForTier(source.tier));
+        for (const target of targets) {
+          if (!target || target.health <= 0) continue;
+          // Deliberately a direct `applyDamage` call, not routed through the
+          // tick loop's clash machinery below — this is what keeps the three
+          // interaction questions answered by construction rather than by a
+          // special-cased guard:
+          //  - Marrow-Snap's execute (relics.ts's `executeThreshold`) only
+          //    checks `foeHealthBeforeClash` captured immediately around the
+          //    tick loop's own clash hit, further down this file. This call
+          //    happens at `startOfWave`, entirely before that tick loop even
+          //    starts for the wave, so it can never be mistaken for "the
+          //    crossing blow" — a swarm of backline snipers cannot cheapen
+          //    Marrow-Snap's execute condition.
+          //  - Ward-Weaver's `blockCharges` pool only guards the tick loop's
+          //    two `applyDamage` calls against `front`/`foe`. This hits the
+          //    enemy side directly and never touches `blockCharges` at all,
+          //    so block charges are neither consumed nor checked here — they
+          //    protect the horde's own front from incoming hits, and this
+          //    effect only ever deals outgoing damage to the enemy.
+          //  - Gore-Cleaver's cleave-overkill spillover is computed only
+          //    right after the tick loop's own front-vs-front clash, reading
+          //    `front.relics` and the foe's post-clash health from that same
+          //    hit. This call never runs inside that block, so it can never
+          //    feed a stacked Gore-Cleaver's overkill carry.
+          // Ordering vs poison: this fires at `startOfWave`, before the first
+          // clash tick and before any poison ticks that wave (poison only
+          // ticks inside the tick loop, after the clash) — so backline damage
+          // always lands first, same relative order as Plague-Bearer's
+          // `poisonFrontEnemy` already establishes for its own startOfWave hit.
+          applyDamage(target, perHitAttack, 'attack');
+        }
         break;
       }
     }

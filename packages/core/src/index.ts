@@ -10,6 +10,7 @@ export {
   wardArmorForTier,
   poisonStacksForTier,
   cellarCoilChargeCapForTier,
+  backlineTargetsForTier,
   type UnitDef,
   type Ability,
   type Effect,
