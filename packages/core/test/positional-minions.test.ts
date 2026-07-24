@@ -70,126 +70,101 @@ describe('Press-Kin (buffAdjacent)', () => {
   });
 });
 
-describe('Ward-Weaver (blockFrontHits, issue #56)', () => {
-  // dire-rat: attack 4, health 5, armor 2. Enemy attack 1 -> blunted to the
-  // MIN_ATTACK_DAMAGE floor of 1 per hit (1 - 2 armor clamps up to 1), so
-  // dire-rat survives long enough (1000hp enemy behind it) to observe many
-  // ticks without either side dying mid-wave.
+describe('Ward-Weaver (grantArmor rework, 2026-07-24)', () => {
+  // Was a `startOfWave` `blockFrontHits` full-negate pool; reworked to a
+  // `startOfBattle` `grantArmor` that hardens the whole warren with flat armor
+  // (`wardArmorForTier`, 2/4/6) for the ride. `damage` events record the
+  // POST-armor amount (`applyDamage` in sim.ts), so we read the reduced hit
+  // directly. dire-rat: attack 4, health 5, own armor 2 (×tier).
+  const firstDamageTo = (events: BattleEvent[], id: number) =>
+    ofType(events, 'damage').find((d) => d.targetId === id)!;
+  const frontIdOf = (events: BattleEvent[]) =>
+    events.find((e): e is Extract<BattleEvent, { type: 'battleStart' }> => e.type === 'battleStart')!.horde[0].instanceId;
 
-  it('t1 blocks exactly the first 1 hit of the wave, no more', () => {
+  it('grants tier-scaled armor (2/4/6) to the front, on top of its own armor', () => {
+    // dire-rat's own armor is 2. A t-N ward adds wardArmorForTier(N), so a
+    // 9-attack dummy lands for max(1, 9 - (2 + ward)) = 5 / 3 / 1 by tier.
+    for (const [tier, expected] of [[1, 5], [2, 3], [3, 1]] as const) {
+      const { events } = simulate(
+        lineup({ defId: 'dire-rat' }, { defId: 'ward-weaver', tier }),
+        gauntletOf([dummy(9, 1000)])
+      );
+      expect(firstDamageTo(events, frontIdOf(events)).amount).toBe(expected);
+    }
+  });
+
+  it('a warded unit still takes ≥1 per hit however much armor — never immortal (the Boss Trial fix)', () => {
+    // Two t3 wards stack additively to +12 armor, dire-rat's own 2 makes 14.
+    // A 5-attack dummy would go negative (5 - 14), but the MIN_ATTACK_DAMAGE
+    // floor keeps it at 1 — which is exactly why flat armor terminates the
+    // exponentially-escalating Boss Trial where full hit-negation did not.
+    const { events } = simulate(
+      lineup({ defId: 'dire-rat' }, { defId: 'ward-weaver', tier: 3 }, { defId: 'ward-weaver', tier: 3 }),
+      gauntletOf([dummy(5, 1000)])
+    );
+    expect(firstDamageTo(events, frontIdOf(events)).amount).toBe(1);
+  });
+
+  it('wards the whole warren (all), not just the front — including itself', () => {
+    const { events } = simulate(
+      lineup({ defId: 'gutter-runt' }, { defId: 'dire-rat' }, { defId: 'ward-weaver', tier: 1 }),
+      gauntletOf([dummy(0, 1000)])
+    );
+    const battleStart = events.find((e): e is Extract<BattleEvent, { type: 'battleStart' }> => e.type === 'battleStart')!;
+    const allIds = battleStart.horde.map((u) => u.instanceId);
+    const grantedTo = ofType(events, 'shieldGranted').map((e) => e.targetId);
+    // Every ally — front, back, and the Ward-Weaver's own instance — is warded.
+    expect(new Set(grantedTo)).toEqual(new Set(allIds));
+  });
+
+  it('is a one-time startOfBattle grant — it does not re-apply or re-stack each wave', () => {
+    // Two waves (attack-0 dummies, so nobody dies; dire-rat clears each 5hp
+    // dummy in 2 ticks). The ward fires once at battle start for the 2 allies
+    // = 2 grants total, NOT 2 per wave. If it re-fired per wave we'd see 4.
     const { events } = simulate(
       lineup({ defId: 'dire-rat' }, { defId: 'ward-weaver', tier: 1 }),
-      gauntletOf([dummy(1, 1000)])
+      gauntletOf([dummy(0, 5)], [dummy(0, 5)])
     );
-    const absorbed = ofType(events, 'shieldAbsorbed');
-    const battleStart = events.find((e): e is Extract<BattleEvent, { type: 'battleStart' }> => e.type === 'battleStart')!;
-    const frontId = battleStart.horde[0].instanceId;
-    const absorbedForFront = absorbed.filter((e) => e.targetId === frontId);
-    expect(absorbedForFront.length).toBe(1);
-    // It's the very first hit of the wave that's blocked, not a later one.
-    const firstDamageToFront = ofType(events, 'damage').find((d) => d.targetId === frontId);
-    const firstAbsorbToFront = absorbedForFront[0];
-    expect(events.indexOf(firstAbsorbToFront)).toBeLessThan(events.indexOf(firstDamageToFront!));
+    const granted = ofType(events, 'shieldGranted');
+    // Two allies warded once each = 2 grants total. If the grant re-fired per
+    // wave (startOfWave instead of the reworked startOfBattle) we'd see 4.
+    expect(granted.length).toBe(2);
+    // Both grants land during wave 1's entry and never again — none at or
+    // after the second wave starts.
+    const secondWaveStart = events.indexOf(ofType(events, 'waveStart')[1]);
+    expect(granted.every((g) => events.indexOf(g) < secondWaveStart)).toBe(true);
   });
+});
 
-  it('t2 blocks exactly the first 2 hits of the wave, no more', () => {
-    const { events } = simulate(
-      lineup({ defId: 'dire-rat' }, { defId: 'ward-weaver', tier: 2 }),
-      gauntletOf([dummy(1, 1000)])
-    );
-    const battleStart = events.find((e): e is Extract<BattleEvent, { type: 'battleStart' }> => e.type === 'battleStart')!;
-    const frontId = battleStart.horde[0].instanceId;
-    const absorbedForFront = ofType(events, 'shieldAbsorbed').filter((e) => e.targetId === frontId);
-    expect(absorbedForFront.length).toBe(2);
-  });
+describe('blockFrontHits mechanic (issue #56 — enemy-only since the Ward-Weaver armor rework)', () => {
+  // The engine primitive still exists and is used by an enemy (see enemies.ts);
+  // no HORDE unit carries it any more, so it's exercised here on the enemy
+  // side. A gauntlet-side blocker (attack 0 so nobody on the horde dies)
+  // absorbs the dire-rat's first swing each wave, and the pool refills every
+  // wave when the enemy re-instantiates.
+  const blocker: UnitDef = {
+    id: 'blocker', name: 'Blocker', attack: 0, health: 12, cost: 0,
+    ability: { trigger: 'startOfWave', effect: { kind: 'blockFrontHits' } },
+  };
 
-  it('t3 blocks exactly the first 3 hits of the wave, no more', () => {
+  it('blocks the tier-1 first hit each wave and the pool resets per wave', () => {
+    // dire-rat (attack 4) vs a 12hp blocker: swing 1 is absorbed, swings 2-4
+    // (12 dmg) kill it — so exactly one absorb per wave, twice over two waves.
     const { events } = simulate(
-      lineup({ defId: 'dire-rat' }, { defId: 'ward-weaver', tier: 3 }),
-      gauntletOf([dummy(1, 1000)])
-    );
-    const battleStart = events.find((e): e is Extract<BattleEvent, { type: 'battleStart' }> => e.type === 'battleStart')!;
-    const frontId = battleStart.horde[0].instanceId;
-    const absorbedForFront = ofType(events, 'shieldAbsorbed').filter((e) => e.targetId === frontId);
-    expect(absorbedForFront.length).toBe(3);
-  });
-
-  it('charges reset every wave — they do not carry over or accumulate', () => {
-    // 3 separate waves, each with a fresh 5hp enemy: dire-rat's attack (4)
-    // kills it in exactly 2 ticks, so each wave clears cleanly after
-    // exactly 2 ticks — enough for a t2 Ward-Weaver's 2 charges to be fully
-    // spent (and no more) every single wave, with a fresh enemy re-arming
-    // the test for the next wave. If charges carried over or accumulated,
-    // some wave would show a count other than exactly 2.
-    const { events } = simulate(
-      lineup({ defId: 'dire-rat' }, { defId: 'ward-weaver', tier: 2 }),
-      gauntletOf([dummy(1, 5)], [dummy(1, 5)], [dummy(1, 5)])
+      lineup({ defId: 'dire-rat' }),
+      gauntletOf([blocker], [blocker])
     );
     const waveStarts = ofType(events, 'waveStart');
-    expect(waveStarts.length).toBe(3);
-    for (let w = 0; w < 3; w++) {
+    expect(waveStarts.length).toBe(2);
+    for (let w = 0; w < 2; w++) {
       const start = events.indexOf(waveStarts[w]);
-      const end = w + 1 < 3 ? events.indexOf(waveStarts[w + 1]) : events.length;
+      const end = w + 1 < 2 ? events.indexOf(waveStarts[w + 1]) : events.length;
       const absorbedThisWave = ofType(events, 'shieldAbsorbed').filter((e) => {
         const idx = events.indexOf(e);
         return idx >= start && idx < end;
       });
-      expect(absorbedThisWave.length).toBe(2);
+      expect(absorbedThisWave.length).toBe(1);
     }
-  });
-
-  it('does NOT stack additively: two t3 Ward-Weavers together still only block 3 hits, not 6', () => {
-    const { events } = simulate(
-      lineup({ defId: 'dire-rat' }, { defId: 'ward-weaver', tier: 3 }, { defId: 'ward-weaver', tier: 3 }),
-      gauntletOf([dummy(1, 1000)])
-    );
-    const battleStart = events.find((e): e is Extract<BattleEvent, { type: 'battleStart' }> => e.type === 'battleStart')!;
-    const frontId = battleStart.horde[0].instanceId;
-    const absorbedForFront = ofType(events, 'shieldAbsorbed').filter((e) => e.targetId === frontId);
-    expect(absorbedForFront.length).toBe(3);
-  });
-
-  it('mixed tiers use MAX, not sum: one t1 + one t3 Ward-Weaver together still only block 3 hits', () => {
-    const { events } = simulate(
-      lineup({ defId: 'dire-rat' }, { defId: 'ward-weaver', tier: 1 }, { defId: 'ward-weaver', tier: 3 }),
-      gauntletOf([dummy(1, 1000)])
-    );
-    const battleStart = events.find((e): e is Extract<BattleEvent, { type: 'battleStart' }> => e.type === 'battleStart')!;
-    const frontId = battleStart.horde[0].instanceId;
-    const absorbedForFront = ofType(events, 'shieldAbsorbed').filter((e) => e.targetId === frontId);
-    expect(absorbedForFront.length).toBe(3);
-  });
-
-  it('protects whichever unit is currently front, not the Ward-Weaver itself', () => {
-    // Ward-Weaver sits behind the front-line gutter-runt. The block must
-    // land on gutter-runt (index 0), never on the Ward-Weaver's own
-    // instance — it watches the front, it doesn't shield itself.
-    const { events } = simulate(
-      lineup({ defId: 'gutter-runt' }, { defId: 'ward-weaver', tier: 2 }),
-      gauntletOf([dummy(3, 1000)])
-    );
-    const battleStart = events.find((e): e is Extract<BattleEvent, { type: 'battleStart' }> => e.type === 'battleStart')!;
-    const gutterRuntId = battleStart.horde[0].instanceId;
-    const wardWeaverId = battleStart.horde[1].instanceId;
-    const absorbed = ofType(events, 'shieldAbsorbed');
-    expect(absorbed.length).toBe(2);
-    expect(absorbed.every((e) => e.targetId === gutterRuntId)).toBe(true);
-    expect(absorbed.some((e) => e.targetId === wardWeaverId)).toBe(false);
-  });
-
-  it('a fully-blocked hit resolves before Tail-Charm — it does not consume the charm', () => {
-    // bone-priest: attack 1, health 4. Enemy attack 1 (unblocked) would chip
-    // it 4 -> 3 -> 2 -> 1 -> dead across 4 ticks, but t1 Ward-Weaver blocks
-    // the wave's first hit outright, so bone-priest only takes 3 real hits
-    // this wave and survives at 1 health, never touching Tail-Charm.
-    const { events } = simulate(
-      lineup({ defId: 'bone-priest', relicIds: ['tail-charm'] }, { defId: 'ward-weaver', tier: 1 }),
-      gauntletOf([dummy(1, 4)])
-    );
-    const absorbed = ofType(events, 'shieldAbsorbed');
-    expect(absorbed.length).toBeGreaterThanOrEqual(1);
-    const tailCharmProcs = ofType(events, 'relicProc').filter((e) => e.relicId === 'tail-charm');
-    expect(tailCharmProcs.length).toBe(0);
   });
 });
 

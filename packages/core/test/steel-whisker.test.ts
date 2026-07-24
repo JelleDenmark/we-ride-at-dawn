@@ -64,11 +64,12 @@ describe('Steel-Whisker (issue #134: onHurt thorns)', () => {
     expect(onFoe.map((d) => d.amount)).toEqual([6, 4]);
   });
 
-  it("a Ward-Weaver-blocked hit draws no blood — absorbed blows don't reflect", () => {
-    // Wave 1, tick 1: the whisker's incoming hit is absorbed (1 block
-    // charge), so NO reflect fires — the foe takes only the 4-damage clash.
-    // Tick 2: the pool is spent, the blow lands, and the 2-damage reflect
-    // appears.
+  it("Ward-Weaver's armor softens the incoming hit but a landed blow still reflects", () => {
+    // Post-rework Ward-Weaver grants flat armor (+2 at t1), NOT a block. The
+    // whisker's own armor 1 + the ward's 2 = 3 blunts the dummy's 3-attack hit
+    // to the MIN floor of 1 — but it still LANDS, so onHurt fires and the
+    // 2-damage reflect appears from the very first tick. Armor is not a block:
+    // there's no `shieldAbsorbed`, and no "absorbed blows don't reflect" gap.
     const { events } = simulate(
       lineup(
         { defId: 'steel-whisker', relicIds: ['rusted-nail'] },
@@ -76,19 +77,16 @@ describe('Steel-Whisker (issue #134: onHurt thorns)', () => {
       ),
       gauntletOf([dummy(3, 100)])
     );
-    expect(ofType(events, 'shieldAbsorbed').length).toBe(1);
+    expect(ofType(events, 'shieldAbsorbed').length).toBe(0);
     const clashes = ofType(events, 'clash');
-    expect(clashes.length).toBeGreaterThanOrEqual(2);
+    expect(clashes.length).toBeGreaterThanOrEqual(1);
     const foeId = frontFoeId(events);
-    // Slice the event stream tick by tick: between clash 1 and clash 2 the
-    // foe must see exactly one damage event (the clash hit, no reflect).
+    // Tick 1: the reduced hit still landed on the whisker, so the reflect (2)
+    // shows up on the foe right away — not deferred to a later, unblocked tick.
     const i1 = events.indexOf(clashes[0]);
-    const i2 = events.indexOf(clashes[1]);
+    const i2 = clashes.length > 1 ? events.indexOf(clashes[1]) : events.length;
     const tick1OnFoe = ofType(events.slice(i1, i2), 'damage').filter((d) => d.targetId === foeId);
-    expect(tick1OnFoe.map((d) => d.amount)).toEqual([4]);
-    // From tick 2 on, the reflect's 2s show up.
-    const laterOnFoe = ofType(events.slice(i2), 'damage').filter((d) => d.targetId === foeId);
-    expect(laterOnFoe.some((d) => d.amount === 2)).toBe(true);
+    expect(tick1OnFoe.some((d) => d.amount === 2)).toBe(true);
   });
 
   it('poison ticks are rot, not blows — they never trigger the reflect', () => {

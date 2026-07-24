@@ -58,6 +58,36 @@ export function blockHitsForTier(tier: number): number {
 }
 
 /**
+ * Flat armor Ward-Weaver's `grantArmor` bestows on each warded ally, by tier
+ * (Ward-Weaver rework, 2026-07-24). The replacement lever for the old
+ * `blockFrontHits` full-negate pool: instead of cancelling N whole hits per
+ * wave, the ward now hardens the whole warren with flat `damageReduction` for
+ * the battle. Same small-explicit-table shape as `blockHitsForTier` above.
+ *
+ * Deliberately LINEAR (2/4/6), never `tierAttackMultiplier`'s 3^(tier-1)
+ * curve, for two reasons stacked:
+ *   1. Same as `blockHitsForTier` — a steep curve on a defensive magnitude
+ *      lets a ★3 no-sell whole early waves.
+ *   2. More importantly, this is the fix for the Boss Trial exploit: flat
+ *      armor is subtracted per hit with a `MIN_ATTACK_DAMAGE` floor (see
+ *      `applyDamage` in sim.ts), so a warded unit ALWAYS takes ≥1 per hit and
+ *      the exponentially-escalating trial boss eventually pierces — unlike the
+ *      old full-negate block, which let a high-DPS board ride untouched to the
+ *      60-phase hard cap (all three season `2026-07-20` ceiling boards ran a
+ *      ★3 Ward-Weaver; the best board without one stalled at 13).
+ *
+ * PLACEHOLDER magnitudes [2, 4, 6] — subject to the balance pass, same as
+ * every new number in this file. The whole-warren reach makes this pricier
+ * than a single-unit armor stat, so expect the pass to land it lower, not
+ * higher; tune HERE (one source of truth), and keep `abilitySentence`'s
+ * Ward-Weaver copy in App.svelte in step since it reads these same values.
+ */
+export function wardArmorForTier(tier: number): number {
+  const table = [2, 4, 6];
+  return table[tier - 1] ?? table[table.length - 1];
+}
+
+/**
  * Poison stacks applied by Plague-Bearer's `poisonLastEnemy` (`startOfWave`,
  * reworked from `poisonFrontEnemy` in issue #112) and Blight-Witch's
  * `poisonAllEnemies` (`startOfWave`), by tier (issue #62,
@@ -110,6 +140,27 @@ export function poisonStacksForTier(tier: number): number {
  */
 export function cellarCoilChargeCapForTier(tier: number): number {
   const table = [6, 12, 18];
+  return table[tier - 1] ?? table[table.length - 1];
+}
+
+/**
+ * Number of enemies (from the front) Slink-Rat's `backlineDamage` hits per
+ * Wave, by tier (issue #86 merge-scaling follow-up). Deliberately linear
+ * (1/2/3), same shape and same reasoning as `blockHitsForTier`: this magnitude
+ * resets every Wave, so it isn't subject to `tierAttackMultiplier`'s
+ * compounding curve.
+ *
+ * Per-hit damage is deliberately NOT also run through `tierAttackMultiplier`
+ * — see the `backlineDamage` case in sim.ts's `applyEffect` for how the
+ * per-hit amount is computed. Stacking the exponential 1x/3x/9x attack curve
+ * on top of a growing target count would let a single ★3 Slink-Rat output
+ * ~9x today's damage AND spread it across 3 enemies — effectively turning a
+ * "backline sniper" into wave-clearing AOE, which most Gauntlet waves (often
+ * 1-2 enemies) can't survive regardless of front-line investment. Target
+ * count is the sole tier axis instead: reach, not raw magnitude.
+ */
+export function backlineTargetsForTier(tier: number): number {
+  const table = [1, 2, 3];
   return table[tier - 1] ?? table[table.length - 1];
 }
 
@@ -490,6 +541,20 @@ export type Effect =
    */
   | { kind: 'blockFrontHits' }
   /**
+   * Ward-Weaver rework (2026-07-24). Replaces `blockFrontHits`: instead of a
+   * per-wave pool that fully negates the next N incoming hits to the front,
+   * this grants flat armor (`damageReduction`) sized by `wardArmorForTier` to
+   * every ally present at battle start (`all`), or just the caster otherwise.
+   * ALWAYS wired to `startOfBattle`, so — exactly like `buffBehind`/`teamBuff`
+   * — it fires once per instance ever and cannot re-stack across the 45 waves.
+   * Carries no magnitude of its own (the tier table is the sole lever, mirror
+   * of how `blockFrontHits` reads `blockHitsForTier`). See `wardArmorForTier`'s
+   * doc comment for why flat armor — not hit-negation — is what closes the
+   * Boss Trial full-negate exploit. Units summoned/revived mid-battle are not
+   * retroactively warded, same as every other `startOfBattle` grant.
+   */
+  | { kind: 'grantArmor'; all?: boolean }
+  /**
    * Backline damage path (issue #85; "Slink-Rat option B" in
    * `docs/design/future-minions.md`). The reusable primitive behind future
    * backline snipers: a non-front unit adds its own current `attack`
@@ -840,6 +905,17 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     // exploit-stress (weak 1/1 bodies, hard-capped by combatCap).
     ability: { trigger: 'startOfWave', effect: { kind: 'maintainSummons', unitId: 'pup', count: 2 } },
     tribe: 'swarm',
+    // Season rotation (Jesper, 2026-07-24): retired outright to make roster
+    // room for the season-4 intake, same mechanism/precedent as Gutter-Runt
+    // above — out of the shop pool from day 1 on, carried-in copies still
+    // sell at par (`sellRefund`). NOTE the #105 `maintainSummons` rework only
+    // landed 2026-07-21; the cap-raise it justified (COMBAT_CAP_BONUS=6) is
+    // now carried by Brood-Mother alone, which is fine (see
+    // [[wrad-summon-cap-rework]]). CAVEAT: Squeak-Sensei (#133) was
+    // sign-off-probed as "Rat-Piper + Brood-Mother + Sensei"; retiring Piper
+    // leaves Brood-Mother as Sensei's sole summon feeder — Sensei still
+    // works, but re-check its swarm-payoff read before season start.
+    retireDay: 1,
   },
   // Brood-Mother (issue #105 rework): the babushka. On faint she spawns two
   // Brood-Broodlings; each broodling, on ITS faint, spawns two Brood-Runts;
@@ -935,18 +1011,22 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     id: 'press-kin', name: 'Press-Kin', attack: 2, health: 4, cost: 5,
     ability: { trigger: 'startOfBattle', effect: { kind: 'buffAdjacent', attack: 2, health: 2 } },
   },
-  // COST 6 -> 5 -> 6 (2026-07-18, Jesper's call): PR #125's cost rebalance
-  // dropped this to 5. The Twilight-Runt wave-rework balance pass (PR #123)
-  // ran a real-board seat-swap probe (the isolated all-unit-value tier list
-  // doesn't reach deep enough waves to catch this — see that script's doc
-  // comment) and found Ward-Weaver the single best back-seat swap on a
-  // day-7 t2+relics board — +5.9 waves, clear of every alternative
-  // including Twilight-Runt's own +2.5. Bumped back to 6 to bring that
-  // outlier in line; not re-run through the full all-unit-value/
-  // realistic-player suite yet.
+  // ARMOR REWORK (2026-07-24, prototype pending balance pass): was a
+  // `startOfWave` `blockFrontHits` full-negate pool (1/2/3 hits cancelled per
+  // wave). That pool was a two-mode outlier — the single best depth back-seat
+  // swap (+5.9 waves, PR #123 probe) AND the enabler of the Boss Trial exploit
+  // (every season `2026-07-20` board that rode to the 60-phase cap ran a ★3
+  // Ward-Weaver; the best board without one stalled at 13). Full hit-negation
+  // scales infinitely against the trial's exponentially-escalating boss, so it
+  // never dies. Reworked to a `startOfBattle` `grantArmor`: it now hardens the
+  // whole warren with flat armor (`wardArmorForTier`, 2/4/6) for the ride.
+  // Flat armor can't fully negate (MIN_ATTACK_DAMAGE floor), so the trial boss
+  // eventually pierces and the mode terminates — while the ward keeps a
+  // coherent "hardens the line" identity. Cost/stats untouched pending the
+  // pass; the whole-warren reach may want a lower table or a cost bump.
   'ward-weaver': {
     id: 'ward-weaver', name: 'Ward-Weaver', attack: 1, health: 3, cost: 6,
-    ability: { trigger: 'startOfWave', effect: { kind: 'blockFrontHits' } },
+    ability: { trigger: 'startOfBattle', effect: { kind: 'grantArmor', all: true } },
     unlockDay: 2, // day-1 shop kept plain — see Dire-Rat's note.
   },
   // Issue #12: a parallel "Runt" pair (Gutter-Runt precedent) tied to the
@@ -1007,9 +1087,11 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     id: 'slink-rat', name: 'Slink-Rat', attack: 3, health: 1, cost: 6,
     // startOfWave, via `backlineDamage` (see that Effect's doc comment for
     // the full compounding-law note and the four resolved interaction
-    // decisions against Marrow-Snap/Ward-Weaver/Gore-Cleaver). Fixed
-    // per-wave damage equal to this unit's own (tier-scaled) attack — no
-    // accumulation; multiple Slink-Rats stack additively, bounded by board size.
+    // decisions against Marrow-Snap/Ward-Weaver/Gore-Cleaver). Merge scaling
+    // (issue #86 follow-up) grows the number of enemies hit — 1/2/3 by tier,
+    // see `backlineTargetsForTier` — not the per-hit damage, which stays this
+    // unit's flat base attack (3) regardless of tier. No accumulation across
+    // waves; multiple Slink-Rats stack additively, bounded by board/wave size.
     ability: { trigger: 'startOfWave', effect: { kind: 'backlineDamage' } },
   },
   // Issue #110: single-unit fusion of the Dawn-Runt/Dusk-Runt pair above —
