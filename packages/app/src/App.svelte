@@ -62,6 +62,7 @@
     reviveHpForTier,
     poisonStacksForTier,
     cellarCoilChargeCapForTier,
+    wardArmorForTier,
     simulateBossTrial,
     simulateBossTrialReplay,
     bossTrialPhaseAttack,
@@ -599,6 +600,10 @@
     if (e.kind === 'blockFrontHits') {
       return `Each wave, blocks the front ${own}’s first hit outright (★2 blocks 2, ★3 blocks 3) — resets every wave.`;
     }
+    if (e.kind === 'grantArmor') {
+      const who = e.all ? 'every ' + own : 'itself';
+      return `At the dawn of battle, wards ${who} with +${wardArmorForTier(1)} armor (★2 +${wardArmorForTier(2)}, ★3 +${wardArmorForTier(3)}) — every hit they take lands for that much less, all ride long.`;
+    }
     if (e.kind === 'chargeWhileBenched') {
       // Bespoke sentence (not the generic trigger/condition template below):
       // this effect has TWO separate "nothing happens" cases — at the front,
@@ -757,6 +762,8 @@
           return '✚ revive';
         case 'blockFrontHits':
           return '⛨ block';
+        case 'grantArmor':
+          return '⛨ armor';
         case 'backlineDamage':
           return '⚔ snipe';
         case 'buffSummoned':

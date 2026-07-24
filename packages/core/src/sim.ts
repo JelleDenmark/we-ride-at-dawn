@@ -1,5 +1,5 @@
 import type { Side, UnitDef, Ability, Lineup } from './data/units';
-import { UNIT_DEFS, tierAttackMultiplier, tierHealthMultiplier, reviveHpForTier, blockHitsForTier, poisonStacksForTier, cellarCoilChargeCapForTier } from './data/units';
+import { UNIT_DEFS, tierAttackMultiplier, tierHealthMultiplier, reviveHpForTier, blockHitsForTier, poisonStacksForTier, cellarCoilChargeCapForTier, wardArmorForTier } from './data/units';
 import { ENEMY_POOL } from './data/enemies';
 import { RELIC_DEFS, type RelicDef } from './data/relics';
 import type { Gauntlet } from './gauntlet';
@@ -50,7 +50,16 @@ export const MAX_TICKS_PER_WAVE = 1000;
 // exists to fix, just recurring at a higher power level.
 export const ENEMY_HEALTH_SCALE_PER_WAVE = 0.20;
 export const ENEMY_HEALTH_SCALE_QUADRATIC = 0.004;
-export const ENEMY_ATTACK_SCALE_PER_WAVE = 0.05;
+// 0.05 -> 0.08 (2026-07-24, alongside the Ward-Weaver armor rework): a modest
+// general-difficulty raise so the deep gauntlet actually pressures armor/
+// sustain fronts. NOTE this is only a supporting knob — the armor+heal
+// immortality it was first reached for is fixed structurally by the net-damage
+// floor in the tick loop (raising this alone couldn't break that threshold
+// without cratering the whole depth ladder; see the balance-pass notes). The
+// Boss Trial is INVARIANT to this constant — `buildBossTrialGauntlet` divides
+// each boss's attack by `enemyAttackScale` and the sim multiplies it back, so
+// the two cancel; only the depth gauntlet is affected.
+export const ENEMY_ATTACK_SCALE_PER_WAVE = 0.08;
 
 export function enemyHealthScale(waveIndex: number): number {
   return 1 + waveIndex * ENEMY_HEALTH_SCALE_PER_WAVE + waveIndex * waveIndex * ENEMY_HEALTH_SCALE_QUADRATIC;
@@ -436,6 +445,26 @@ export function simulate(
         const start = removed ? index : index + 1;
         const targets = effect.all ? board.slice(start) : board.slice(start, start + 1);
         for (const target of targets) buff(target, effect.attack * tierAttackMultiplier(tier), effect.health * tierHealthMultiplier(tier));
+        break;
+      }
+      case 'grantArmor': {
+        // Ward-Weaver rework (2026-07-24). `startOfBattle`-fired, so like
+        // `buffBehind`/`teamBuff` this is a fire-once-per-instance grant that
+        // cannot re-stack across waves (see the effect's doc comment in
+        // data/units.ts). Adds flat `damageReduction` — subtracted per hit
+        // with a MIN_ATTACK_DAMAGE floor in `applyDamage`, so it can NEVER
+        // fully negate a hit, which is the whole point of replacing the old
+        // `blockFrontHits` full-negate pool. `all` wards the whole warren
+        // (including the caster and units already in front of it), matching
+        // `teamBuff`'s whole-board reach; otherwise just the caster. Reuses
+        // the `shieldGranted` event (no matching `shieldAbsorbed` needed —
+        // that pair only tracked the old per-hit block drain).
+        const amount = wardArmorForTier(tier);
+        const targets = effect.all ? board : board.slice(index, index + 1);
+        for (const target of targets) {
+          target.damageReduction += amount;
+          events.push({ type: 'shieldGranted', targetId: target.instanceId, sourceId: source.instanceId });
+        }
         break;
       }
       case 'bequeathAttack': {
@@ -1025,6 +1054,17 @@ export function simulate(
 
     let ticks = 0;
     while (horde.length > 0 && enemies.length > 0 && ticks++ < MAX_TICKS_PER_WAVE) {
+      // Net-damage floor (2026-07-24): the two units about to clash — captured
+      // BEFORE this tick's regen — so we can guarantee each loses at least
+      // MIN_ATTACK_DAMAGE net this tick if its clash blow lands (see the clamp
+      // after the clash below). Without this, a per-tick heal (Fat Tick's
+      // `healPerTick`, or a team heal relic) exactly cancels the armor floor's
+      // 1-damage minimum, making a high-armor front unkillable — which defeats
+      // the very "armor can never make a unit immortal" guarantee the floor in
+      // `applyDamage` exists to provide. Fat Tick's sustain still fully applies
+      // against any real (>1) hit; it just can't manufacture immortality.
+      const frontStartHealth = horde[0].health;
+      const foeStartHealth = enemies[0].health;
       // Distribute team heal pool across all horde units to cap unbounded scaling
       // with board size (issue #75: Forgotten Backpack). Instead of each unit
       // getting full teamHealPerTick, divide it evenly: total team heal per tick
@@ -1085,6 +1125,20 @@ export function simulate(
       } else {
         applyDamage(front, damageIn, 'attack');
         frontTookBlow = true;
+      }
+      // Net-damage floor: a unit whose clash blow landed must end the tick at
+      // least MIN_ATTACK_DAMAGE below where it started (pre-regen), so per-tick
+      // healing can never fully offset the armor floor and manufacture an
+      // immortal front. Guarded to units that started ABOVE the floor: a unit
+      // already at/below it is left to the normal clash + surviveLethal
+      // (Tail-Charm) path, so this never bypasses a death-cheat rescue. The
+      // clamp only ever removes healing the unit gained THIS tick — it can't
+      // deal fresh damage past the raw clash, so it never front-runs a faint.
+      if (frontTookBlow && frontStartHealth > MIN_ATTACK_DAMAGE) {
+        front.health = Math.min(front.health, frontStartHealth - MIN_ATTACK_DAMAGE);
+      }
+      if (foeTookBlow && foeStartHealth > MIN_ATTACK_DAMAGE) {
+        foe.health = Math.min(foe.health, foeStartHealth - MIN_ATTACK_DAMAGE);
       }
       damageThisWave += damageOut;
 

@@ -7,6 +7,7 @@ export {
   tierHealthMultiplier,
   reviveHpForTier,
   blockHitsForTier,
+  wardArmorForTier,
   poisonStacksForTier,
   cellarCoilChargeCapForTier,
   type UnitDef,

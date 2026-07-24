@@ -89,10 +89,10 @@ describe('Boss Trial (issue #107)', () => {
   });
 
   it('a Ward-Weaver board cannot stall the trial forever (RFC hard criterion)', () => {
-    // The RFC calls out Ward-Weaver's block pool as the thing that, if it reset
-    // per hit, would let the horde block every boss swing indefinitely. Under
-    // phase = wave the pool resets per phase (not per hit), so even a stack of
-    // t3 Ward-Weavers + Bone-Priest sustain still terminates well under the cap.
+    // Ward-Weaver was the RFC's named stall risk. Since the 2026-07-24 rework
+    // it grants flat ARMOR, not a hit-negating block — a warded unit always
+    // takes ≥1 per hit (MIN_ATTACK_DAMAGE floor), so the exponentially-
+    // escalating boss inevitably pierces and the trial terminates.
     const wardWall: Lineup = {
       units: ['ward-weaver', 'ward-weaver', 'bone-priest', 'dire-rat', 'dire-rat'].map((defId) => ({
         defId,
@@ -102,6 +102,23 @@ describe('Boss Trial (issue #107)', () => {
     };
     const { phasesSurvived } = simulateBossTrial(wardWall);
     expect(phasesSurvived).toBeLessThan(BOSS_TRIAL_MAX_PHASES);
+  });
+
+  it('the real season 2026-07-20 ceiling boards no longer ride the trial to the cap (regression)', () => {
+    // Three PRODUCTION boards hit the 60-phase MAX cap that season, every one
+    // sharing a ★3 Ward-Weaver; the best board without one stalled at 13. The
+    // old full-negate block let a high-DPS horde take ZERO damage per phase and
+    // ride the escalating boss to the cap. This is the regression the two
+    // termination tests above structurally MISSED — their boards happened not
+    // to out-DPS the block window. Under the armor rework all three terminate.
+    const ceilingBoards: Lineup[] = [
+      board(['gnawer', 'gnawer', 'twilight-runt', 'twilight-runt', 'twilight-runt', 'twilight-runt', 'slink-rat', 'ward-weaver'], 3),
+      board(['gnawer', 'gnawer', 'twilight-runt', 'twilight-runt', 'twilight-runt', 'slink-rat', 'ward-weaver'], 3),
+      board(['dire-rat', 'rat-piper', 'press-kin', 'twilight-runt', 'draughtsman-moe', 'corpse-glutton', 'slink-rat', 'ward-weaver'], 3),
+    ];
+    for (const b of ceilingBoards) {
+      expect(simulateBossTrial(b).phasesSurvived).toBeLessThan(BOSS_TRIAL_MAX_PHASES);
+    }
   });
 
   it('a near-empty weak board scores near zero and survives no phases', () => {
