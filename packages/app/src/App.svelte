@@ -65,6 +65,7 @@
     backlineTargetsForTier,
     wardArmorForTier,
     buffSummonedForTier,
+    weakenPercentForTier,
     simulateBossTrial,
     simulateBossTrialReplay,
     bossTrialPhaseAttack,
@@ -712,10 +713,14 @@
         // Linear per-star curve — repeats every clash survived (see sim.ts).
         what = `drains ${e.amount} health back (★2 ${e.amount * 2} · ★3 ${e.amount * 3}) if it survived the clash — never past its own max`;
         break;
-      case 'weakenAllEnemies':
-        // Linear per-star curve — re-applies to each fresh wave (see sim.ts).
-        what = `saps ${e.attack} attack (★2 ${e.attack * 2} · ★3 ${e.attack * 3}) from every ${foe} in the wave — they always keep at least 1`;
+      case 'weakenAllEnemies': {
+        // [0.05, 0.10, 0.15] per-star curve (2026-07-25, converted from flat,
+        // then halved after the leaderboard-ceiling guardrail) — re-applies
+        // to each fresh wave, off ORIGINAL wave-start attack (see sim.ts).
+        const pct = (t: number) => Math.round(e.percent * weakenPercentForTier(t) * 100);
+        what = `saps ${pct(1)}% attack (★2 ${pct(2)}% · ★3 ${pct(3)}%) from every ${foe} in the wave — they always keep at least 1`;
         break;
+      }
     }
     const when = def.ability.condition?.timeOfDay
       ? `${TIME_OF_DAY_LABEL[def.ability.condition.timeOfDay] ?? ''}`

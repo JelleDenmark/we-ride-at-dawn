@@ -165,6 +165,42 @@ export function backlineTargetsForTier(tier: number): number {
 }
 
 /**
+ * Gutter-Acolyte's `weakenAllEnemies` shred, as a fraction of the target's
+ * ORIGINAL wave-start attack, by tier (Jesper, 2026-07-25: converted from a
+ * flat `attack * tier` amount, issue #137, to percentage — the flat version
+ * decays into irrelevance late-ride since enemy attack scales `1 + wave *
+ * ENEMY_ATTACK_SCALE_PER_WAVE` (~5x by wave 45), while a fixed -1/-2/-3 stays
+ * fixed. Percentage keeps the shred proportionally meaningful at any depth.
+ *
+ * `[0.05, 0.10, 0.15]` — halved from an initial `[0.10, 0.20, 0.30]` probe
+ * after `scripts/maxed-board-guardrail.ts` found even a SINGLE ★3 Acolyte
+ * swapped into the deepest existing guardrail comp erased all headroom and
+ * full-cleared the 45-wave gauntlet (top-depth 41/45 -> 45/45). That's a
+ * single-caster magnitude problem, not a stacking one: with only one caster,
+ * "percent of current attack" and "percent of original attack" are the same
+ * number, so a same-side rebase alone couldn't have fixed it — the rate
+ * itself had to come down. Re-verified against the guardrail before
+ * shipping; a percentage shred that GROWS in absolute terms with depth is
+ * the mirror-image risk of the enemy-HP softening issue #92 rejected for
+ * saturating the leaderboard, so treat any future bump here as gated by
+ * that same guardrail, not just a "feels right" call.
+ *
+ * Applied against the target's attack AT WAVE START (`weakenOriginalAttack`
+ * in sim.ts), not whatever it's been shredded down to by an earlier caster
+ * this wave — that's what lets multi-caster stacking be a simple ADDITIVE
+ * cap-not-sum budget (`weakenAppliedPercent`, capped at
+ * `weakenPercentForTier(3)` total per enemy per wave) instead of a
+ * multiplicative one: one ★3 fills the 15% budget alone, two ★2s (10% each)
+ * sum to 20% and clip to 15%, same "cap-not-sum" precedent as
+ * `poisonAllEnemies`/`blockCharges` — see the `weakenAllEnemies` case in
+ * sim.ts.
+ */
+export function weakenPercentForTier(tier: number): number {
+  const table = [0.05, 0.1, 0.15];
+  return table[tier - 1] ?? table[table.length - 1];
+}
+
+/**
  * Squeak-Sensei's `buffSummoned` grant per tier (Jesper, 2026-07-25: bumped
  * from the shallow linear 1/2/3 to `[1, 3, 5]` — same table shape as
  * `poisonStacksForTier` — to give the swarm archetype's season-4 payoff a
@@ -270,22 +306,25 @@ export type Effect =
    * Gutter-Acolyte (issue #137) — the first enemy-STAT debuff (poison races
    * enemy health; nothing before this lowered the incoming number itself).
    * Wired to `startOfWave`, same firing point as `poisonAllEnemies`: saps
-   * `attack * tier` (linear 1/2/3) from EVERY living enemy in the wave,
-   * floored at MIN_ATTACK_DAMAGE so a stack of Acolytes can never zero-out
-   * a wave (enemies still hit for at least 1, mirroring the armor rule).
+   * `percent * weakenPercentForTier(tier)` (2026-07-25, converted from the
+   * original flat `attack * tier` — see `weakenPercentForTier`'s doc comment
+   * for why, including the guardrail-driven `[0.10,0.20,0.30] ->
+   * [0.05,0.10,0.15]` cut) of EVERY living enemy's ORIGINAL wave-start attack,
+   * floored at MIN_ATTACK_DAMAGE so a stack of Acolytes can never zero-out a
+   * wave (enemies still hit for at least 1, mirroring the armor rule).
    * Whole-line, not front-only, by design: a front-only shred inherits the
    * exact "the front enemy was dying to the clash anyway" dead-weight
-   * problem that forced Plague-Bearer's #112 rework — flagged for Jesper's
-   * sign-off along with the magnitude.
+   * problem that forced Plague-Bearer's #112 rework.
    *
    * Compounding-law note (ADR-0003): safe — enemies are re-instantiated
    * fresh every wave, so a stat debuff cannot carry across the 45-wave ride
    * (identical bound to `poisonAllEnemies`). Multiple Acolytes stack
-   * additively within a wave, bounded by board size AND by the floor; if
-   * that stacking still probes too strong, cap it per-wave like the
-   * poison-all budget (#116) — noted, not pre-built.
+   * ADDITIVELY against a shared per-enemy cap-not-sum budget
+   * (`weakenAppliedPercent` in sim.ts, capped at `weakenPercentForTier(3)`
+   * total) — same precedent as `poisonAllEnemies`'s stack cap (issue #116):
+   * one ★3 fills the budget alone, extra casters clip rather than add.
    */
-  | { kind: 'weakenAllEnemies'; attack: number }
+  | { kind: 'weakenAllEnemies'; percent: number }
   /**
    * Buffs the rat(s) behind the source (or `all` of them) by
    * `attack`/`health`, scaled by `tierAttackMultiplier`/`tierHealthMultiplier`
@@ -1268,7 +1307,7 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   // Catacombs curse flavor — a soft read, like every tribe tag.
   'gutter-acolyte': {
     id: 'gutter-acolyte', name: 'Gutter-Acolyte', attack: 2, health: 3, cost: 5,
-    ability: { trigger: 'startOfWave', effect: { kind: 'weakenAllEnemies', attack: 1 } },
+    ability: { trigger: 'startOfWave', effect: { kind: 'weakenAllEnemies', percent: 1 } },
     tribe: 'plague',
   },
 };

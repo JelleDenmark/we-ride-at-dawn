@@ -12,6 +12,7 @@ export {
   cellarCoilChargeCapForTier,
   backlineTargetsForTier,
   buffSummonedForTier,
+  weakenPercentForTier,
   type UnitDef,
   type Ability,
   type Effect,

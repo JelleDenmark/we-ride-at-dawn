@@ -1,5 +1,5 @@
 import type { Side, UnitDef, Ability, Lineup } from './data/units';
-import { UNIT_DEFS, tierAttackMultiplier, tierHealthMultiplier, reviveHpForTier, blockHitsForTier, poisonStacksForTier, cellarCoilChargeCapForTier, backlineTargetsForTier, wardArmorForTier, buffSummonedForTier } from './data/units';
+import { UNIT_DEFS, tierAttackMultiplier, tierHealthMultiplier, reviveHpForTier, blockHitsForTier, poisonStacksForTier, cellarCoilChargeCapForTier, backlineTargetsForTier, wardArmorForTier, buffSummonedForTier, weakenPercentForTier } from './data/units';
 import { ENEMY_POOL } from './data/enemies';
 import { RELIC_DEFS, type RelicDef } from './data/relics';
 import type { Gauntlet } from './gauntlet';
@@ -751,22 +751,36 @@ export function simulate(
         break;
       }
       case 'weakenAllEnemies': {
-        // Gutter-Acolyte (issue #137). `startOfWave`-fired, so this runs for
-        // every live Acolyte in board order at the top of the wave, same
-        // firing point as `poisonAllEnemies` — and same compounding bound:
-        // enemies are re-instantiated fresh every wave, so the shred can
-        // never carry across waves. The MIN_ATTACK_DAMAGE floor mirrors the
-        // armor rule (enemies still hit for at least 1), which also bounds
-        // Acolyte stacking: extra casters clip against the floor rather
-        // than zeroing a wave out. `attack` on the event is the amount
-        // actually removed post-floor, so replays never show a bigger shred
-        // than what happened.
+        // Gutter-Acolyte (issue #137, converted to percentage 2026-07-25).
+        // `startOfWave`-fired, so this runs for every live Acolyte in board
+        // order at the top of the wave, same firing point as
+        // `poisonAllEnemies` — and same compounding bound: enemies are
+        // re-instantiated fresh every wave, so the shred can never carry
+        // across waves. Percentage is taken off the target's ORIGINAL
+        // wave-start attack (`weakenOriginalAttack`, snapshotted before any
+        // Acolyte fires), not whatever it's already been shredded down to —
+        // see `weakenPercentForTier`'s doc comment for why. That makes
+        // multi-caster stacking a simple ADDITIVE cap-not-sum budget
+        // (`weakenAppliedPercent`, capped at `weakenPercentForTier(3)` total
+        // per enemy per wave), same precedent as `poisonAllEnemies`. The
+        // MIN_ATTACK_DAMAGE floor still applies on top (enemies always hit
+        // for at least 1). `attack` on the event is the amount actually
+        // removed post-floor, so replays never show a bigger shred than what
+        // happened.
+        const capPct = weakenPercentForTier(3);
+        const ownPct = effect.percent * weakenPercentForTier(tier);
         for (const target of opposing(source.side)) {
           if (target.health <= 0) continue;
-          const reduced = Math.max(MIN_ATTACK_DAMAGE, target.attack - effect.attack * tier);
+          const original = weakenOriginalAttack.get(target.instanceId) ?? target.attack;
+          const appliedSoFar = weakenAppliedPercent.get(target.instanceId) ?? 0;
+          const pct = Math.min(ownPct, Math.max(0, capPct - appliedSoFar));
+          if (pct <= 0) continue;
+          const shred = Math.round(original * pct);
+          const reduced = Math.max(MIN_ATTACK_DAMAGE, target.attack - shred);
           const delta = target.attack - reduced;
           if (delta <= 0) continue;
           target.attack = reduced;
+          weakenAppliedPercent.set(target.instanceId, appliedSoFar + pct);
           events.push({ type: 'weaken', targetId: target.instanceId, attack: delta, newAttack: target.attack });
         }
         break;
@@ -1072,6 +1086,24 @@ export function simulate(
   let poisonLastApplied: Record<Side, number> = { horde: 0, gauntlet: 0 };
 
   /**
+   * Each living enemy's attack AT WAVE START, keyed by instanceId — the
+   * denominator `weakenAllEnemies` (Gutter-Acolyte, issue #137) percentages
+   * are taken against, snapshotted fresh every wave right after enemies are
+   * instantiated, before any Acolyte fires. See `weakenPercentForTier`'s doc
+   * comment in data/units.ts for why "original", not "current", is the base.
+   */
+  let weakenOriginalAttack: Map<number, number> = new Map();
+  /**
+   * Total fraction of `weakenOriginalAttack` already granted to each enemy
+   * this wave (issue #137), keyed by instanceId. Reset every wave alongside
+   * `poisonAllApplied`, same cap-not-sum shape: each `weakenAllEnemies`
+   * caster's own percent is clipped to whatever's left of
+   * `weakenPercentForTier(3)` for that specific enemy, so multiple Acolytes
+   * stack additively up to one ★3's worth, not without bound.
+   */
+  let weakenAppliedPercent: Map<number, number> = new Map();
+
+  /**
    * Total attack/health every `distributeStatsOnFaint` caster (Pack-Caller)
    * on a side has EVER given away, across the WHOLE battle — unlike
    * `poisonAllApplied`/`poisonLastApplied` above, this is deliberately NOT
@@ -1134,6 +1166,11 @@ export function simulate(
     // Plague-Bearer's own separate per-wave budget (issue #131) — see
     // `poisonLastApplied` above. Independent of `poisonAllApplied`.
     poisonLastApplied = { horde: 0, gauntlet: 0 };
+    // weakenAllEnemies (Gutter-Acolyte, issue #137): snapshot each enemy's
+    // fresh attack as the percentage denominator, and reset the per-enemy
+    // cap-not-sum budget — see both maps' doc comments above.
+    weakenOriginalAttack = new Map(enemies.map((e) => [e.instanceId, e.attack]));
+    weakenAppliedPercent = new Map();
 
     fireEntryTriggers(horde);
     fireEntryTriggers(enemies);
