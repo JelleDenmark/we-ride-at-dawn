@@ -164,6 +164,24 @@ export function backlineTargetsForTier(tier: number): number {
   return table[tier - 1] ?? table[table.length - 1];
 }
 
+/**
+ * Squeak-Sensei's `buffSummoned` grant per tier (Jesper, 2026-07-25: bumped
+ * from the shallow linear 1/2/3 to `[1, 3, 5]` — same table shape as
+ * `poisonStacksForTier` — to give the swarm archetype's season-4 payoff a
+ * stronger ★3 headline, deliberately NOT to close the "two ★2 beat one ★3"
+ * merge gap (it doesn't: 2+2=4 vs 3 becomes 3+3=6 vs 5, same 1-point gap,
+ * see [[corpse-glutton-gainstats-curve]] for why that gap is left alone).
+ *
+ * Still safe under the compounding law for the reason `buffSummoned`'s
+ * doc comment gives: the grant lands once on a fresh newcomer body, never on
+ * a persistent unit, so a steeper per-tier table doesn't change what
+ * accumulates — only how much a single newcomer gets at birth.
+ */
+export function buffSummonedForTier(tier: number): number {
+  const table = [1, 3, 5];
+  return table[tier - 1] ?? table[table.length - 1];
+}
+
 export type Effect =
   | { kind: 'summon'; unitId: string; count: number }
   /**
@@ -184,9 +202,10 @@ export type Effect =
   /**
    * Squeak-Sensei (issue #133) — the swarm archetype's first payoff. Wired to
    * the new `allySummoned` trigger: whenever an ally is summoned onto this
-   * side, the NEWLY-SUMMONED body enters with `+attack/+health`, scaled
-   * LINEARLY by the Sensei's tier (`* tier`, 1/2/3 — the shallow gainStats
-   * curve, NOT `tierAttackMultiplier`'s 3^(tier-1)): the trigger repeats
+   * side, the NEWLY-SUMMONED body enters with `+attack/+health`, scaled by
+   * `buffSummonedForTier`'s `[1, 3, 5]` table (Jesper, 2026-07-25 — bumped
+   * from the original shallow linear 1/2/3 for a stronger ★3 headline; NOT
+   * `tierAttackMultiplier`'s exponential 3^(tier-1)): the trigger repeats
    * every summon of every wave, and a repeating trigger must not also get an
    * exponential per-tier multiplier (same rationale as `chargeWhileBenched`
    * and `blockHitsForTier`).
@@ -202,6 +221,14 @@ export type Effect =
    * be built without a Cellar-Coil-style hard cap; keep the target the
    * newcomer. Fired from the `summon` resolution path only — a `revive` is
    * a raising, not a summoning, and deliberately does NOT fire this.
+   *
+   * Multi-caster stack cap (2026-07-25): per-body safety doesn't cover
+   * MULTIPLE Senseis witnessing the same summon — that's additive stacking
+   * across casters, the same shape as the `poisonAllEnemies` RatMoe exploit
+   * (issue #116). `fireAllySummoned` in sim.ts caps the TOTAL grant one
+   * summoned body can receive from all Senseis combined at
+   * `buffSummonedForTier(3)` (cap-not-sum, same precedent as
+   * `poisonAllEnemies`/`blockCharges`) — see that function's doc comment.
    */
   | { kind: 'buffSummoned'; attack: number; health: number }
   /**

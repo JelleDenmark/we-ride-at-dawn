@@ -11,6 +11,7 @@ export {
   poisonStacksForTier,
   cellarCoilChargeCapForTier,
   backlineTargetsForTier,
+  buffSummonedForTier,
   type UnitDef,
   type Ability,
   type Effect,

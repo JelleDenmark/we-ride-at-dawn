@@ -1,5 +1,5 @@
 import type { Side, UnitDef, Ability, Lineup } from './data/units';
-import { UNIT_DEFS, tierAttackMultiplier, tierHealthMultiplier, reviveHpForTier, blockHitsForTier, poisonStacksForTier, cellarCoilChargeCapForTier, backlineTargetsForTier, wardArmorForTier } from './data/units';
+import { UNIT_DEFS, tierAttackMultiplier, tierHealthMultiplier, reviveHpForTier, blockHitsForTier, poisonStacksForTier, cellarCoilChargeCapForTier, backlineTargetsForTier, wardArmorForTier, buffSummonedForTier } from './data/units';
 import { ENEMY_POOL } from './data/enemies';
 import { RELIC_DEFS, type RelicDef } from './data/relics';
 import type { Gauntlet } from './gauntlet';
@@ -379,7 +379,11 @@ export function simulate(
    * and a repeating trigger must never also get `tierAttackMultiplier`'s
    * exponential curve (see `chargeWhileBenched`'s rationale in units.ts).
    */
-  const applyTargetedEffect = (source: BattleUnit, target: BattleUnit): void => {
+  const applyTargetedEffect = (
+    source: BattleUnit,
+    target: BattleUnit,
+    buffSummonedBudget?: { attack: number; health: number }
+  ): void => {
     if (!source.ability) return;
     const effect = source.ability.effect;
     const tier = source.tier;
@@ -389,7 +393,30 @@ export function simulate(
         // that targeting is the ADR-0003 safety (a fresh instance, buffed
         // once at birth; nothing accumulates on a persistent unit). See the
         // Effect's doc comment in units.ts before ever widening the target.
-        buff(target, effect.attack * tier, effect.health * tier);
+        // Magnitude comes from `buffSummonedForTier` ([1, 3, 5], not `* tier`)
+        // — see that function's doc comment for the 2026-07-25 curve bump.
+        //
+        // Multi-caster stack cap (2026-07-25, per Jesper's "5x Sensei + 1-2
+        // Brood-Mother" concern): every OTHER Sensei on the board witnesses
+        // the same summon (see `fireAllySummoned` below), so without a cap
+        // N Senseis grant N times the buff to one newcomer — the exact
+        // additive-stacking shape that caused the `poisonAllEnemies` RatMoe
+        // exploit (issue #116). Mirror that fix: cap the TOTAL grant one
+        // summoned body can receive from all witnessing Senseis combined at
+        // `buffSummonedForTier(3)` (one ★3's worth) — cap-not-sum, same
+        // precedent as `poisonAllEnemies`/`blockCharges`. No single caster's
+        // per-summon grant changes; you can still field 2 tier-2s, just not
+        // stack 5 tier-3s onto one newcomer.
+        const scale = buffSummonedForTier(tier);
+        let grantAttack = effect.attack * scale;
+        let grantHealth = effect.health * scale;
+        if (buffSummonedBudget) {
+          grantAttack = Math.min(grantAttack, buffSummonedBudget.attack);
+          grantHealth = Math.min(grantHealth, buffSummonedBudget.health);
+          buffSummonedBudget.attack -= grantAttack;
+          buffSummonedBudget.health -= grantHealth;
+        }
+        if (grantAttack > 0 || grantHealth > 0) buff(target, grantAttack, grantHealth);
         break;
       }
       case 'reflectDamage': {
@@ -410,11 +437,19 @@ export function simulate(
    * OTHER living unit on that side that watches for summons reacts, in board
    * order; the newcomer never witnesses its own arrival. `revive` is a
    * raising, not a summoning, and deliberately never calls this.
+   *
+   * `buffSummonedBudget` is a fresh cap-not-sum budget PER SUMMON EVENT
+   * (`buffSummonedForTier(3)` in each of attack/health) — see the
+   * `buffSummoned` case in `applyTargetedEffect` above for why multiple
+   * Senseis must share one budget rather than each granting in full.
    */
   const fireAllySummoned = (summoned: BattleUnit): void => {
+    const buffSummonedBudget = { attack: buffSummonedForTier(3), health: buffSummonedForTier(3) };
     for (const witness of [...boardOf(summoned.side)]) {
       if (witness === summoned || witness.health <= 0) continue;
-      if (witness.ability?.trigger === 'allySummoned') applyTargetedEffect(witness, summoned);
+      if (witness.ability?.trigger === 'allySummoned') {
+        applyTargetedEffect(witness, summoned, buffSummonedBudget);
+      }
     }
   };
 

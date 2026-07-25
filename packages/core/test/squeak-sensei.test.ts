@@ -68,16 +68,16 @@ describe('Squeak-Sensei (issue #133: allySummoned swarm payoff)', () => {
     expect(buffs.map((b) => b.targetId).sort()).toEqual(summonedIds.sort());
   });
 
-  it('scales LINEARLY with tier (1/2/3), never the exponential buff curve', () => {
+  it('scales via the [1, 3, 5] table (2026-07-25 bump), never the exponential buff curve', () => {
     // A repeating trigger must not get 3^(tier-1) — see the Effect's doc
-    // comment. ★2 trains +2/+2, not +3/+3.
+    // comment. ★2 trains +3/+3 (buffSummonedForTier's table), not +2/+2 or +9/+9.
     const { events } = simulate(
       lineup({ defId: 'rat-piper' }, { defId: 'squeak-sensei', tier: 2 }),
       gauntletOf([dummy(0, 100)])
     );
     const buffs = ofType(events, 'buff');
     expect(buffs.length).toBe(2); // ★1 Piper's two pups, each trained once
-    expect(buffs.every((b) => b.attack === 2 && b.health === 2)).toBe(true);
+    expect(buffs.every((b) => b.attack === 3 && b.health === 3)).toBe(true);
   });
 
   it('the buff count tracks the SUMMON count across waves — one per newcomer, never more', () => {
@@ -120,6 +120,42 @@ describe('Squeak-Sensei (issue #133: allySummoned swarm payoff)', () => {
     expect(ofType(events, 'revive').length).toBe(1);
     expect(ofType(events, 'summon').length).toBe(0);
     expect(ofType(events, 'buff').length).toBe(0);
+  });
+
+  it('multi-caster stack cap: 5×★3 Senseis grant only one ★3 worth (5/5), not 25/25', () => {
+    // Same additive-stacking shape as the poisonAllEnemies RatMoe exploit
+    // (issue #116) — every Sensei witnesses the same summon, so without a
+    // shared budget N Senseis would grant N times the buff to one newcomer.
+    const { events } = simulate(
+      lineup(
+        { defId: 'brood-mother' },
+        { defId: 'squeak-sensei', tier: 3 },
+        { defId: 'squeak-sensei', tier: 3 },
+        { defId: 'squeak-sensei', tier: 3 },
+        { defId: 'squeak-sensei', tier: 3 },
+        { defId: 'squeak-sensei', tier: 3 }
+      ),
+      gauntletOf([dummy(50, 100)])
+    );
+    const summons = ofType(events, 'summon');
+    const buffs = ofType(events, 'buff');
+    // Group buffs by target and confirm no single newcomer's total exceeds
+    // buffSummonedForTier(3) (5) in either stat.
+    const totals = new Map<string, { attack: number; health: number }>();
+    for (const b of buffs) {
+      const t = totals.get(b.targetId) ?? { attack: 0, health: 0 };
+      t.attack += b.attack;
+      t.health += b.health;
+      totals.set(b.targetId, t);
+    }
+    expect(summons.length).toBeGreaterThan(0);
+    expect(totals.size).toBeGreaterThan(0);
+    for (const t of totals.values()) {
+      expect(t.attack).toBeLessThanOrEqual(5);
+      expect(t.health).toBeLessThanOrEqual(5);
+    }
+    // And the cap is actually reached, not just never exceeded.
+    expect([...totals.values()].some((t) => t.attack === 5 && t.health === 5)).toBe(true);
   });
 
   it('a Sensei alone does nothing — no feeder, no payoff (not a hidden stat stick)', () => {

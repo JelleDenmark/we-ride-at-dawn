@@ -64,6 +64,7 @@
     cellarCoilChargeCapForTier,
     backlineTargetsForTier,
     wardArmorForTier,
+    buffSummonedForTier,
     simulateBossTrial,
     simulateBossTrialReplay,
     bossTrialPhaseAttack,
@@ -572,6 +573,17 @@
     return buffScaleWith(attack, health, (t) => t);
   }
 
+  /**
+   * "+1/+1 (★2 +3/+3 · ★3 +5/+5)" for Squeak-Sensei's `buffSummoned` curve —
+   * `buffSummonedForTier`'s `[1, 3, 5]` table (2026-07-25 bump), not the
+   * flat `(t) => t` gainStats uses. Reads the same core table sim.ts scales
+   * by, so display can't drift from the mechanic (see the display bug this
+   * pattern was created to prevent: [[wrad-copy-vs-engine-audit]]).
+   */
+  function buffSummonedScale(attack: number, health: number): string {
+    return buffScaleWith(attack, health, buffSummonedForTier);
+  }
+
   function abilitySentence(def: UnitDef | undefined, side: 'horde' | 'enemy' = 'horde'): string {
     // Takes the def directly (not an id + UNIT_DEFS lookup) so it works for
     // both rats and enemies — enemies live in ENEMY_POOL, a separate array
@@ -687,9 +699,10 @@
         what = `grants the whole ${team} ${buffScale(e.early.attack, e.early.health)} on its first wave, plus ${buffScale(e.late.attack, e.late.health)} more from wave ${e.switchWave} onward — both permanent for the rest of the ride`;
         break;
       case 'buffSummoned':
-        // Linear (1/2/3) per-star curve, same as gainStats — the trigger
-        // repeats every summon, so sim.ts scales it shallow, not 3^(tier-1).
-        what = `trains the newcomer: it arrives with ${gainStatsScale(e.attack, e.health)}`;
+        // [1, 3, 5] per-star curve (2026-07-25 bump) — the trigger repeats
+        // every summon, so sim.ts scales it via buffSummonedForTier, not
+        // 3^(tier-1).
+        what = `trains the newcomer: it arrives with ${buffSummonedScale(e.attack, e.health)} — capped across multiple casters`;
         break;
       case 'reflectDamage':
         // Linear per-star curve — repeats every hit taken (see sim.ts).
