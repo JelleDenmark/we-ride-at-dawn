@@ -1015,7 +1015,9 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     // twin. Not un-retired; do not add back to the shop pool here.
     id: 'md-rattyfock', name: 'MD Rattyfock', attack: 3, health: 6, cost: 6,
     ability: { trigger: 'startOfBattle', effect: { kind: 'buffBehind', attack: 1, health: 1, all: true } },
-    unlockDay: 2, // day-1 shop kept plain — see Dire-Rat's note.
+    // unlockDay dropped (#149, 2026-07-25): MD Rattyfock is now the live twin
+    // of this reskin pair, taking over Warren-Warden's old day-1-available
+    // role — a straight swap, not a partial one.
     tribe: 'brute',
   },
   'press-kin': {

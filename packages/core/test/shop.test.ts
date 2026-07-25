@@ -1450,16 +1450,18 @@ describe('day-gated shop unlocks (issue #12)', () => {
     }
   });
 
-  it('season-3 reskin swap (issue #115): retired reskins never roll; tribute + un-retired anchor do', () => {
-    // Draughtsman Moe reskins Blight-Witch and MD Rattyfock is retired, so
-    // neither base reskin is purchasable on any day; Warren-Warden returns to
-    // the pool and Draughtsman Moe joins it, both day-1 available (no unlockDay,
-    // matching the Blight-Witch kit Moe reskins).
+  it('season-3 reskin swap (issue #115) + #149 pool flip: retired reskins never roll; tribute + un-retired anchor do', () => {
+    // Draughtsman Moe reskins Blight-Witch, so Blight-Witch is never
+    // purchasable. Draughtsman Moe joins the pool, day-1 available (no
+    // unlockDay, matching the Blight-Witch kit Moe reskins). Per #149
+    // (2026-07-25) the Warren-Warden/MD-Rattyfock reskin pair swapped back:
+    // Warren-Warden is now the retired twin and MD Rattyfock is the
+    // purchasable one.
     for (const day of [1, 2, 3, 4, 5, 6, 7]) {
       expect(everAppears(day, 'blight-witch')).toBe(false);
-      expect(everAppears(day, 'md-rattyfock')).toBe(false);
+      expect(everAppears(day, 'warren-warden')).toBe(false);
       expect(everAppears(day, 'draughtsman-moe')).toBe(true);
-      expect(everAppears(day, 'warren-warden')).toBe(true);
+      expect(everAppears(day, 'md-rattyfock')).toBe(true);
     }
   });
 
