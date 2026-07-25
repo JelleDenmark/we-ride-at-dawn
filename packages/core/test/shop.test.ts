@@ -1465,6 +1465,22 @@ describe('day-gated shop unlocks (issue #12)', () => {
     }
   });
 
+  it('season-3 prestige reskin swap (issue #151): Gutter Gourmand replaces Twilight-Runt', () => {
+    // Twilight-Runt is retired in favor of Gutter Gourmand, its exact-kit
+    // reskin — never purchasable on any day. Gutter Gourmand inherits
+    // Twilight-Runt's unlockDay: 3, so it's absent days 1-2 and present from
+    // day 3 onward, same gate the original had.
+    for (const day of [1, 2, 3, 4, 5, 6, 7]) {
+      expect(everAppears(day, 'twilight-runt')).toBe(false);
+    }
+    for (const day of [1, 2]) {
+      expect(everAppears(day, 'gutter-gourmand')).toBe(false);
+    }
+    for (const day of [3, 4, 5, 6, 7]) {
+      expect(everAppears(day, 'gutter-gourmand')).toBe(true);
+    }
+  });
+
   it('rerollShop and autoRerollShop respect the build day, not just newBuild', () => {
     // A day-4 build should be able to roll a day-2-unlocked pick on reroll
     // too, not just on the initial shop — this exercises the s.day plumbing

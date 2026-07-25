@@ -1141,6 +1141,31 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     },
     unlockDay: 3,
   },
+  // Season-3 prestige reskin (issue #151): Gutter Gourmand reskins
+  // Twilight-Runt's exact kit/stats/unlockDay — same reskin-replacement
+  // precedent as Draughtsman Moe (Blight-Witch) and MD Rattyfock
+  // (Warren-Warden). The "twilight" flavor (a strong dusk buff fading to a
+  // leaner late dose) reads cleanly as a camp cook's arc: a hearty first
+  // course while supplies are fresh, thinned rations once the campaign drags
+  // on. Numbers are unchanged from Twilight-Runt's PR #123 balance pass (see
+  // that unit's doc comment above and `teamBuffByWave`'s doc comment) —
+  // carried over as-is since this is a pure reflavor, not a fresh tune. The
+  // base `twilight-runt` def stays in UNIT_DEFS for golden logs/replays but
+  // is removed from the purchasable pool (SHOP_UNIT_POOL in shop.ts), so the
+  // wave-buff kit is only offered under the prestige name this season.
+  'gutter-gourmand': {
+    id: 'gutter-gourmand', name: 'Gutter Gourmand', attack: 1, health: 2, cost: 6,
+    ability: {
+      trigger: 'startOfWave',
+      effect: {
+        kind: 'teamBuffByWave',
+        early: { attack: 2, health: 1 },
+        late: { attack: 1, health: 1 },
+        switchWave: 15,
+      },
+    },
+    unlockDay: 3,
+  },
   // Issue #106: Cellar-Coil — "positional patience" (docs/design/future-minions.md
   // concept 2). Attack 2 / health 4 / cost 5 are the design doc's rough
   // starting point, NOT final — flagged for Jesper's balance sign-off.

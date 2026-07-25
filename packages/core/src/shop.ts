@@ -234,6 +234,11 @@ export type ActionResult = { ok: true; state: BuildState } | { ok: false; reason
 //     redundant-kits rule still holds either direction, this is purely which
 //     twin is on shelf this season. Their stats/ability stay identical
 //     (see #149's Warren-Warden buff, mirrored onto both entries).
+//   - 'twilight-runt' is excluded (Jesper, 2026-07-25, issue #151): Gutter
+//     Gourmand is the season-3 prestige reskin of its `teamBuffByWave` kit,
+//     same "prestige replaces the base" pattern as Draughtsman Moe/Blight-
+//     Witch above — the wave-buff kit is only offered under the prestige
+//     name this season.
 // Every excluded def stays intact in UNIT_DEFS (tests/golden logs/replays
 // reference them directly) — only presence in the purchasable pool changes.
 //
@@ -255,6 +260,7 @@ const SHOP_UNIT_POOL = Object.values(UNIT_DEFS).filter(
     u.cost > 0 &&
     u.id !== 'blight-witch' &&
     u.id !== 'warren-warden' &&
+    u.id !== 'twilight-runt' &&
     u.id !== 'dawn-runt' &&
     u.id !== 'dusk-runt'
 );
@@ -274,7 +280,8 @@ const SHOP_RELIC_POOL = Object.values(RELIC_DEFS);
  *
  * Exported (issue #136) so the compendium can list exactly the rats a
  * player can actually obtain this week — same day gate, same permanent
- * pool exclusions (pup/blight-witch/warren-warden/dawn-runt/dusk-runt) — no
+ * pool exclusions (pup/blight-witch/warren-warden/twilight-runt/dawn-runt/
+ * dusk-runt) — no
  * second filter to keep in sync.
  */
 export function shopUnitPoolForDay(day: number): UnitDef[] {
