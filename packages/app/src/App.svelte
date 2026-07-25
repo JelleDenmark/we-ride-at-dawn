@@ -612,6 +612,15 @@
       return armorSentence || 'No special trick — just a body to swell the ranks.';
     }
     const e = def.ability.effect;
+    if (e.kind === 'reflectDamage' && armor > 0) {
+      // Bespoke sentence (not the generic trigger/template + appended
+      // armorSentence below): Steel-Whisker (only reflectDamage user, issue
+      // #134) reads as two glued-together full sentences otherwise. Merged
+      // to one, per Jesper's review of the season-4 patch notes (2026-07-25)
+      // — the standalone `armorSentence` template stays untouched since
+      // Dire-Rat (its only other user) has no ability to merge it with.
+      return `Shrugs off ${armor} damage a hit (★2 ${armor * 2} · ★3 ${armor * 3}) and bites back for ${e.damage} (★2 ${e.damage * 2} · ★3 ${e.damage * 3}) — poison slips past the armor, blocked hits draw no blood.`;
+    }
     if (e.kind === 'blockFrontHits') {
       return `Each wave, blocks the front ${own}’s first hit outright (★2 blocks 2, ★3 blocks 3) — resets every wave.`;
     }
