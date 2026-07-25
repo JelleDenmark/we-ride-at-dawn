@@ -984,7 +984,14 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     ability: { trigger: 'faint', effect: { kind: 'revive' } },
   },
   'warren-warden': {
-    id: 'warren-warden', name: 'Warren-Warden', attack: 2, health: 6, cost: 6,
+    // #149 (Jesper: "feels underwhelming"): attack 2 -> 3. The `buffBehind`
+    // amount is deliberately left alone — it's already exponential via
+    // `tierAttackMultiplier`'s 3^(tier-1) (a flat +1/+1 is +9/+9 to the whole
+    // team behind it at T3, see all-unit-value's T2/T3 rank), so bumping the
+    // ability would compound into an outlier at high tier. A flat +1 own
+    // attack is linear, fixes the early-game "does nothing itself" feel
+    // without touching the part of the kit that already tops the tier list.
+    id: 'warren-warden', name: 'Warren-Warden', attack: 3, health: 6, cost: 6,
     ability: { trigger: 'startOfBattle', effect: { kind: 'buffBehind', attack: 1, health: 1, all: true } },
     tribe: 'brute',
   },
@@ -1002,9 +1009,15 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     tribe: 'brute',
   },
   'md-rattyfock': {
-    id: 'md-rattyfock', name: 'MD Rattyfock', attack: 2, health: 6, cost: 6,
+    // #149: mirrors Warren-Warden's attack 2 -> 3 buff so this dormant
+    // reskin (excluded from SHOP_UNIT_POOL, kept only for golden-log/replay
+    // compatibility — see shop.ts) stays numerically identical to its live
+    // twin. Not un-retired; do not add back to the shop pool here.
+    id: 'md-rattyfock', name: 'MD Rattyfock', attack: 3, health: 6, cost: 6,
     ability: { trigger: 'startOfBattle', effect: { kind: 'buffBehind', attack: 1, health: 1, all: true } },
-    unlockDay: 2, // day-1 shop kept plain — see Dire-Rat's note.
+    // unlockDay dropped (#149, 2026-07-25): MD Rattyfock is now the live twin
+    // of this reskin pair, taking over Warren-Warden's old day-1-available
+    // role — a straight swap, not a partial one.
     tribe: 'brute',
   },
   'press-kin': {
