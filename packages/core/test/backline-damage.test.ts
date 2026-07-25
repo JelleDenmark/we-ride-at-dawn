@@ -139,7 +139,11 @@ describe('backline damage primitive (issue #85)', () => {
   });
 
   it('backline damage does not grow with wave count (compounding-law canary)', () => {
-    const grinder = (n: number) => gauntletOf(...Array.from({ length: n }, () => [dummy(0, 1000)]));
+    // Health kept comfortably below the MAX_TICKS_PER_WAVE stalemate guard at
+    // wave index 9 even after the issue #150 enemy-scaling bump (0.20->0.22
+    // health/wave) — 1000 HP left only ~1 tick of headroom under the old
+    // scaling and started tripping the guard once scaling grew.
+    const grinder = (n: number) => gauntletOf(...Array.from({ length: n }, () => [dummy(0, 500)]));
     const short = simulate(lineup({ defId: 'dire-rat' }, { defId: 'test-sniper' }), grinder(2));
     const long = simulate(lineup({ defId: 'dire-rat' }, { defId: 'test-sniper' }), grinder(10));
     const foeIdOf = (events: BattleEvent[], waveIdx: number) => ofType(events, 'waveStart')[waveIdx].enemies[0].instanceId;

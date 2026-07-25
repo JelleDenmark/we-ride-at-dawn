@@ -48,7 +48,20 @@ export const MAX_TICKS_PER_WAVE = 1000;
 // linear HP curve eventually falls behind and attack stops mattering again
 // at high depth/tier — the same "overkill wasted" bug this whole change
 // exists to fix, just recurring at a higher power level.
-export const ENEMY_HEALTH_SCALE_PER_WAVE = 0.20;
+// 0.20 -> 0.22 (2026-07-25, issue #150): a separate, general "slightly
+// harder" difficulty pass on top of the 0.08 attack bump below — NOT targeted
+// at armor/sustain like that one was. Sized off three balance scripts
+// (balance:realistic, balance:depth, snowball) against 0.22/0.09 and a larger
+// 0.24/0.10 candidate: 0.22/0.09 knocked every depth proxy down a consistent
+// ~4-7% (e.g. balance:realistic lookahead day-7 24.06 -> 23.41, snowball
+// default day-7 13.86 -> 12.43) while staying monotonic/convergent and
+// leaving Rusted Nail positive on every expedition day. The 0.24/0.10
+// candidate cut deeper (~9-12%) but zeroed Rusted Nail's delta on three of
+// seven days in balance:depth — a relic going fully inert read as more than
+// "slightly" harder, so it was rejected in favor of this one. See issue #150
+// for the full comparison; this does NOT touch the tier-up curve (3^(tier-1)
+// per merge), which is a separate, still-open wave-10-flatten question.
+export const ENEMY_HEALTH_SCALE_PER_WAVE = 0.22;
 export const ENEMY_HEALTH_SCALE_QUADRATIC = 0.004;
 // 0.05 -> 0.08 (2026-07-24, alongside the Ward-Weaver armor rework): a modest
 // general-difficulty raise so the deep gauntlet actually pressures armor/
@@ -59,7 +72,10 @@ export const ENEMY_HEALTH_SCALE_QUADRATIC = 0.004;
 // Boss Trial is INVARIANT to this constant — `buildBossTrialGauntlet` divides
 // each boss's attack by `enemyAttackScale` and the sim multiplies it back, so
 // the two cancel; only the depth gauntlet is affected.
-export const ENEMY_ATTACK_SCALE_PER_WAVE = 0.08;
+// 0.08 -> 0.09 (2026-07-25, issue #150): layered on top as part of the same
+// general difficulty pass described above the health constant; same
+// balance-script evidence, same rejected 0.10 candidate.
+export const ENEMY_ATTACK_SCALE_PER_WAVE = 0.09;
 
 export function enemyHealthScale(waveIndex: number): number {
   return 1 + waveIndex * ENEMY_HEALTH_SCALE_PER_WAVE + waveIndex * waveIndex * ENEMY_HEALTH_SCALE_QUADRATIC;
