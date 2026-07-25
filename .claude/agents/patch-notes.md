@@ -44,6 +44,8 @@ Write for a player, not an engineer:
 - Be honest when something was broken and topped the leaderboard. This community found the last bug for us; treat them as collaborators, not an audience to manage.
 - Short. A patch note is read on a phone between rides. Three to six bullets.
 - If a balance change invalidates a strategy people were enjoying, say so plainly and say why.
+- Start every sentence and bullet with a capital letter, even though the voice is otherwise lowercase-leaning mid-sentence (Jesper's call, 2026-07-25).
+- Don't call out tuning changes on units that are brand-new this release (a buff/nerf to something players haven't touched yet reads as "shipped under-tuned" and pulls back the curtain on the dev process). Only list tuning bullets for units that existed before this release.
 
 ## Output format
 

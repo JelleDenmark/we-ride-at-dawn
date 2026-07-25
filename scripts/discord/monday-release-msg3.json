@@ -1,0 +1,10 @@
+{
+  "embeds": [
+    {
+      "title": "v0.7.0 — The drains grow teeth (3/3)",
+      "description": "Under the hood: PWA install icons got real art, the update banner is clearer about when a new build is waiting, the leaderboard now folds depth, boss damage, and kills into one combined board (with a Crown for the top seat), and an overnight ride-freeze bug got fixed. Quality-of-life, no gameplay swing.",
+      "color": 5793266,
+      "footer": { "text": "we ride at dawn · season resets Monday 06:00 CET" }
+    }
+  ]
+}
