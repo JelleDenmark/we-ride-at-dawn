@@ -75,7 +75,14 @@ export const ENEMY_HEALTH_SCALE_QUADRATIC = 0.004;
 // 0.08 -> 0.09 (2026-07-25, issue #150): layered on top as part of the same
 // general difficulty pass described above the health constant; same
 // balance-script evidence, same rejected 0.10 candidate.
-export const ENEMY_ATTACK_SCALE_PER_WAVE = 0.09;
+// 0.09 -> 0.1 (2026-07-25): the 0.10 candidate #150 rejected specifically
+// because it zeroed Rusted Nail's delta on three of seven balance:depth days
+// (read as more than "slightly" harder at the time). Reapplied here at
+// Jesper's call re: enemy scaling still reading soft against the tier-up
+// curve (see the wave-10-flatten note) — re-verify Rusted Nail's delta
+// against balance:depth before this ships to confirm that tradeoff is one
+// he still wants.
+export const ENEMY_ATTACK_SCALE_PER_WAVE = 0.1;
 
 export function enemyHealthScale(waveIndex: number): number {
   return 1 + waveIndex * ENEMY_HEALTH_SCALE_PER_WAVE + waveIndex * waveIndex * ENEMY_HEALTH_SCALE_QUADRATIC;

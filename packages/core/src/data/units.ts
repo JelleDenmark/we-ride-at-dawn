@@ -1293,10 +1293,18 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   // Warren-Warden incident shape) and the only one whose cost-efficiency
   // ROSE with tier. afterAttack repeats every clash (compounding law), so
   // the sustain number, not the body, is the lever that compounds.
+  // unlockDay: 3 — a warded Grave-Leech (Ward-Weaver armor pushing incoming
+  // damage to the MIN_ATTACK_DAMAGE floor) runs a genuine zero-net-damage
+  // window in the earliest waves, verified by probe: flat health for the
+  // first 6 waves before enemy attack scaling starts to bite. Day-gating
+  // pushes its first legal appearance past day 1-2's shallowest, softest
+  // waves so that window buys less. Not a fix for the underlying interaction
+  // (still worth a real balance-script pass), just a blast-radius limiter.
   'grave-leech': {
     id: 'grave-leech', name: 'Grave-Leech', attack: 3, health: 6, cost: 6,
     ability: { trigger: 'afterAttack', effect: { kind: 'healSelf', amount: 1 } },
     tribe: 'brute',
+    unlockDay: 3,
   },
   // Issue #137: Gutter-Acolyte — anti-brute tech: the roster's first enemy
   // attack-shred (armor blunts hits, poison races health; nothing lowered
