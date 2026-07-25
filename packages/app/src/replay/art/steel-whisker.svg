@@ -1,0 +1,28 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <!-- Steel-Whisker (issue #134): armored thorns — a genuine front-line body
+       (flat damage reduction) whose bristles cut back on every hit taken
+       (stateless reflect, never gain-on-hurt). Riveted plates over the back,
+       stiff metal whiskers radiating out like the thorns themselves. Cool grey
+       steel as the one accent against house-standard fur brown. -->
+  <!-- tail -->
+  <path d="M13 51 Q4 49 6 39 Q6.5 34 11 33" fill="none" stroke="#5e3120" stroke-width="2.4" stroke-linecap="round"/>
+  <!-- squat, broad body (front-line tank silhouette) -->
+  <path d="M13 52 C9 43 14 31 27 30 C36 29.5 43 33.5 46 40 L46 46 C43 52 34 55 24 55 C17 55 14.5 55 13 52 Z" fill="#8a4b2f" stroke="#201209" stroke-width="1.5" stroke-linejoin="round"/>
+  <!-- riveted steel plate over the back -->
+  <path d="M18 34 C17 40 17 46 21 51 C29 53 37 51 41 45 C43 40 41 35 36 32 C29 29.5 22 30.5 18 34 Z" fill="#7d8792" stroke="#3a4148" stroke-width="1.3" stroke-linejoin="round"/>
+  <circle cx="24" cy="36" r="1" fill="#3a4148"/>
+  <circle cx="32" cy="35" r="1" fill="#3a4148"/>
+  <circle cx="37" cy="40" r="1" fill="#3a4148"/>
+  <circle cx="24" cy="47" r="1" fill="#3a4148"/>
+  <circle cx="33" cy="47" r="1" fill="#3a4148"/>
+  <!-- head -->
+  <circle cx="41" cy="31" r="4.4" fill="#8a4b2f" stroke="#201209" stroke-width="1.5"/>
+  <circle cx="43.6" cy="33.2" r="1.4" fill="#201209"/>
+  <!-- stiff metal whiskers, radiating like thorns -->
+  <path d="M44 30 L52 27" stroke="#b9c2ca" stroke-width="1.1" stroke-linecap="round"/>
+  <path d="M44.5 32 L53 32.5" stroke="#b9c2ca" stroke-width="1.1" stroke-linecap="round"/>
+  <path d="M44 34 L51 37" stroke="#b9c2ca" stroke-width="1.1" stroke-linecap="round"/>
+  <!-- legs, planted wide -->
+  <rect x="20" y="53" width="4.6" height="7" rx="1.8" fill="#5e3120"/>
+  <rect x="34" y="53" width="4.6" height="7" rx="1.8" fill="#5e3120"/>
+</svg>
