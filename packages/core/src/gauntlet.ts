@@ -128,6 +128,19 @@ export function generateGauntlet(date: string, day = 1, hour?: number): Gauntlet
       while (spent < quota && units.length < WAVE_UNIT_CAP) {
         const pool = ENEMY_POOL.filter((u) => {
           if (u.cost > budget) return false;
+          // Depth floor (issue #138: enchanters must not appear where the
+          // median player lives) — the deterministic mirror of the shop's
+          // unlockDay, same precedent as the pivot-wave gate below.
+          if (u.minWave !== undefined && i + 1 < u.minWave) return false;
+          // At most ONE support per wave (issue #138). The issue's "high
+          // cost = still rare when first available" intuition inverts in
+          // this engine: `weightedPick` weights BY cost, so once a cost-8
+          // enchanter clears the budget bar it's the LIKELIEST pick, not a
+          // rare one — an unchecked sweep flooded deep waves with up to 4
+          // Sluice-Wardens at once. One support behind a wall is the whole
+          // design ("kill the enchanter first"); a stack of them is just a
+          // stat wall with extra steps.
+          if (u.rearguard && units.some((picked) => picked.rearguard)) return false;
           if (archetype !== null) return u.archetype === archetype;
           return !(u.archetype === secondary && i + 1 < pivotWave);
         });
@@ -143,7 +156,13 @@ export function generateGauntlet(date: string, day = 1, hour?: number): Gauntlet
     if (i + 1 >= pivotWave) spendPhase(secondary, Math.ceil(waveBudget * SECONDARY_SHARE));
     spendPhase(null, budget);
 
-    waves.push({ units });
+    // Rearguard reorder (issue #138): supports roll in phase order like any
+    // other pick — which lands a primary-themed enchanter at index 0, the
+    // clash slot, where it dies doing nothing. Move every `rearguard` enemy
+    // to the back (stable within each group) so the "protected support"
+    // placement the wing exists for actually happens; the only counters are
+    // the tools that reach the back (AoE poison, backline snipers).
+    waves.push({ units: [...units.filter((u) => !u.rearguard), ...units.filter((u) => u.rearguard)] });
   }
 
   return hour === undefined ? { date, seed, theme, waves } : { date, seed, theme, hour, waves };

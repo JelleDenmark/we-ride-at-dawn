@@ -38,7 +38,7 @@ import { UNIT_DEFS } from '../src/data/units';
 import { RELIC_DEFS } from '../src/data/relics';
 import { simulate } from '../src/sim';
 import { generateGauntlet, difficultyForDay } from '../src/gauntlet';
-import { BOARD_CAP } from '../src/sim';
+import { BOARD_CAP, COMBAT_CAP_BONUS } from '../src/sim';
 
 const unitSlot = (s: BuildState): number => s.shop.slots.findIndex((x) => x.kind === 'unit');
 const relicSlot = (s: BuildState): number => s.shop.slots.findIndex((x) => x.kind === 'relic');
@@ -777,7 +777,7 @@ describe('tiers in battle', () => {
     expect(lineupFromBuild(s)).toEqual({
       units: [{ defId: 'gnawer', tier: 2, relicIds: ['rusted-nail'] }],
       teamRelicIds: ['filth-totem'],
-      combatCap: 3, // 1 deployed rat + COMBAT_CAP_BONUS(2), issue #69
+      combatCap: 1 + COMBAT_CAP_BONUS, // 1 deployed rat + summon headroom, issue #69
     });
   });
 
@@ -1396,26 +1396,26 @@ describe('buyable horde slots (issue #9)', () => {
   it('combatCapForBuild is deployed board size plus summon headroom (issue #69), not board-cap-derived', () => {
     for (let boardSize = 0; boardSize <= 8; boardSize++) {
       const build = { board: new Array(boardSize).fill({ defId: 'gutter-runt', tier: 1, relicIds: [] }) };
-      expect(combatCapForBuild(build)).toBe(boardSize + 2);
+      expect(combatCapForBuild(build)).toBe(boardSize + COMBAT_CAP_BONUS);
     }
   });
 
-  it('a summoner on a small board gets exactly 2 summon slots of headroom', () => {
+  it('a summoner on a small board gets exactly COMBAT_CAP_BONUS slots of headroom', () => {
     const build = { board: [{ defId: 'rat-piper', tier: 1, relicIds: [] }] };
-    expect(combatCapForBuild(build)).toBe(3); // 1 deployed + 2
+    expect(combatCapForBuild(build)).toBe(1 + COMBAT_CAP_BONUS);
   });
 
-  it('a summoner on a full board still gets +2, no more and no less', () => {
+  it('a summoner on a full board still gets exactly COMBAT_CAP_BONUS, no more and no less', () => {
     const build = { board: new Array(8).fill({ defId: 'gutter-runt', tier: 1, relicIds: [] }) };
-    expect(combatCapForBuild(build)).toBe(10); // 8 deployed + 2
+    expect(combatCapForBuild(build)).toBe(8 + COMBAT_CAP_BONUS);
   });
 
   it('lineupFromBuild derives combatCap from the actually-deployed board, not effectiveBoardCap or purchased slots', () => {
     let s: BuildState = { ...newBuild('2026-07-04', 1), scrap: 200, board: [{ defId: 'gutter-runt', tier: 1, relicIds: [] }] };
     s = (buyBoardSlot(s) as { ok: true; state: BuildState }).state; // effectiveBoardCap now 6, but only 1 rat deployed
     const lineup = lineupFromBuild(s);
-    expect(lineup.combatCap).toBe(3); // 1 deployed + 2, unaffected by the purchased slot
-    expect(lineup.combatCap).toBeLessThan(effectiveBoardCap(s) + 2);
+    expect(lineup.combatCap).toBe(1 + COMBAT_CAP_BONUS); // 1 deployed + bonus, unaffected by the purchased slot
+    expect(lineup.combatCap).toBeLessThan(effectiveBoardCap(s) + COMBAT_CAP_BONUS);
   });
 });
 
@@ -1450,16 +1450,34 @@ describe('day-gated shop unlocks (issue #12)', () => {
     }
   });
 
-  it('season-3 reskin swap (issue #115): retired reskins never roll; tribute + un-retired anchor do', () => {
-    // Draughtsman Moe reskins Blight-Witch and MD Rattyfock is retired, so
-    // neither base reskin is purchasable on any day; Warren-Warden returns to
-    // the pool and Draughtsman Moe joins it, both day-1 available (no unlockDay,
-    // matching the Blight-Witch kit Moe reskins).
+  it('season-3 reskin swap (issue #115) + #149 pool flip: retired reskins never roll; tribute + un-retired anchor do', () => {
+    // Draughtsman Moe reskins Blight-Witch, so Blight-Witch is never
+    // purchasable. Draughtsman Moe joins the pool, day-1 available (no
+    // unlockDay, matching the Blight-Witch kit Moe reskins). Per #149
+    // (2026-07-25) the Warren-Warden/MD-Rattyfock reskin pair swapped back:
+    // Warren-Warden is now the retired twin and MD Rattyfock is the
+    // purchasable one.
     for (const day of [1, 2, 3, 4, 5, 6, 7]) {
       expect(everAppears(day, 'blight-witch')).toBe(false);
-      expect(everAppears(day, 'md-rattyfock')).toBe(false);
+      expect(everAppears(day, 'warren-warden')).toBe(false);
       expect(everAppears(day, 'draughtsman-moe')).toBe(true);
-      expect(everAppears(day, 'warren-warden')).toBe(true);
+      expect(everAppears(day, 'md-rattyfock')).toBe(true);
+    }
+  });
+
+  it('season-3 prestige reskin swap (issue #151): Gutter Gourmand replaces Twilight-Runt', () => {
+    // Twilight-Runt is retired in favor of Gutter Gourmand, its exact-kit
+    // reskin — never purchasable on any day. Gutter Gourmand inherits
+    // Twilight-Runt's unlockDay: 3, so it's absent days 1-2 and present from
+    // day 3 onward, same gate the original had.
+    for (const day of [1, 2, 3, 4, 5, 6, 7]) {
+      expect(everAppears(day, 'twilight-runt')).toBe(false);
+    }
+    for (const day of [1, 2]) {
+      expect(everAppears(day, 'gutter-gourmand')).toBe(false);
+    }
+    for (const day of [3, 4, 5, 6, 7]) {
+      expect(everAppears(day, 'gutter-gourmand')).toBe(true);
     }
   });
 

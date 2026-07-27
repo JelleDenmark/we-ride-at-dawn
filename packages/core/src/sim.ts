@@ -1,5 +1,5 @@
 import type { Side, UnitDef, Ability, Lineup } from './data/units';
-import { UNIT_DEFS, tierAttackMultiplier, tierHealthMultiplier, reviveHpForTier, blockHitsForTier, poisonStacksForTier, cellarCoilChargeCapForTier } from './data/units';
+import { UNIT_DEFS, tierAttackMultiplier, tierHealthMultiplier, reviveHpForTier, blockHitsForTier, poisonStacksForTier, cellarCoilChargeCapForTier, backlineTargetsForTier, wardArmorForTier, buffSummonedForTier, weakenPercentForTier } from './data/units';
 import { ENEMY_POOL } from './data/enemies';
 import { RELIC_DEFS, type RelicDef } from './data/relics';
 import type { Gauntlet } from './gauntlet';
@@ -21,8 +21,18 @@ export const BOARD_CAP = 8;
  * per issue #69 (deployed-count + bonus, not board-cap + bonus) so the
  * headroom is always useful on a thin board but never a runaway ceiling on a
  * full one. See `combatCapForBuild` in shop.ts.
+ *
+ * Raised 2 -> 6 for the issue #105 summon rework: this bonus is no longer the
+ * summon *firewall* it used to be. Its old job — stopping Rat-Piper's per-wave
+ * summon from filling the board with permanent pups — now belongs at the
+ * source (Rat-Piper's `maintainSummons` self-bounds to `count * tier`). So
+ * the bonus is free to be "how many momentary bodies fit at once," sized to
+ * fit Brood-Mother's babushka cascade (finite by construction — see her def).
+ * PLACEHOLDER pending the balance pass; the exploit-stress probe and the
+ * enemy-wave body-count check (this cap also gates enemy summoners, who share
+ * the loop) are the guardrails on the exact number.
  */
-export const COMBAT_CAP_BONUS = 2;
+export const COMBAT_CAP_BONUS = 6;
 export const SCORE_PER_WAVE = 100;
 /** Stalemate guard (e.g. two healers out-sustaining each other): the wave is abandoned. */
 export const MAX_TICKS_PER_WAVE = 1000;
@@ -38,9 +48,41 @@ export const MAX_TICKS_PER_WAVE = 1000;
 // linear HP curve eventually falls behind and attack stops mattering again
 // at high depth/tier — the same "overkill wasted" bug this whole change
 // exists to fix, just recurring at a higher power level.
-export const ENEMY_HEALTH_SCALE_PER_WAVE = 0.20;
+// 0.20 -> 0.22 (2026-07-25, issue #150): a separate, general "slightly
+// harder" difficulty pass on top of the 0.08 attack bump below — NOT targeted
+// at armor/sustain like that one was. Sized off three balance scripts
+// (balance:realistic, balance:depth, snowball) against 0.22/0.09 and a larger
+// 0.24/0.10 candidate: 0.22/0.09 knocked every depth proxy down a consistent
+// ~4-7% (e.g. balance:realistic lookahead day-7 24.06 -> 23.41, snowball
+// default day-7 13.86 -> 12.43) while staying monotonic/convergent and
+// leaving Rusted Nail positive on every expedition day. The 0.24/0.10
+// candidate cut deeper (~9-12%) but zeroed Rusted Nail's delta on three of
+// seven days in balance:depth — a relic going fully inert read as more than
+// "slightly" harder, so it was rejected in favor of this one. See issue #150
+// for the full comparison; this does NOT touch the tier-up curve (3^(tier-1)
+// per merge), which is a separate, still-open wave-10-flatten question.
+export const ENEMY_HEALTH_SCALE_PER_WAVE = 0.22;
 export const ENEMY_HEALTH_SCALE_QUADRATIC = 0.004;
-export const ENEMY_ATTACK_SCALE_PER_WAVE = 0.05;
+// 0.05 -> 0.08 (2026-07-24, alongside the Ward-Weaver armor rework): a modest
+// general-difficulty raise so the deep gauntlet actually pressures armor/
+// sustain fronts. NOTE this is only a supporting knob — the armor+heal
+// immortality it was first reached for is fixed structurally by the net-damage
+// floor in the tick loop (raising this alone couldn't break that threshold
+// without cratering the whole depth ladder; see the balance-pass notes). The
+// Boss Trial is INVARIANT to this constant — `buildBossTrialGauntlet` divides
+// each boss's attack by `enemyAttackScale` and the sim multiplies it back, so
+// the two cancel; only the depth gauntlet is affected.
+// 0.08 -> 0.09 (2026-07-25, issue #150): layered on top as part of the same
+// general difficulty pass described above the health constant; same
+// balance-script evidence, same rejected 0.10 candidate.
+// 0.09 -> 0.1 (2026-07-25): the 0.10 candidate #150 rejected specifically
+// because it zeroed Rusted Nail's delta on three of seven balance:depth days
+// (read as more than "slightly" harder at the time). Reapplied here at
+// Jesper's call re: enemy scaling still reading soft against the tier-up
+// curve (see the wave-10-flatten note) — re-verify Rusted Nail's delta
+// against balance:depth before this ships to confirm that tradeoff is one
+// he still wants.
+export const ENEMY_ATTACK_SCALE_PER_WAVE = 0.1;
 
 export function enemyHealthScale(waveIndex: number): number {
   return 1 + waveIndex * ENEMY_HEALTH_SCALE_PER_WAVE + waveIndex * waveIndex * ENEMY_HEALTH_SCALE_QUADRATIC;
@@ -72,6 +114,12 @@ export type BattleEvent =
   | { type: 'summon'; side: Side; index: number; unit: UnitView }
   | { type: 'revive'; side: Side; index: number; unit: UnitView }
   | { type: 'buff'; targetId: number; attack: number; health: number; newAttack: number; newHealth: number }
+  /** Gutter-Acolyte's attack shred (issue #137): `attack` is the amount
+   * actually removed (post-floor, so it may be less than the caster's full
+   * shred). A separate event from 'buff' on purpose — the replay renders
+   * buffs as green "+N" floats, and a debuff wearing that costume would
+   * read as a gift. */
+  | { type: 'weaken'; targetId: number; attack: number; newAttack: number }
   | { type: 'relicProc'; targetId: number; relicId: string; name: string }
   | { type: 'shieldGranted'; targetId: number; sourceId: number }
   | { type: 'shieldAbsorbed'; targetId: number }
@@ -122,6 +170,20 @@ interface BattleUnit {
    */
   chargeStacks: number;
   /**
+   * Running total of every runtime attack buff this instance has ever
+   * received via `buff()` (Warren-Warden's `buffBehind`, Twilight-Runt's
+   * `teamBuffByWave`, Gnawer's `bequeathAttack`, etc.) — everything added to
+   * `attack` AFTER `instantiate` sets its tier-scaled base. `backlineDamage`
+   * needs this to build a flat, tier-multiplier-free per-hit magnitude
+   * (`def.attack` + relics + team relic attack) that still honors these
+   * runtime buffs the same way `source.attack` already does for every other
+   * attack-based effect — without it, a buffed Slink-Rat would silently deal
+   * less backline damage than an identical unit hitting through the normal
+   * clash. Never itself run through `tierAttackMultiplier` — `buff()` already
+   * tier-scales its callers' inputs before adding here.
+   */
+  attackBuffs: number;
+  /**
    * Twilight-Runt's `teamBuffByWave` (2026-07-16 rework of issue #110).
    * Tracks how far this instance has progressed through its two fire-once
    * team grants — 'none' (neither fired yet), 'early' (only the early-wave
@@ -133,6 +195,15 @@ interface BattleUnit {
    * without the effect.
    */
   waveBuffPhase: 'none' | 'early' | 'both';
+  /**
+   * instanceId of the summoner that owns this body, if it was summoned by a
+   * `maintainSummons` caster (Rat-Piper, issue #105). Lets that caster count
+   * how many of its OWN pups are still alive and top the litter back up to
+   * target instead of adding a fresh one every wave — the source-level bound
+   * that makes a raised `COMBAT_CAP_BONUS` safe. Undefined for recruited
+   * units and for one-shot summons (Brood-Mother's cascade doesn't maintain).
+   */
+  summonedBy?: number;
 }
 
 /** A hit reduced by armor still lands for at least this much. */
@@ -215,6 +286,7 @@ export function simulate(
       raised: false,
       chargeStacks: 0,
       waveBuffPhase: 'none',
+      attackBuffs: 0,
     };
   };
 
@@ -279,6 +351,7 @@ export function simulate(
 
   const buff = (target: BattleUnit, attack: number, health: number): void => {
     target.attack += attack;
+    target.attackBuffs += attack;
     target.health += health;
     target.maxHealth += health;
     events.push({
@@ -305,6 +378,107 @@ export function simulate(
   let currentWave = 0;
 
   /**
+   * TARGETED triggers (issue #133/#134: `allySummoned`, `onHurt`): their
+   * effects act on a specific other unit (the newly-summoned body, the
+   * attacker) that the positional `applyEffect` below has no way to name, so
+   * they resolve here instead. Magnitudes scale LINEARLY with the source's
+   * tier (`* tier`, 1/2/3) — both triggers repeat (every summon, every hit),
+   * and a repeating trigger must never also get `tierAttackMultiplier`'s
+   * exponential curve (see `chargeWhileBenched`'s rationale in units.ts).
+   */
+  const applyTargetedEffect = (
+    source: BattleUnit,
+    target: BattleUnit,
+    buffSummonedBudget?: { attack: number; health: number }
+  ): void => {
+    if (!source.ability) return;
+    const effect = source.ability.effect;
+    const tier = source.tier;
+    switch (effect.kind) {
+      case 'buffSummoned': {
+        // Squeak-Sensei (issue #133). The buff lands on the NEWCOMER only —
+        // that targeting is the ADR-0003 safety (a fresh instance, buffed
+        // once at birth; nothing accumulates on a persistent unit). See the
+        // Effect's doc comment in units.ts before ever widening the target.
+        // Magnitude comes from `buffSummonedForTier` ([1, 3, 5], not `* tier`)
+        // — see that function's doc comment for the 2026-07-25 curve bump.
+        //
+        // Multi-caster stack cap (2026-07-25, per Jesper's "5x Sensei + 1-2
+        // Brood-Mother" concern): every OTHER Sensei on the board witnesses
+        // the same summon (see `fireAllySummoned` below), so without a cap
+        // N Senseis grant N times the buff to one newcomer — the exact
+        // additive-stacking shape that caused the `poisonAllEnemies` RatMoe
+        // exploit (issue #116). Mirror that fix: cap the TOTAL grant one
+        // summoned body can receive from all witnessing Senseis combined at
+        // `buffSummonedForTier(3)` (one ★3's worth) — cap-not-sum, same
+        // precedent as `poisonAllEnemies`/`blockCharges`. No single caster's
+        // per-summon grant changes; you can still field 2 tier-2s, just not
+        // stack 5 tier-3s onto one newcomer.
+        const scale = buffSummonedForTier(tier);
+        let grantAttack = effect.attack * scale;
+        let grantHealth = effect.health * scale;
+        if (buffSummonedBudget) {
+          grantAttack = Math.min(grantAttack, buffSummonedBudget.attack);
+          grantHealth = Math.min(grantHealth, buffSummonedBudget.health);
+          buffSummonedBudget.attack -= grantAttack;
+          buffSummonedBudget.health -= grantHealth;
+        }
+        if (grantAttack > 0 || grantHealth > 0) buff(target, grantAttack, grantHealth);
+        break;
+      }
+      case 'reflectDamage': {
+        // Steel-Whisker (issue #134). A normal 'attack' hit back at the
+        // attacker, so the attacker's own armor blunts it and the
+        // MIN_ATTACK_DAMAGE floor applies. Fires whether or not the victim
+        // survived the blow (the bristles cut as it falls), but never lands
+        // on an attacker some earlier source already felled this tick.
+        if (target.health > 0) applyDamage(target, effect.damage * tier, 'attack');
+        break;
+      }
+    }
+  };
+
+  /**
+   * `allySummoned` fire-point (issue #133): called once per summoned body,
+   * right after its 'summon' event, from the `summon` case below. Every
+   * OTHER living unit on that side that watches for summons reacts, in board
+   * order; the newcomer never witnesses its own arrival. `revive` is a
+   * raising, not a summoning, and deliberately never calls this.
+   *
+   * `buffSummonedBudget` is a fresh cap-not-sum budget PER SUMMON EVENT
+   * (`buffSummonedForTier(3)` in each of attack/health) — see the
+   * `buffSummoned` case in `applyTargetedEffect` above for why multiple
+   * Senseis must share one budget rather than each granting in full.
+   */
+  const fireAllySummoned = (summoned: BattleUnit): void => {
+    const buffSummonedBudget = { attack: buffSummonedForTier(3), health: buffSummonedForTier(3) };
+    for (const witness of [...boardOf(summoned.side)]) {
+      if (witness === summoned || witness.health <= 0) continue;
+      if (witness.ability?.trigger === 'allySummoned') {
+        applyTargetedEffect(witness, summoned, buffSummonedBudget);
+      }
+    }
+  };
+
+  /**
+   * Insert one summoned body at `index` on `side`, respecting the combat cap.
+   * Returns false (and does nothing) when the side is already at the cap, so
+   * callers can stop their litter loop. `owner` tags the body's `summonedBy`
+   * for `maintainSummons` accounting (Rat-Piper); omit it for one-shot summons
+   * (Brood-Mother's cascade). Fires `allySummoned` (Squeak-Sensei) per body.
+   */
+  const spawn = (def: UnitDef, index: number, side: Side, owner?: number): boolean => {
+    const board = boardOf(side);
+    if (board.length >= combatCap) return false;
+    const summoned = instantiate(def, side);
+    summoned.summonedBy = owner;
+    board.splice(index, 0, summoned);
+    events.push({ type: 'summon', side, index, unit: view(summoned) });
+    fireAllySummoned(summoned);
+    return true;
+  };
+
+  /**
    * `index` is the source's current board index, or — when `removed` —
    * the index it occupied before dying, which is where "behind" now starts
    * and where summons/revives are inserted.
@@ -320,10 +494,24 @@ export function simulate(
       case 'summon': {
         const def = DEF_LOOKUP[effect.unitId];
         for (let i = 0; i < effect.count * tier; i++) {
-          if (board.length >= combatCap) break;
-          const summoned = instantiate(def, source.side);
-          board.splice(index, 0, summoned);
-          events.push({ type: 'summon', side: source.side, index, unit: view(summoned) });
+          if (!spawn(def, index, source.side)) break;
+        }
+        break;
+      }
+      case 'maintainSummons': {
+        // Rat-Piper (issue #105): top the litter up to `count * tier`, don't
+        // pile on a fresh one every wave. Only bodies THIS caster summoned
+        // and that are still alive count toward the target, so re-summoning
+        // fills the shortfall left by pups that fell — and does nothing when
+        // the litter is already full. That caps this per-wave summoner's
+        // permanent contribution at `count * tier`, ever.
+        const def = DEF_LOOKUP[effect.unitId];
+        const target = effect.count * tier;
+        const living = board.filter(
+          (u) => u.summonedBy === source.instanceId && u.health > 0
+        ).length;
+        for (let i = 0; i < target - living; i++) {
+          if (!spawn(def, index, source.side, source.instanceId)) break;
         }
         break;
       }
@@ -331,6 +519,26 @@ export function simulate(
         const start = removed ? index : index + 1;
         const targets = effect.all ? board.slice(start) : board.slice(start, start + 1);
         for (const target of targets) buff(target, effect.attack * tierAttackMultiplier(tier), effect.health * tierHealthMultiplier(tier));
+        break;
+      }
+      case 'grantArmor': {
+        // Ward-Weaver rework (2026-07-24). `startOfBattle`-fired, so like
+        // `buffBehind`/`teamBuff` this is a fire-once-per-instance grant that
+        // cannot re-stack across waves (see the effect's doc comment in
+        // data/units.ts). Adds flat `damageReduction` — subtracted per hit
+        // with a MIN_ATTACK_DAMAGE floor in `applyDamage`, so it can NEVER
+        // fully negate a hit, which is the whole point of replacing the old
+        // `blockFrontHits` full-negate pool. `all` wards the whole warren
+        // (including the caster and units already in front of it), matching
+        // `teamBuff`'s whole-board reach; otherwise just the caster. Reuses
+        // the `shieldGranted` event (no matching `shieldAbsorbed` needed —
+        // that pair only tracked the old per-hit block drain).
+        const amount = wardArmorForTier(tier);
+        const targets = effect.all ? board : board.slice(index, index + 1);
+        for (const target of targets) {
+          target.damageReduction += amount;
+          events.push({ type: 'shieldGranted', targetId: target.instanceId, sourceId: source.instanceId });
+        }
         break;
       }
       case 'bequeathAttack': {
@@ -531,6 +739,59 @@ export function simulate(
         buff(source, effect.attack * tier, effect.health * tier);
         break;
       }
+      case 'healSelf': {
+        // Grave-Leech (issue #135). `afterAttack`-fired, i.e. every clash
+        // tick this unit is front for — but only a clash it SURVIVED pays
+        // out: at 0 or less health the faint is already owed and a drain
+        // must not quietly resurrect it ahead of resolveDeaths. The clamp
+        // at maxHealth lives HERE, in the effect application (per the
+        // issue), which is the whole ADR-0003 bound: no matter how many of
+        // the 45 waves it fights, it can never bank health past its own
+        // ceiling. Same clamp shape as the healPerTick regen in the tick
+        // loop below (Fat Tick / Forgotten Backpack).
+        if (source.health <= 0) break;
+        const amount = Math.min(effect.amount * tier, source.maxHealth - source.health);
+        if (amount > 0) {
+          source.health += amount;
+          events.push({ type: 'heal', targetId: source.instanceId, amount, newHealth: source.health });
+        }
+        break;
+      }
+      case 'weakenAllEnemies': {
+        // Gutter-Acolyte (issue #137, converted to percentage 2026-07-25).
+        // `startOfWave`-fired, so this runs for every live Acolyte in board
+        // order at the top of the wave, same firing point as
+        // `poisonAllEnemies` — and same compounding bound: enemies are
+        // re-instantiated fresh every wave, so the shred can never carry
+        // across waves. Percentage is taken off the target's ORIGINAL
+        // wave-start attack (`weakenOriginalAttack`, snapshotted before any
+        // Acolyte fires), not whatever it's already been shredded down to —
+        // see `weakenPercentForTier`'s doc comment for why. That makes
+        // multi-caster stacking a simple ADDITIVE cap-not-sum budget
+        // (`weakenAppliedPercent`, capped at `weakenPercentForTier(3)` total
+        // per enemy per wave), same precedent as `poisonAllEnemies`. The
+        // MIN_ATTACK_DAMAGE floor still applies on top (enemies always hit
+        // for at least 1). `attack` on the event is the amount actually
+        // removed post-floor, so replays never show a bigger shred than what
+        // happened.
+        const capPct = weakenPercentForTier(3);
+        const ownPct = effect.percent * weakenPercentForTier(tier);
+        for (const target of opposing(source.side)) {
+          if (target.health <= 0) continue;
+          const original = weakenOriginalAttack.get(target.instanceId) ?? target.attack;
+          const appliedSoFar = weakenAppliedPercent.get(target.instanceId) ?? 0;
+          const pct = Math.min(ownPct, Math.max(0, capPct - appliedSoFar));
+          if (pct <= 0) continue;
+          const shred = Math.round(original * pct);
+          const reduced = Math.max(MIN_ATTACK_DAMAGE, target.attack - shred);
+          const delta = target.attack - reduced;
+          if (delta <= 0) continue;
+          target.attack = reduced;
+          weakenAppliedPercent.set(target.instanceId, appliedSoFar + pct);
+          events.push({ type: 'weaken', targetId: target.instanceId, attack: delta, newAttack: target.attack });
+        }
+        break;
+      }
       case 'chargeWhileBenched': {
         // Cellar-Coil (issue #106). See this Effect's doc comment in
         // data/units.ts and `cellarCoilChargeCapForTier`'s doc comment for
@@ -643,47 +904,67 @@ export function simulate(
       case 'backlineDamage': {
         // Backline damage path (issue #85; the "Slink-Rat option B"
         // primitive from docs/design/future-minions.md). A non-front unit
-        // adds its own current attack directly to the frontmost enemy,
-        // taking no retaliation — it never becomes `foe`/`front` in the
-        // tick loop below, so there is nothing to hit it back. `index` here
-        // is the source's live board position (this effect is only ever
-        // wired to `startOfWave`, never `faint`, so `removed` is never
-        // true, matching `buffAdjacent`'s reasoning above) — index 0 is
-        // "currently at the front," which already deals damage through the
-        // normal clash every tick, so it's excluded here to keep this
-        // strictly a *backline* contribution, not a double-dip for a unit
-        // that happens to rotate to the front.
+        // hits the front of the enemy line directly, taking no retaliation
+        // — it never becomes `foe`/`front` in the tick loop below, so there
+        // is nothing to hit it back. `index` here is the source's live board
+        // position (this effect is only ever wired to `startOfWave`, never
+        // `faint`, so `removed` is never true, matching `buffAdjacent`'s
+        // reasoning above) — index 0 is "currently at the front," which
+        // already deals damage through the normal clash every tick, so it's
+        // excluded here to keep this strictly a *backline* contribution, not
+        // a double-dip for a unit that happens to rotate to the front.
         if (index === 0) break;
-        const target = opposing(source.side)[0];
-        if (!target || target.health <= 0) break;
-        // Deliberately a direct `applyDamage` call, not routed through the
-        // tick loop's clash machinery below — this is what keeps the three
-        // interaction questions answered by construction rather than by a
-        // special-cased guard:
-        //  - Marrow-Snap's execute (relics.ts's `executeThreshold`) only
-        //    checks `foeHealthBeforeClash` captured immediately around the
-        //    tick loop's own clash hit, further down this file. This call
-        //    happens at `startOfWave`, entirely before that tick loop even
-        //    starts for the wave, so it can never be mistaken for "the
-        //    crossing blow" — a swarm of backline snipers cannot cheapen
-        //    Marrow-Snap's execute condition.
-        //  - Ward-Weaver's `blockCharges` pool only guards the tick loop's
-        //    two `applyDamage` calls against `front`/`foe`. This hits the
-        //    enemy side directly and never touches `blockCharges` at all,
-        //    so block charges are neither consumed nor checked here — they
-        //    protect the horde's own front from incoming hits, and this
-        //    effect only ever deals outgoing damage to the enemy.
-        //  - Gore-Cleaver's cleave-overkill spillover is computed only
-        //    right after the tick loop's own front-vs-front clash, reading
-        //    `front.relics` and the foe's post-clash health from that same
-        //    hit. This call never runs inside that block, so it can never
-        //    feed a stacked Gore-Cleaver's overkill carry.
-        // Ordering vs poison: this fires at `startOfWave`, before the first
-        // clash tick and before any poison ticks that wave (poison only
-        // ticks inside the tick loop, after the clash) — so backline damage
-        // always lands first, same relative order as Plague-Bearer's
-        // `poisonFrontEnemy` already establishes for its own startOfWave hit.
-        applyDamage(target, source.attack, 'attack');
+        // Merge scaling (issue #86 follow-up): tier grows how many enemies
+        // get hit (backlineTargetsForTier: 1/2/3), NOT how hard each hit
+        // lands. Per-hit damage is the unit's own def base attack plus its
+        // relics, the team-attack pool (horde units), and any runtime attack
+        // buffs it's received (`attackBuffs` — Warren-Warden's `buffBehind`,
+        // Twilight-Runt's `teamBuffByWave`, etc.), but with
+        // `tierAttackMultiplier` deliberately left out — see
+        // `backlineTargetsForTier`'s doc comment for why stacking the
+        // exponential 1x/3x/9x attack curve on top of a growing target count
+        // was rejected as an AOE-nuke risk. `attackBuffs` mirrors
+        // `source.attack` for every OTHER attack-based effect in this file —
+        // omitting it would make a buffed Slink-Rat silently under-hit.
+        const def = UNIT_DEFS[source.defId];
+        const perHitAttack =
+          (def?.attack ?? 0) +
+          source.relics.reduce((s, r) => s + (r.attack ?? 0), 0) +
+          (source.side === 'horde' ? teamAttack : 0) +
+          source.attackBuffs;
+        if (perHitAttack <= 0) break;
+        const targets = opposing(source.side).slice(0, backlineTargetsForTier(source.tier));
+        for (const target of targets) {
+          if (!target || target.health <= 0) continue;
+          // Deliberately a direct `applyDamage` call, not routed through the
+          // tick loop's clash machinery below — this is what keeps the three
+          // interaction questions answered by construction rather than by a
+          // special-cased guard:
+          //  - Marrow-Snap's execute (relics.ts's `executeThreshold`) only
+          //    checks `foeHealthBeforeClash` captured immediately around the
+          //    tick loop's own clash hit, further down this file. This call
+          //    happens at `startOfWave`, entirely before that tick loop even
+          //    starts for the wave, so it can never be mistaken for "the
+          //    crossing blow" — a swarm of backline snipers cannot cheapen
+          //    Marrow-Snap's execute condition.
+          //  - Ward-Weaver's `blockCharges` pool only guards the tick loop's
+          //    two `applyDamage` calls against `front`/`foe`. This hits the
+          //    enemy side directly and never touches `blockCharges` at all,
+          //    so block charges are neither consumed nor checked here — they
+          //    protect the horde's own front from incoming hits, and this
+          //    effect only ever deals outgoing damage to the enemy.
+          //  - Gore-Cleaver's cleave-overkill spillover is computed only
+          //    right after the tick loop's own front-vs-front clash, reading
+          //    `front.relics` and the foe's post-clash health from that same
+          //    hit. This call never runs inside that block, so it can never
+          //    feed a stacked Gore-Cleaver's overkill carry.
+          // Ordering vs poison: this fires at `startOfWave`, before the first
+          // clash tick and before any poison ticks that wave (poison only
+          // ticks inside the tick loop, after the clash) — so backline damage
+          // always lands first, same relative order as Plague-Bearer's
+          // `poisonFrontEnemy` already establishes for its own startOfWave hit.
+          applyDamage(target, perHitAttack, 'attack');
+        }
         break;
       }
     }
@@ -812,6 +1093,24 @@ export function simulate(
   let poisonLastApplied: Record<Side, number> = { horde: 0, gauntlet: 0 };
 
   /**
+   * Each living enemy's attack AT WAVE START, keyed by instanceId — the
+   * denominator `weakenAllEnemies` (Gutter-Acolyte, issue #137) percentages
+   * are taken against, snapshotted fresh every wave right after enemies are
+   * instantiated, before any Acolyte fires. See `weakenPercentForTier`'s doc
+   * comment in data/units.ts for why "original", not "current", is the base.
+   */
+  let weakenOriginalAttack: Map<number, number> = new Map();
+  /**
+   * Total fraction of `weakenOriginalAttack` already granted to each enemy
+   * this wave (issue #137), keyed by instanceId. Reset every wave alongside
+   * `poisonAllApplied`, same cap-not-sum shape: each `weakenAllEnemies`
+   * caster's own percent is clipped to whatever's left of
+   * `weakenPercentForTier(3)` for that specific enemy, so multiple Acolytes
+   * stack additively up to one ★3's worth, not without bound.
+   */
+  let weakenAppliedPercent: Map<number, number> = new Map();
+
+  /**
    * Total attack/health every `distributeStatsOnFaint` caster (Pack-Caller)
    * on a side has EVER given away, across the WHOLE battle — unlike
    * `poisonAllApplied`/`poisonLastApplied` above, this is deliberately NOT
@@ -874,6 +1173,11 @@ export function simulate(
     // Plague-Bearer's own separate per-wave budget (issue #131) — see
     // `poisonLastApplied` above. Independent of `poisonAllApplied`.
     poisonLastApplied = { horde: 0, gauntlet: 0 };
+    // weakenAllEnemies (Gutter-Acolyte, issue #137): snapshot each enemy's
+    // fresh attack as the percentage denominator, and reset the per-enemy
+    // cap-not-sum budget — see both maps' doc comments above.
+    weakenOriginalAttack = new Map(enemies.map((e) => [e.instanceId, e.attack]));
+    weakenAppliedPercent = new Map();
 
     fireEntryTriggers(horde);
     fireEntryTriggers(enemies);
@@ -881,6 +1185,17 @@ export function simulate(
 
     let ticks = 0;
     while (horde.length > 0 && enemies.length > 0 && ticks++ < MAX_TICKS_PER_WAVE) {
+      // Net-damage floor (2026-07-24): the two units about to clash — captured
+      // BEFORE this tick's regen — so we can guarantee each loses at least
+      // MIN_ATTACK_DAMAGE net this tick if its clash blow lands (see the clamp
+      // after the clash below). Without this, a per-tick heal (Fat Tick's
+      // `healPerTick`, or a team heal relic) exactly cancels the armor floor's
+      // 1-damage minimum, making a high-armor front unkillable — which defeats
+      // the very "armor can never make a unit immortal" guarantee the floor in
+      // `applyDamage` exists to provide. Fat Tick's sustain still fully applies
+      // against any real (>1) hit; it just can't manufacture immortality.
+      const frontStartHealth = horde[0].health;
+      const foeStartHealth = enemies[0].health;
       // Distribute team heal pool across all horde units to cap unbounded scaling
       // with board size (issue #75: Forgotten Backpack). Instead of each unit
       // getting full teamHealPerTick, divide it evenly: total team heal per tick
@@ -923,17 +1238,38 @@ export function simulate(
       // Captured for Marrow-Snap's crossing check below: the execute must
       // compare against the foe's health as it stood BEFORE this clash hit.
       const foeHealthBeforeClash = foe.health;
+      // Whether each side's clash blow actually LANDED this tick — a
+      // Ward-Weaver-absorbed hit never touched the body, so it must not
+      // fire `onHurt` (issue #134) below.
+      let foeTookBlow = false;
+      let frontTookBlow = false;
       if (blockCharges[foe.side] > 0) {
         blockCharges[foe.side]--;
         events.push({ type: 'shieldAbsorbed', targetId: foe.instanceId });
       } else {
         applyDamage(foe, damageOut, 'attack');
+        foeTookBlow = true;
       }
       if (blockCharges[front.side] > 0) {
         blockCharges[front.side]--;
         events.push({ type: 'shieldAbsorbed', targetId: front.instanceId });
       } else {
         applyDamage(front, damageIn, 'attack');
+        frontTookBlow = true;
+      }
+      // Net-damage floor: a unit whose clash blow landed must end the tick at
+      // least MIN_ATTACK_DAMAGE below where it started (pre-regen), so per-tick
+      // healing can never fully offset the armor floor and manufacture an
+      // immortal front. Guarded to units that started ABOVE the floor: a unit
+      // already at/below it is left to the normal clash + surviveLethal
+      // (Tail-Charm) path, so this never bypasses a death-cheat rescue. The
+      // clamp only ever removes healing the unit gained THIS tick — it can't
+      // deal fresh damage past the raw clash, so it never front-runs a faint.
+      if (frontTookBlow && frontStartHealth > MIN_ATTACK_DAMAGE) {
+        front.health = Math.min(front.health, frontStartHealth - MIN_ATTACK_DAMAGE);
+      }
+      if (foeTookBlow && foeStartHealth > MIN_ATTACK_DAMAGE) {
+        foe.health = Math.min(foe.health, foeStartHealth - MIN_ATTACK_DAMAGE);
       }
       damageThisWave += damageOut;
 
@@ -985,6 +1321,20 @@ export function simulate(
 
       if (front.ability?.trigger === 'afterAttack') applyEffect(front, 0, false);
       if (foe.ability?.trigger === 'afterAttack') applyEffect(foe, 0, false);
+
+      // `onHurt` reflect (issue #134: Steel-Whisker) resolves HERE — after
+      // the execute (Marrow-Snap) and cleave (Gore-Cleaver) blocks above,
+      // alongside the other post-clash triggers — deliberately, so the
+      // reflect's extra damage can never be mistaken for part of the
+      // crossing blow (Marrow-Snap compares against the clash hit only) and
+      // never feeds cleave-overkill (computed from the clash hit only,
+      // before this line runs). Only a blow that actually LANDED fires it:
+      // a shield-absorbed hit was never taken (see foeTookBlow/frontTookBlow
+      // above), and poison ticks below are rot, not blows. The reflect is
+      // fired symmetrically so an enemy-side thorns def (ADR-0004) works for
+      // free.
+      if (frontTookBlow && front.ability?.trigger === 'onHurt') applyTargetedEffect(front, foe);
+      if (foeTookBlow && foe.ability?.trigger === 'onHurt') applyTargetedEffect(foe, front);
 
       for (const board of [horde, enemies]) {
         for (const unit of [...board]) {

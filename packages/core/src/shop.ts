@@ -229,9 +229,16 @@ export type ActionResult = { ok: true; state: BuildState } | { ok: false; reason
 //   - 'blight-witch' is excluded now: Draughtsman Moe (season-3 tribute to
 //     RatMoe) is a same-kit reskin of it, and having both in rotation is
 //     redundant (no-redundant-kits rule).
-//   - 'md-rattyfock' is excluded, and 'warren-warden' is BROUGHT BACK: last
-//     season Rattyfock reskinned Warren-Warden, but with Rattyfock retired the
-//     pair is no longer redundant, so Warren-Warden returns to the pool.
+//   - Swapped back (Jesper, 2026-07-25, alongside #149): 'warren-warden' is
+//     excluded and 'md-rattyfock' is BROUGHT BACK — same reskin pair, no-
+//     redundant-kits rule still holds either direction, this is purely which
+//     twin is on shelf this season. Their stats/ability stay identical
+//     (see #149's Warren-Warden buff, mirrored onto both entries).
+//   - 'twilight-runt' is excluded (Jesper, 2026-07-25, issue #151): Gutter
+//     Gourmand is the season-3 prestige reskin of its `teamBuffByWave` kit,
+//     same "prestige replaces the base" pattern as Draughtsman Moe/Blight-
+//     Witch above — the wave-buff kit is only offered under the prestige
+//     name this season.
 // Every excluded def stays intact in UNIT_DEFS (tests/golden logs/replays
 // reference them directly) — only presence in the purchasable pool changes.
 //
@@ -246,9 +253,14 @@ export type ActionResult = { ok: true; state: BuildState } | { ok: false; reason
 // (golden logs) — only the purchasable pool changes.
 const SHOP_UNIT_POOL = Object.values(UNIT_DEFS).filter(
   (u) =>
-    u.id !== 'pup' &&
+    // Internal summon-only bodies (pup, and issue #105's brood-broodling /
+    // brood-runt cascade) are all cost-0 and must never be shop-rollable or
+    // browsable — excluding by cost covers every current and future one
+    // without an ever-growing id blocklist.
+    u.cost > 0 &&
     u.id !== 'blight-witch' &&
-    u.id !== 'md-rattyfock' &&
+    u.id !== 'warren-warden' &&
+    u.id !== 'twilight-runt' &&
     u.id !== 'dawn-runt' &&
     u.id !== 'dusk-runt'
 );
@@ -268,7 +280,8 @@ const SHOP_RELIC_POOL = Object.values(RELIC_DEFS);
  *
  * Exported (issue #136) so the compendium can list exactly the rats a
  * player can actually obtain this week — same day gate, same permanent
- * pool exclusions (pup/blight-witch/md-rattyfock/dawn-runt/dusk-runt) — no
+ * pool exclusions (pup/blight-witch/warren-warden/twilight-runt/dawn-runt/
+ * dusk-runt) — no
  * second filter to keep in sync.
  */
 export function shopUnitPoolForDay(day: number): UnitDef[] {

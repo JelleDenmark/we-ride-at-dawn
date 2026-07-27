@@ -22,6 +22,7 @@
     dailySeed,
     generateGauntlet,
     simulate,
+    WAVE_COUNT,
     UNIT_DEFS,
     ENEMY_POOL,
     RELIC_DEFS,
@@ -61,6 +62,10 @@
     reviveHpForTier,
     poisonStacksForTier,
     cellarCoilChargeCapForTier,
+    backlineTargetsForTier,
+    wardArmorForTier,
+    buffSummonedForTier,
+    weakenPercentForTier,
     simulateBossTrial,
     simulateBossTrialReplay,
     bossTrialPhaseAttack,
@@ -85,6 +90,7 @@
     loadLastIncomeHour,
     saveSeasonBest,
     loadSeasonBest,
+    type BestRideSnapshot,
     saveSeasonKills,
     loadSeasonKills,
     savePlayerName,
@@ -180,15 +186,30 @@
   // counts is the 10:00–11:00 bucket. Every other day already has a real
   // roster earning through any gap, so this only applies to day 1.
   const DAY1_CUTOFF_SEC = 10 * 3600;
+  // The ride-date/season boundary: currentRideDate shifts the clock back 6h,
+  // so a ride-date runs dawn-to-dawn (06:00–05:59 Copenhagen), not
+  // midnight-to-midnight.
+  const DAWN_SEC = 6 * 3600;
 
   /** Whether hour bucket `h` (epoch hours) falls inside the day-1 freeze:
    * its ride-date is the season's Monday and its Copenhagen local time is
-   * before 10:00. Checked per hour (not just "now") so offline catch-up on
-   * day 1 skips only the frozen hours, not the ones after 10:00 — and stays
-   * correct even if catch-up crosses into day 2 before it's credited. */
+   * in [06:00, 10:00). The dawn lower bound matters: Monday's ride-date
+   * extends past midnight to Tuesday 05:59, and without it those overnight
+   * hours also matched "Monday before 10:00" and were wrongly frozen (the
+   * 2026-07-21 no-rides-overnight bug). Compared against the season id's
+   * 10-char date prefix so a reissued id (e.g. 2026-07-13.2) still freezes
+   * its day 1 instead of silently never matching a plain ride-date. Checked
+   * per hour (not just "now") so offline catch-up on day 1 skips only the
+   * frozen hours, not the ones after 10:00 — and stays correct even if
+   * catch-up crosses into day 2 before it's credited. */
   function isFrozenHour(h: number, seasonId: string): boolean {
     const instant = new Date(h * HOUR_MS);
-    return currentRideDate(instant) === seasonId && copenhagenSeconds(instant) < DAY1_CUTOFF_SEC;
+    const sec = copenhagenSeconds(instant);
+    return (
+      currentRideDate(instant) === seasonId.slice(0, 10) &&
+      sec >= DAWN_SEC &&
+      sec < DAY1_CUTOFF_SEC
+    );
   }
 
   // build.date is the current expedition day's date; the horde rides its
@@ -200,6 +221,10 @@
   const storedBest = loadSeasonBest(seasonIdFor(currentRideDate()));
   let seasonBest = $state(storedBest.best);
   let seasonBestHour = $state<number | undefined>(storedBest.hour);
+  // Exact (date, day, lineup) of the ride that set seasonBest — what the
+  // server re-simulates for anti-cheat (issue #81). Snapshotted here, not at
+  // submit time: the build keeps mutating after the best ride.
+  let seasonBestSnapshot = $state<BestRideSnapshot | undefined>(storedBest.snapshot);
   // Cumulative season total of enemies felled across every completed ride —
   // only climbs, resets with seasonBest. Leaderboard tiebreak under depth.
   let seasonKills = $state(loadSeasonKills(build.seasonId));
@@ -260,7 +285,7 @@
     try {
       const [rows, rank] = await Promise.all([
         fetchTop(build.seasonId, 20),
-        fetchRank(build.seasonId, seasonBest, seasonKills),
+        fetchRank(build.seasonId, seasonBest, myBossDamage(), seasonKills),
       ]);
       board = rows;
       myRank = rank;
@@ -282,6 +307,23 @@
   let bossTrialBoard = $state<BossTrialRow[]>([]);
   let bossTrialRank = $state<number | null>(null);
   let bossTrialBoardBusy = $state(false);
+  // The Crown (issue #132): whoever tops the season's Boss Trial board wears a
+  // 👑 next to their name on BOTH boards — visible prestige on the board
+  // everyone reads, and it moves the instant someone out-damages them. Derived
+  // client-side from the already-fetched boss board (ordered damage desc), so
+  // no new state or query; the reigning champion needs a real score (>0) so an
+  // all-empty board crowns nobody.
+  const crownDeviceId = $derived(
+    bossTrialBoard.length > 0 && bossTrialBoard[0].damage > 0 ? bossTrialBoard[0].device_id : null
+  );
+  // This device's season-best boss damage, for the combined-board rank query
+  // (#132). Read from the fetched boss board (the authoritative season best),
+  // falling back to 0 when we're unranked/off the fetched page — a slightly
+  // stale rank self-corrects on the next refresh, same as every other board
+  // number here.
+  function myBossDamage(): number {
+    return bossTrialBoard.find((r) => isMe(r))?.damage ?? 0;
+  }
 
   // Fixed fight hour (issue #120): 20:00 CET, matching the established
   // 06:00 CET dawn/season-boundary convention (`copenhagenSeconds`/
@@ -421,13 +463,19 @@
     const sig = `${build.seasonId}|${playerName}|${seasonBest}|${build.day}|${seasonKills}`;
     if (sig === lastSubmit) return;
     lastSubmit = sig;
+    // Submit the SNAPSHOT of the best ride, not the live build: the server's
+    // re-simulation (issue #81) replays exactly (date, day, lineup, rideHour),
+    // and the live board may have changed since the best was set. Pre-snapshot
+    // saves fall back to the old live-build behavior (server treats those as
+    // unverifiable, not cheating).
     await submitScore({
       seasonId: build.seasonId,
       name: playerName,
       depth: seasonBest,
-      day: build.day,
-      lineup: lineupFromBuild(build),
+      day: seasonBestSnapshot?.day ?? build.day,
+      lineup: seasonBestSnapshot?.lineup ?? lineupFromBuild(build),
       rideHour: seasonBestHour,
+      rideDate: seasonBestSnapshot?.date,
       kills: seasonKills,
     });
     await refreshBoard();
@@ -470,6 +518,8 @@
     faint: 'When it faints,',
     afterAttack: 'After it attacks,',
     allyFaint: 'Whenever a friendly rat faints,',
+    allySummoned: 'Whenever a friendly rat is summoned,',
+    onHurt: 'When a blow lands on it,',
   };
 
   const TIME_OF_DAY_LABEL: Record<string, string> = {
@@ -524,11 +574,33 @@
     return buffScaleWith(attack, health, (t) => t);
   }
 
-  function abilitySentence(def: UnitDef | undefined): string {
+  /**
+   * "+1/+1 (★2 +3/+3 · ★3 +5/+5)" for Squeak-Sensei's `buffSummoned` curve —
+   * `buffSummonedForTier`'s `[1, 3, 5]` table (2026-07-25 bump), not the
+   * flat `(t) => t` gainStats uses. Reads the same core table sim.ts scales
+   * by, so display can't drift from the mechanic (see the display bug this
+   * pattern was created to prevent: [[wrad-copy-vs-engine-audit]]).
+   */
+  function buffSummonedScale(attack: number, health: number): string {
+    return buffScaleWith(attack, health, buffSummonedForTier);
+  }
+
+  function abilitySentence(def: UnitDef | undefined, side: 'horde' | 'enemy' = 'horde'): string {
     // Takes the def directly (not an id + UNIT_DEFS lookup) so it works for
     // both rats and enemies — enemies live in ENEMY_POOL, a separate array
     // not keyed by id (issue #136), and every caller already has the def
     // object in hand.
+    //
+    // `side` flips the sentence's perspective (issue #146): the copy is
+    // authored horde-side, but the compendium renders it for enemies too, so
+    // words like "horde"/"the frontmost enemy" would be backwards on an enemy
+    // card. `own` = a member of the caster's own team, `foe` = a member of the
+    // opposing team, `team` = the caster's whole side.
+    const isEnemy = side === 'enemy';
+    const own = isEnemy ? 'enemy' : 'rat';
+    const foe = isEnemy ? 'rat' : 'enemy';
+    const foes = isEnemy ? 'rats' : 'enemies';
+    const team = isEnemy ? 'enemy line' : 'horde';
     // Passive armor is not an `ability`, but it's absolutely something the
     // player must be told about — Dire-Rat's whole identity lives here.
     const armor = def?.damageReduction ?? 0;
@@ -540,8 +612,21 @@
       return armorSentence || 'No special trick — just a body to swell the ranks.';
     }
     const e = def.ability.effect;
+    if (e.kind === 'reflectDamage' && armor > 0) {
+      // Bespoke sentence (not the generic trigger/template + appended
+      // armorSentence below): Steel-Whisker (only reflectDamage user, issue
+      // #134) reads as two glued-together full sentences otherwise. Merged
+      // to one, per Jesper's review of the season-4 patch notes (2026-07-25)
+      // — the standalone `armorSentence` template stays untouched since
+      // Dire-Rat (its only other user) has no ability to merge it with.
+      return `Shrugs off ${armor} damage a hit (★2 ${armor * 2} · ★3 ${armor * 3}) and bites back for ${e.damage} (★2 ${e.damage * 2} · ★3 ${e.damage * 3}) — poison slips past the armor, blocked hits draw no blood.`;
+    }
     if (e.kind === 'blockFrontHits') {
-      return 'Each wave, blocks the front rat’s first hit outright (★2 blocks 2, ★3 blocks 3) — resets every wave.';
+      return `Each wave, blocks the front ${own}’s first hit outright (★2 blocks 2, ★3 blocks 3) — resets every wave.`;
+    }
+    if (e.kind === 'grantArmor') {
+      const who = e.all ? 'every ' + own : 'itself';
+      return `At the dawn of battle, wards ${who} with +${wardArmorForTier(1)} armor (★2 +${wardArmorForTier(2)}, ★3 +${wardArmorForTier(3)}) — every hit they take lands for that much less, all ride long.`;
     }
     if (e.kind === 'chargeWhileBenched') {
       // Bespoke sentence (not the generic trigger/condition template below):
@@ -558,29 +643,46 @@
       // Bespoke sentence (not the generic template below): the shared-budget
       // caveat (issue #131) doesn't fit the `${TRIGGER_WHEN} it ${what}` shape
       // without an awkward bolt-on clause, same reasoning as chargeWhileBenched.
-      return `When it faints, splits its current attack/health evenly across the horde (leftover point to the frontmost rat). All your Pack-Callers share one lifetime budget for this.`;
+      return `When it faints, splits its current attack and max health evenly across the surviving horde (any remainder goes to the frontmost survivors first). All your Pack-Callers draw from one shared pool for this, spent across the ride.`;
     }
     if (e.kind === 'backlineDamage') {
-      return `At the start of every wave, if not at the front, strikes the frontmost enemy directly for its own attack — a separate hit, landed before that wave's clashing even begins, with no retaliation. At the front, it just fights normally.`;
+      // Merge scaling grows target count, not per-hit damage (issue #86
+      // follow-up) — see `backlineTargetsForTier`'s doc comment in
+      // data/units.ts for why the exponential attack curve is deliberately
+      // left out here.
+      const base = def?.attack ?? 0;
+      const targets = (t: number) => backlineTargetsForTier(t);
+      return `At the start of every wave, if not at the front, strikes the first ${foe} for ${base} (★2 hits the first ${targets(2)} ${foes} for ${base} each · ★3 hits the first ${targets(3)} ${foes} for ${base} each) — separate hits, landed before that wave's clashing even begins, with no retaliation. At the front, it just fights normally.`;
     }
     let what = '';
     switch (e.kind) {
       case 'summon': {
         const name = UNIT_DEFS[e.unitId]?.name ?? ENEMY_DEFS[e.unitId]?.name ?? e.unitId;
-        what = `summons ${e.count} ${name}${e.count > 1 ? 's' : ''} (★2 ${e.count * 2} · ★3 ${e.count * 3}) in front`;
+        // Brood-Mother's summon (issue #105) births Brood-Broodlings that
+        // themselves birth Brood-Runts on faint — call out the cascade so the
+        // matryoshka reads, rather than looking like a flat litter.
+        const cascades = UNIT_DEFS[e.unitId]?.ability?.effect.kind === 'summon';
+        const litter = `summons ${e.count} ${name}${e.count > 1 ? 's' : ''} (★2 ${e.count * 2} · ★3 ${e.count * 3}) in front`;
+        what = cascades ? `${litter} — and each births smaller young of its own when it falls` : litter;
+        break;
+      }
+      case 'maintainSummons': {
+        const name = UNIT_DEFS[e.unitId]?.name ?? ENEMY_DEFS[e.unitId]?.name ?? e.unitId;
+        // Rat-Piper (issue #105): maintenance, not a fresh litter every wave.
+        what = `keeps ${e.count} ${name}${e.count > 1 ? 's' : ''} (★2 ${e.count * 2} · ★3 ${e.count * 3}) at its side, piping in a fresh one whenever one falls`;
         break;
       }
       case 'buffBehind':
-        what = `grants ${buffScale(e.attack, e.health)} to ${e.all ? 'every rat behind it' : 'the rat behind it'}`;
+        what = `grants ${buffScale(e.attack, e.health)} to ${e.all ? `every ${own} behind it` : `the ${own} behind it`}`;
         break;
       case 'bequeathAttack':
         what = `passes its OWN current attack to the rat behind it, plus a bonus for how deep into the ride it fell (capped at ${e.waveBonusCapMultiplier}× its own attack)`;
         break;
       case 'poisonFrontEnemy':
-        what = `applies ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) to the frontmost enemy — clears when the wave falls`;
+        what = `applies ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) to the frontmost ${foe} — clears when the wave falls`;
         break;
       case 'poisonLastEnemy':
-        what = `applies ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) to the enemy at the back of the line — clears when the wave falls, capped across multiple casters`;
+        what = `applies ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) to the ${foe} at the back of the line — clears when the wave falls, capped across multiple casters`;
         break;
       case 'poisonTarget':
         // Flat `stacks * tier`, NOT poisonStacksForTier — mirrors sim.ts's
@@ -595,27 +697,57 @@
         what = `revives your first fallen rat at ${reviveHpForTier(1)} health (★2 ${reviveHpForTier(2)} · ★3 ${reviveHpForTier(3)}), capped at its own max — once per rat`;
         break;
       case 'buffAdjacent':
-        what = `grants ${buffScale(e.attack, e.health)} to the rat(s) beside it — a middle seat buffs both neighbours`;
+        what = `grants ${buffScale(e.attack, e.health)} to the ${own}(s) beside it — a middle seat buffs both neighbours`;
         break;
       case 'teamBuff':
-        what = `grants ${buffScale(e.attack, e.health)} to the whole horde, itself included`;
+        what = `grants ${buffScale(e.attack, e.health)} to the whole ${team}, itself included`;
         break;
       case 'poisonAllEnemies':
-        what = `rots every enemy in the wave with ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) — ignores armor, clears when the wave falls, capped across multiple casters`;
+        what = `rots every ${foe} in the wave with ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) — ignores armor, clears when the wave falls, capped across multiple casters`;
         break;
       case 'teamBuffByWave':
-        what = `grants the whole horde ${buffScale(e.early.attack, e.early.health)} on its first wave, plus ${buffScale(e.late.attack, e.late.health)} more from wave ${e.switchWave} onward — both permanent for the rest of the battle`;
+        what = `grants the whole ${team} ${buffScale(e.early.attack, e.early.health)} on its first wave, plus ${buffScale(e.late.attack, e.late.health)} more from wave ${e.switchWave} onward — both permanent for the rest of the ride`;
         break;
+      case 'buffSummoned':
+        // [1, 3, 5] per-star curve (2026-07-25 bump) — the trigger repeats
+        // every summon, so sim.ts scales it via buffSummonedForTier, not
+        // 3^(tier-1).
+        what = `trains the newcomer: it arrives with ${buffSummonedScale(e.attack, e.health)} — capped across multiple casters`;
+        break;
+      case 'reflectDamage':
+        // Linear per-star curve — repeats every hit taken (see sim.ts).
+        what = `cuts back, dealing ${e.damage} damage (★2 ${e.damage * 2} · ★3 ${e.damage * 3}) to its attacker — a blocked hit draws no blood`;
+        break;
+      case 'healSelf':
+        // Linear per-star curve — repeats every clash survived (see sim.ts).
+        what = `drains ${e.amount} health back (★2 ${e.amount * 2} · ★3 ${e.amount * 3}) if it survived the clash — never past its own max`;
+        break;
+      case 'weakenAllEnemies': {
+        // [0.05, 0.10, 0.15] per-star curve (2026-07-25, converted from flat,
+        // then halved after the leaderboard-ceiling guardrail) — re-applies
+        // to each fresh wave, off ORIGINAL wave-start attack (see sim.ts).
+        const pct = (t: number) => Math.round(e.percent * weakenPercentForTier(t) * 100);
+        what = `saps ${pct(1)}% attack (★2 ${pct(2)}% · ★3 ${pct(3)}%) from every ${foe} in the wave — they always keep at least 1`;
+        break;
+      }
     }
     const when = def.ability.condition?.timeOfDay
       ? `${TIME_OF_DAY_LABEL[def.ability.condition.timeOfDay] ?? ''}`
       : '';
-    const abilityPart = `${TRIGGER_WHEN[def.ability.trigger]} it ${what}${when}.`;
+    // startOfBattle reads "at the start of the ride" for the persistent horde
+    // (fires once), but enemies are re-instantiated every wave, so for them it
+    // fires each wave — say so (issue #146 finding #2).
+    const triggerText =
+      isEnemy && def.ability.trigger === 'startOfBattle'
+        ? 'At the start of each wave,'
+        : TRIGGER_WHEN[def.ability.trigger];
+    const abilityPart = `${triggerText} it ${what}${when}.`;
     return armorSentence ? `${abilityPart} ${armorSentence}` : abilityPart;
   }
 
   function isSummoner(def: UnitDef | undefined): boolean {
-    return def?.ability?.effect.kind === 'summon';
+    const kind = def?.ability?.effect.kind;
+    return kind === 'summon' || kind === 'maintainSummons';
   }
 
   // Compendium (issue #136) lists every rat regardless of day-gating (a
@@ -642,6 +774,7 @@
     if (ability) {
       switch (ability.effect.kind) {
         case 'summon':
+        case 'maintainSummons':
           return '❋ summon';
         case 'buffBehind':
         case 'buffAdjacent':
@@ -664,8 +797,18 @@
           return '✚ revive';
         case 'blockFrontHits':
           return '⛨ block';
+        case 'grantArmor':
+          return '⛨ armor';
         case 'backlineDamage':
           return '⚔ snipe';
+        case 'buffSummoned':
+          return '❋ train';
+        case 'reflectDamage':
+          return '⚔ thorns';
+        case 'healSelf':
+          return '✚ drain';
+        case 'weakenAllEnemies':
+          return '▼ weaken';
       }
     }
     if ((def.damageReduction ?? 0) > 0) return '⛨ armor';
@@ -880,7 +1023,8 @@
         if (deepest.depth > seasonBest) {
           seasonBest = deepest.depth;
           seasonBestHour = deepest.hour;
-          saveSeasonBest(build.seasonId, seasonBest, deepest.hour);
+          seasonBestSnapshot = { date: build.date, day: build.day, lineup };
+          saveSeasonBest(build.seasonId, seasonBest, deepest.hour, seasonBestSnapshot);
         }
         seasonKills += rides.reduce((sum, r) => sum + r.enemiesDefeated, 0);
         saveSeasonKills(build.seasonId, seasonKills);
@@ -906,6 +1050,7 @@
       bestSeasonId = build.seasonId;
       seasonBest = 0;
       seasonBestHour = undefined;
+      seasonBestSnapshot = undefined;
       seasonKills = 0;
       rideLog = [];
       saveSeasonBest(build.seasonId, 0);
@@ -1050,7 +1195,8 @@
     if (deepest.depth > seasonBest) {
       seasonBest = deepest.depth;
       seasonBestHour = deepest.hour;
-      saveSeasonBest(build.seasonId, seasonBest, deepest.hour);
+      seasonBestSnapshot = { date: build.date, day: build.day, lineup };
+      saveSeasonBest(build.seasonId, seasonBest, deepest.hour, seasonBestSnapshot);
     }
     seasonKills += rides.reduce((sum, r) => sum + r.enemiesDefeated, 0);
     saveSeasonKills(build.seasonId, seasonKills);
@@ -1289,7 +1435,7 @@
     {#if updateAvailable && !updateDismissed}
       <div class="update-banner" role="status">
         <button class="update-banner-reload" onclick={reloadForUpdate}>
-          ⚔ a fresh build rode in — tap to reload
+          ⚔ an update rode in — tap to reload
         </button>
         <button class="update-banner-dismiss" onclick={dismissUpdateBanner} aria-label="dismiss"
           >✕</button
@@ -1559,9 +1705,11 @@
         {#if result}
           <p class="result">
             Your horde rides to <strong>depth {result.wavesCleared}</strong>
-            &middot; {result.survivors.length > 0
+            &middot; {result.wavesCleared >= WAVE_COUNT
               ? `⚑ the drains cleared — ${result.survivors.length} rats ride home`
-              : 'until the last rat falls'}
+              : result.survivors.length > 0
+                ? `${result.survivors.length} rats ride home`
+                : 'until the last rat falls'}
           </p>
           <p class="result-note">the drains hold steady all week — resets Monday</p>
         {/if}
@@ -1589,7 +1737,7 @@
         </p>
         <button class="watch" onclick={watchRide}>▶ watch the next ride</button>
         <p class="season-best">Deepest ride this week: <strong>depth {seasonBest}</strong> · resets Monday</p>
-        <p class="season-kills">Rats felled this week: <strong>{seasonKills}</strong></p>
+        <p class="season-kills">Enemies felled this week: <strong>{seasonKills}</strong></p>
         {#if currentDepth > seasonBest}
           <p class="season-hint">the next ride will reach depth {currentDepth}</p>
         {/if}
@@ -1607,8 +1755,10 @@
                   <span class="rl-kills">{r.enemiesDefeated ?? 0} felled</span>
                   <span class="rl-scrap">+{r.scrap} ⚙</span>
                   <!-- Riding until the last rat falls is the normal end of a ride;
-                       only the rare full clear gets a badge. -->
-                  <span class="rl-surv">{r.survivors > 0 ? '⚑ cleared the drains!' : ''}</span>
+                       only a true full clear (all WAVE_COUNT waves) earns the
+                       badge — survivors alone can mean a stalemate short of the
+                       end (issue #146 finding #1). -->
+                  <span class="rl-surv">{r.depth >= WAVE_COUNT ? '⚑ cleared the drains!' : ''}</span>
                 </li>
               {/each}
             </ul>
@@ -1628,19 +1778,24 @@
     {#if board.length === 0}
       <p class="lb-empty">{boardBusy ? 'reading the war-drums…' : 'no riders yet this week — be the first'}</p>
     {:else}
+      <p class="lb-tiebreak">ties in depth are broken by best Boss Trial damage · 👑 tops the Boss Trial</p>
       <ol class="lb-rows">
         {#each board as row, i}
           <li class="lb-row" class:me={isMe(row)}>
             <span class="lb-rank">{i + 1}</span>
-            <span class="lb-name">{row.name}{isMe(row) ? ' · you' : ''}</span>
-            <span class="lb-kills">{row.kills} felled</span>
+            <span class="lb-name"
+              >{#if row.device_id === crownDeviceId}<span class="crown" title="tops the Boss Trial board">👑</span> {/if}{row.name}{isMe(row) ? ' · you' : ''}</span
+            >
+            <span class="lb-boss" title="best Boss Trial damage — breaks depth ties"
+              >{row.boss_attempted ? `${row.boss_damage} dmg` : '—'}</span
+            >
             <span class="lb-depth">depth {row.depth}</span>
           </li>
         {/each}
       </ol>
     {/if}
     {#if myRank !== null && myRank > board.length}
-      <p class="lb-myrank">your rank: <strong>#{myRank}</strong> · depth {seasonBest} · {seasonKills} felled</p>
+      <p class="lb-myrank">your rank: <strong>#{myRank}</strong> · depth {seasonBest} · {myBossDamage() > 0 ? `${myBossDamage()} boss dmg` : 'no Boss Trial yet'}</p>
     {/if}
     <p class="lb-you">
       riding as <strong>{playerName || '—'}</strong>
@@ -1664,7 +1819,7 @@
     </div>
     <img class="bt-portrait" src={ART_URL['boss-trial']} alt="" />
     <p class="bt-blurb">
-      Every day at {BOSS_TRIAL_HOUR}:00 CET your horde automatically faces a boss — no trigger, no preview. Fell it to reach the next phase — every phase the next boss hits half again as hard, until the horde falls. Score is total damage dealt.
+      Every day at {BOSS_TRIAL_HOUR}:00 CET your horde automatically faces a boss — no trigger, no preview. Fell it to reach the next phase — every phase the next boss hits ×{BOSS_TRIAL_ESCALATION} as hard and carries +{BOSS_TRIAL_HP_GROWTH_PER_PHASE} health, until the horde falls. Score is total damage dealt.
     </p>
     {#if bossTrial && bossTrial.day === build.day}
       <p class="bt-result">Today's damage: <strong>{bossTrial.damage}</strong> · felled {bossTrial.phases} {bossTrial.phases === 1 ? 'boss' : 'bosses'} · back tomorrow</p>
@@ -1691,7 +1846,9 @@
         {#each bossTrialBoard as row, i}
           <li class="bt-row" class:me={isMe(row)}>
             <span class="bt-rank">{i + 1}</span>
-            <span class="bt-name">{row.name}{isMe(row) ? ' · you' : ''}</span>
+            <span class="bt-name"
+              >{#if row.device_id === crownDeviceId}<span class="crown" title="reigning Boss-Breaker">👑</span> {/if}{row.name}{isMe(row) ? ' · you' : ''}</span
+            >
             <span class="bt-phases">{row.phases} felled</span>
             <span class="bt-damage">{row.damage} dmg</span>
           </li>
@@ -1727,7 +1884,7 @@
             {@const def = UNIT_DEFS[slot.defId]}
             {@const afford = build.scrap >= def.cost}
             {@const recruitable = canRecruit(build, ins.index)}
-            {@const copies = build.board.filter((u) => u.defId === def.id && u.tier === 1).length}
+            {@const copies = [...build.board, ...build.bench].filter((u) => u.defId === def.id && u.tier === 1).length}
             {@const t2 = unitStats({ defId: def.id, tier: 2, relicIds: [] })}
             {@const t3 = unitStats({ defId: def.id, tier: 3, relicIds: [] })}
             <div class="card-head">
@@ -1735,7 +1892,7 @@
               <div>
                 <div class="card-name">{def.name}</div>
                 <div class="card-stats">
-                  {def.attack}/{def.health}
+                  {def.attack}/{def.health} <span class="card-tier">atk/hp</span>
                   <span class="card-tier">★2 {t2.attack}/{t2.health} · ★3 {t3.attack}/{t3.health}</span>
                 </div>
               </div>
@@ -1788,7 +1945,7 @@
               {#if ART_URL[unit.defId]}<img class="card-portrait" src={ART_URL[unit.defId]} alt="" />{/if}
               <div>
                 <div class="card-name">{def.name}{unit.tier > 1 ? ` ★${unit.tier}` : ''}</div>
-                <div class="card-stats">{stats.attack}/{stats.health}</div>
+                <div class="card-stats">{stats.attack}/{stats.health} <span class="card-tier">atk/hp</span></div>
               </div>
             </div>
             <p class="card-ability">{abilitySentence(def)}</p>
@@ -1817,7 +1974,7 @@
               {#if ART_URL[unit.defId]}<img class="card-portrait" src={ART_URL[unit.defId]} alt="" />{/if}
               <div>
                 <div class="card-name">{def.name}{unit.tier > 1 ? ` ★${unit.tier}` : ''}</div>
-                <div class="card-stats">{stats.attack}/{stats.health}</div>
+                <div class="card-stats">{stats.attack}/{stats.health} <span class="card-tier">atk/hp</span></div>
               </div>
             </div>
             <p class="card-ability">{abilitySentence(def)}</p>
@@ -1872,7 +2029,8 @@
             <div>
               <div class="card-name">{selectedUnit.name}</div>
               <div class="card-stats">
-                {selectedUnit.attack}/{selectedUnit.health}{comp.tab === 'units' ? ` · ⚙ ${selectedUnit.cost}` : ''}
+                {selectedUnit.attack}/{selectedUnit.health}
+                <span class="card-tier">atk/hp</span>{comp.tab === 'units' ? ` · ⚙ ${selectedUnit.cost}` : ''}
               </div>
               {#if selectedUnit.archetype || armor > 0}
                 <div class="card-sub">
@@ -1890,7 +2048,7 @@
               cleared: attack ×{BOSS_TRIAL_ESCALATION}, health +{BOSS_TRIAL_HP_GROWTH_PER_PHASE}. Stats shown are phase 1.
             </p>
           {:else}
-            <p class="card-ability">{abilitySentence(selectedUnit)}</p>
+            <p class="card-ability">{abilitySentence(selectedUnit, comp.tab === 'enemies' ? 'enemy' : 'horde')}</p>
             {#if comp.tab === 'units' && isSummoner(selectedUnit)}
               <p class="card-hint">summoned rats fight beyond your warren's size (up to {combatCapForBuild(build)} in the drains)</p>
             {/if}
@@ -3020,12 +3178,22 @@
     white-space: nowrap;
   }
 
-  .lb-kills {
+  .lb-boss {
     flex: 0 0 auto;
     white-space: nowrap;
     font-size: 12px;
     color: var(--ink-dim);
     font-variant-numeric: tabular-nums;
+  }
+
+  .lb-tiebreak {
+    margin: 0 0 6px;
+    font-size: 11px;
+    color: var(--ink-dim);
+  }
+
+  .crown {
+    font-size: 12px;
   }
 
   .lb-depth {

@@ -58,6 +58,13 @@ export const RELIC_DEFS: Record<string, RelicDef> = {
     id: 'weeping-boil', name: 'Weeping Boil', scope: 'unit', cost: 4,
     desc: 'faint: 2 dmg, all foes', onFaintDamageAll: 2,
   },
+  // SEASON-4 JOINT-TUNING FLAG (issue #135): Grave-Leech gives sustain a
+  // unit-side home, and this relic was the game's only heal before it — a
+  // Leech wearing a Fat Tick stacks both drains on one front rat. Jesper's
+  // options on the issue: retire this from the shop pool, re-scope it to a
+  // pure stat stick (drop healPerTick), or keep both if benchmarks clear
+  // it. Decision DEFERRED to the balance pass, but the two must be tuned
+  // together — probe a wave-40+ ride with and without this on the Leech.
   'fat-tick': {
     id: 'fat-tick', name: 'Fat Tick', scope: 'unit', cost: 6,
     desc: '+1/+2, heal 1/clash', attack: 1, health: 2, healPerTick: 1,
@@ -76,7 +83,7 @@ export const RELIC_DEFS: Record<string, RelicDef> = {
   },
   'marrow-snap': {
     id: 'marrow-snap', name: 'Marrow-Snap', scope: 'unit', cost: 5,
-    desc: 'kills a foe its own hit drops below half health', executeThreshold: 0.5,
+    desc: 'kills a foe its own hit drops to half health or below', executeThreshold: 0.5,
   },
   // Easter egg (issue #24): the name is the whole point — someone else's
   // gear, left behind on an earlier ride, still has a little use left in it.

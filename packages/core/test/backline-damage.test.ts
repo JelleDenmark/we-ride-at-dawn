@@ -78,15 +78,32 @@ describe('backline damage primitive (issue #85)', () => {
     expect(damages.every((d) => d.amount === 3)).toBe(true);
   });
 
-  it('scales with tier, like every other attack-based magnitude', () => {
+  it('tier grows target count, NOT per-hit magnitude (issue #86 follow-up)', () => {
+    // Per-hit damage stays flat (3) at every tier — only the number of
+    // enemies hit grows (backlineTargetsForTier: 1/2/3) — so a ★2 sniper
+    // against a 2-enemy wave lands two separate 3-damage hits, not one
+    // 9-damage hit.
     const t2 = simulate(
       lineup({ defId: 'dire-rat' }, { defId: 'test-sniper', tier: 2 }),
-      gauntletOf([dummy(0, 1000)])
+      gauntletOf([dummy(0, 1000), dummy(0, 1000)])
     );
-    const foeId = ofType(t2.events, 'waveStart')[0].enemies[0].instanceId;
-    const firstHit = ofType(t2.events, 'damage').filter((d) => d.targetId === foeId)[0];
-    // tierAttackMultiplier(2) = 3x -> 3 * 3 = 9.
-    expect(firstHit.amount).toBe(9);
+    const enemies = ofType(t2.events, 'waveStart')[0].enemies;
+    const hitOn = (foeId: number) => ofType(t2.events, 'damage').find((d) => d.targetId === foeId);
+    expect(hitOn(enemies[0].instanceId)?.amount).toBe(3);
+    expect(hitOn(enemies[1].instanceId)?.amount).toBe(3);
+  });
+
+  it('a ★1 sniper only ever hits the frontmost enemy, even in a multi-enemy wave', () => {
+    const { events } = simulate(
+      lineup({ defId: 'dire-rat' }, { defId: 'test-sniper' }),
+      gauntletOf([dummy(0, 1000), dummy(0, 1000)])
+    );
+    const enemies = ofType(events, 'waveStart')[0].enemies;
+    // Only the frontmost enemy takes a startOfWave hit; the second enemy's
+    // only 'damage' events (if any, once it rotates up) come from the tick
+    // loop's own clash, never a second pre-tick-loop backlineDamage hit.
+    const preTickDamages = ofType(events, 'damage').slice(0, 1);
+    expect(preTickDamages).toEqual([expect.objectContaining({ targetId: enemies[0].instanceId, amount: 3 })]);
   });
 
   it('multiple backline units stack additively, bounded by board size', () => {
@@ -106,8 +123,27 @@ describe('backline damage primitive (issue #85)', () => {
     expect(damages.slice(0, 3).map((d) => d.amount)).toEqual([3, 3, 3]);
   });
 
+  it('a runtime attack buff (e.g. Warren-Warden buffBehind) raises the per-hit damage, same as any other attack-based effect', () => {
+    // Warren-Warden's startOfBattle buffBehind grants +1 attack (tier 1) to
+    // every unit behind it, including a backline sniper. Backline damage
+    // recomputes its own flat, tier-multiplier-free magnitude rather than
+    // reusing `source.attack` directly (see the `backlineDamage` case in
+    // sim.ts) — this guards against silently dropping that live buff again.
+    const { events } = simulate(
+      lineup({ defId: 'warren-warden' }, { defId: 'test-sniper' }),
+      gauntletOf([dummy(0, 1000)])
+    );
+    const foeId = ofType(events, 'waveStart')[0].enemies[0].instanceId;
+    const firstHit = ofType(events, 'damage').find((d) => d.targetId === foeId);
+    expect(firstHit?.amount).toBe(4); // base 3 + Warren-Warden's +1 buff.
+  });
+
   it('backline damage does not grow with wave count (compounding-law canary)', () => {
-    const grinder = (n: number) => gauntletOf(...Array.from({ length: n }, () => [dummy(0, 1000)]));
+    // Health kept comfortably below the MAX_TICKS_PER_WAVE stalemate guard at
+    // wave index 9 even after the issue #150 enemy-scaling bump (0.20->0.22
+    // health/wave) — 1000 HP left only ~1 tick of headroom under the old
+    // scaling and started tripping the guard once scaling grew.
+    const grinder = (n: number) => gauntletOf(...Array.from({ length: n }, () => [dummy(0, 500)]));
     const short = simulate(lineup({ defId: 'dire-rat' }, { defId: 'test-sniper' }), grinder(2));
     const long = simulate(lineup({ defId: 'dire-rat' }, { defId: 'test-sniper' }), grinder(10));
     const foeIdOf = (events: BattleEvent[], waveIdx: number) => ofType(events, 'waveStart')[waveIdx].enemies[0].instanceId;

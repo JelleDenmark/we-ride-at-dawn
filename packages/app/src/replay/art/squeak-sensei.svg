@@ -1,0 +1,28 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <!-- Squeak-Sensei (issue #133): dojo trainer — every pup that arrives beside it
+       comes trained. Small, upright, disciplined stance (not hunched like the
+       swarm it drills); a wrapped cane held ready to tap a newcomer into shape,
+       a red training-headband as the one accent color. Spare per house style. -->
+  <!-- tail, held low and still (composed posture) -->
+  <path d="M14 51 Q6 49 8 40 Q8.5 35 13 34" fill="none" stroke="#5e3120" stroke-width="2.2" stroke-linecap="round"/>
+  <!-- upright body, squared stance -->
+  <path d="M14 52 C11 43 15 33 25 31 C33 30 39 33 41 39 L41 46 C39 51 32 54 24 54 C18 54 15 54 14 52 Z" fill="#8a4b2f" stroke="#201209" stroke-width="1.5" stroke-linejoin="round"/>
+  <!-- head, level and alert -->
+  <circle cx="36" cy="28" r="4.6" fill="#8a4b2f" stroke="#201209" stroke-width="1.5"/>
+  <circle cx="36" cy="28" r="2" fill="#b4715a"/>
+  <circle cx="39.5" cy="26" r="1.4" fill="#201209"/>
+  <!-- red training headband, the one accent color -->
+  <path d="M31 25 Q36 22.5 41.5 25" fill="none" stroke="#b53a3a" stroke-width="1.6" stroke-linecap="round"/>
+  <path d="M41.3 25.4 L44.5 24.4 L43.6 27.2 Z" fill="#b53a3a"/>
+  <!-- ear -->
+  <path d="M33 24.5 C31.5 20 34.5 18 37.5 19.5 C36.8 21.8 36.3 23.2 35.9 24.8 Z" fill="#8a4b2f" stroke="#201209" stroke-width="1"/>
+  <!-- wrapped training cane held ready, tip down (a tap, not a strike) -->
+  <path d="M18 34 L14 52" fill="none" stroke="#5e3120" stroke-width="2" stroke-linecap="round"/>
+  <path d="M15.6 41 L16.4 41" stroke="#e8e2cf" stroke-width="1.4" stroke-linecap="round"/>
+  <path d="M15.2 45 L16 45" stroke="#e8e2cf" stroke-width="1.4" stroke-linecap="round"/>
+  <!-- gripping hand -->
+  <ellipse cx="18" cy="37" rx="2.2" ry="2" fill="#b4715a" stroke="#201209" stroke-width="0.9"/>
+  <!-- legs, square stance -->
+  <rect x="20" y="52" width="4.2" height="7" rx="1.7" fill="#5e3120"/>
+  <rect x="30" y="52" width="4.2" height="7" rx="1.7" fill="#5e3120"/>
+</svg>

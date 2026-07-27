@@ -1,0 +1,25 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <!-- Gutter-Acolyte (issue #137): anti-brute tech — the roster's first enemy
+       attack-shred, a curse that lowers the incoming number itself rather than
+       blunting or racing it. A junior cultist (plainer than Blight-Witch's
+       ragged hood: a plague-cult apprentice), raising a cracked curse-sigil
+       tablet toward the enemy line, sickly green shred-glow at its edge. -->
+  <!-- tail -->
+  <path d="M16 51 Q5 50 7 38 Q7 32 12 31" fill="none" stroke="#3a2b3f" stroke-width="2.4" stroke-linecap="round"/>
+  <!-- body, plainer robe than the witch (apprentice, not master) -->
+  <path d="M16 51 C12 42 16 32 27 30 C35 29 41 33 44 39 L44 46 C41 51 33 54 24 54 C19 54 17.5 53.5 16 51 Z" fill="#5c5266" stroke="#201209" stroke-width="1.5" stroke-linejoin="round"/>
+  <!-- plain hood, less ragged -->
+  <path d="M17 46 C14 36 20 26 31 26 C39 26 44 30 45 36 L41 40 C40 33 33 30 27 33 C22 35.5 21 42 23 47 Z" fill="#3a2b3f" stroke="#201209" stroke-width="1.2" stroke-linejoin="round"/>
+  <!-- eye glow under the hood -->
+  <circle cx="38" cy="35" r="1.6" fill="#8fae4a"/>
+  <!-- raised arm holding the sigil tablet up toward the enemy line -->
+  <path d="M40 32 L47 22" fill="none" stroke="#5c5266" stroke-width="2.4" stroke-linecap="round"/>
+  <rect x="44" y="14" width="8" height="10" rx="1" transform="rotate(18 48 19)" fill="#3f3a30" stroke="#201209" stroke-width="1"/>
+  <!-- cracked curse-sigil on the tablet -->
+  <path d="M46.5 15.5 L49.5 22.5 M45.5 19 L50.5 19" transform="rotate(18 48 19)" stroke="#8fae4a" stroke-width="1" stroke-linecap="round"/>
+  <!-- shred-glow radiating from the sigil -->
+  <circle cx="48" cy="19" r="6" fill="#8fae4a" opacity="0.18" transform="rotate(18 48 19)"/>
+  <!-- legs -->
+  <rect x="22" y="52" width="4.4" height="7" rx="1.7" fill="#3a2b3f"/>
+  <rect x="34" y="51" width="4.4" height="7" rx="1.7" fill="#3a2b3f"/>
+</svg>

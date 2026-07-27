@@ -1,0 +1,25 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <!-- Grave-Leech (issue #135): sustain front tank — heals itself by fighting,
+       not a backline healer. A graveyard scavenger, tattered burial-cloth
+       wrappings, a red drain-glow at the fangs/claw where the life it takes
+       feeds it back. Front-line brute build, not lean like a poison unit. -->
+  <!-- tail -->
+  <path d="M14 51 Q4 49 6 39 Q6.5 34 11 33" fill="none" stroke="#4a3a2c" stroke-width="2.4" stroke-linecap="round"/>
+  <!-- broad tank body -->
+  <path d="M14 52 C10 43 15 31 28 30 C37 29.5 44 33.5 47 40 L47 46 C44 52 35 55 25 55 C18 55 15.5 55 14 52 Z" fill="#6b5a4a" stroke="#201209" stroke-width="1.5" stroke-linejoin="round"/>
+  <!-- ragged burial-cloth wrap over the shoulders -->
+  <path d="M17 36 C15 42 16 48 20 52 L26 51 C22 47 21 41 22 35 Z" fill="#c9c2ae" stroke="#8a8272" stroke-width="1" stroke-linejoin="round"/>
+  <path d="M20 52 L18 55 L22 53.5 L24 56 L26 52.8" fill="#c9c2ae" stroke="none"/>
+  <!-- head, low and forward (biting posture) -->
+  <circle cx="42" cy="33" r="4.6" fill="#6b5a4a" stroke="#201209" stroke-width="1.5"/>
+  <circle cx="45.6" cy="35.4" r="1.4" fill="#7a2020"/>
+  <!-- fangs -->
+  <path d="M44 37 L43.5 39.5 L45 38 Z" fill="#e8e2cf"/>
+  <path d="M46.5 37.6 L46.5 39.8 L47.8 38.2 Z" fill="#e8e2cf"/>
+  <!-- drain glow: life siphoned back into the body -->
+  <circle cx="47" cy="38" r="2.2" fill="#c33" opacity="0.55"/>
+  <path d="M45 40 Q34 44 24 40" fill="none" stroke="#c33" stroke-width="1.1" stroke-dasharray="1.5 2" opacity="0.6"/>
+  <!-- legs -->
+  <rect x="21" y="53" width="4.6" height="7" rx="1.8" fill="#4a3a2c"/>
+  <rect x="35" y="53" width="4.6" height="7" rx="1.8" fill="#4a3a2c"/>
+</svg>

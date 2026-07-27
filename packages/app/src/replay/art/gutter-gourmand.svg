@@ -1,0 +1,41 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <!-- Gutter Gourmand (issue #151): season-3 prestige reskin of Twilight-Runt.
+       Same body geometry as twilight-runt.svg (reskin precedent: keep the
+       silhouette, recostume it) — the dawn/dusk color split becomes a stained
+       apron half over plain fur, and the sun/star motifs become a steaming
+       bowl (the hearty first course) and a thin wisp (the late-game thinned
+       rations), matching the kit's early-dose/late-dose split exactly. -->
+  <!-- steaming bowl behind, "hearty first course" side -->
+  <ellipse cx="11" cy="38" rx="6.4" ry="3.2" fill="#c9c2ae"/>
+  <ellipse cx="11" cy="37" rx="5" ry="1.6" fill="#a9481f"/>
+  <path d="M6 30 Q5 27 7 25" stroke="#cfd6e0" stroke-width="1.2" fill="none" stroke-linecap="round" opacity="0.7"/>
+  <path d="M10 29 Q9 25 11 23" stroke="#cfd6e0" stroke-width="1.2" fill="none" stroke-linecap="round" opacity="0.55"/>
+  <!-- thin wisp over the head, "thinned rations" side -->
+  <path d="M49 21 Q51 18 49.5 15" stroke="#cfd6e0" stroke-width="1" fill="none" stroke-linecap="round" opacity="0.5"/>
+  <!-- thin runt tail, over the bowl -->
+  <path d="M17 51 Q8 50 10 41 Q10.5 37 14 36" fill="none" stroke="#7a4a22" stroke-width="2.2" stroke-linecap="round"/>
+  <!-- body: plain fur (back/left half) and apron (front/right half), same seam as the original -->
+  <path d="M15 50 C11 42 16 33 28 31 L29 31.2 L29 53 C22.5 53.6 17.5 52.8 16 51 Z" fill="#8a4b2f"/>
+  <path d="M29 31.2 C35 30.5 41 33 44 38 C46 42 44 48 37 51 C34 52.6 31 52.8 29 53 Z" fill="#e8e2cf"/>
+  <!-- apron stain -->
+  <circle cx="36" cy="44" r="2.4" fill="#a9481f" opacity="0.7"/>
+  <!-- seam: apron tie, where the original's glow line sat -->
+  <line x1="29" y1="32" x2="29" y2="52.4" stroke="#7a4a22" stroke-width="1" opacity="0.7"/>
+  <!-- body outline over both halves -->
+  <path d="M15 50 C11 42 16 33 28 31 C35 30 41 33 44 38 C46 42 44 48 37 51 C30 54 20 54 16 51 Z"
+        fill="none" stroke="#201209" stroke-width="1.5" stroke-linejoin="round"/>
+  <!-- head (apron side) -->
+  <circle cx="44" cy="37" r="4.1" fill="#8a4b2f" stroke="#201209" stroke-width="1.5"/>
+  <!-- big runt ear -->
+  <path d="M42 33.4 C40.5 27.5 44 25 47.5 26.5 C46.5 29.5 46 31.5 45.5 34 Z" fill="#8a4b2f" stroke="#201209" stroke-width="1.1" stroke-linejoin="round"/>
+  <path d="M43 32.6 C42.2 29.4 44 27.8 46 28.4 C45.4 30.2 45 31.4 44.7 33 Z" fill="#b4715a"/>
+  <!-- eye + nose -->
+  <circle cx="46.2" cy="37.6" r="1.5" fill="#ecb45c"/>
+  <circle cx="48.2" cy="39.2" r="1.1" fill="#201209"/>
+  <!-- ladle, held low like a cook mid-serve -->
+  <path d="M40 46 L46 53" stroke="#5e3120" stroke-width="1.6" stroke-linecap="round"/>
+  <circle cx="47.4" cy="54.4" r="2.2" fill="#7d8792" stroke="#3a4148" stroke-width="0.9"/>
+  <!-- legs, one bare (fur) one behind the apron hem -->
+  <rect x="24" y="50" width="4.3" height="6.2" rx="2" fill="#7a4a22"/>
+  <rect x="38" y="50" width="4.3" height="6.2" rx="2" fill="#c9c2ae"/>
+</svg>

@@ -1,0 +1,40 @@
+{
+  "embeds": [
+    {
+      "title": "v0.7.0 — The drains grow teeth (1/3)",
+      "description": "Season 4 rides in. Four new rats, an enemy wing that fights back smarter, and the gutters get a cook.\n\n🍲 A tribute rides with this one: **Gutter Gourmand** carries Twilight-Runt's exact kit — a hearty buff at the start, thinned rations from wave 15 on — recostumed and dedicated to **Raabi**. Twilight-Runt retires into the name, same honour Draughtsman Moe pays RatMoe.\n\nNew to the roster:\n🥋 **Squeak-Sensei** (5) — Trains every rat you summon as it arrives\n🩸 **Grave-Leech** (6) — Bites back health on every clash it survives\n🛡️ **Steel-Whisker** (6) — Armored, and its bristles cut back when hit\n📜 **Gutter-Acolyte** (5) — Saps the whole enemy line's attack, every wave\n\nNew to the drains fighting back: an enchanter wing waits past wave 12 — **Muster-Herald** rallies the line, **Sluice-Warden** shields the front.",
+      "color": 5793266,
+      "footer": { "text": "we ride at dawn · season resets Monday 06:00 CET" }
+    },
+    {
+      "title": "Squeak-Sensei",
+      "description": "trains every newcomer that arrives",
+      "color": 5793266,
+      "image": { "url": "attachment://squeak-sensei.png" }
+    },
+    {
+      "title": "Steel-Whisker",
+      "description": "armored — hit it and it hits back",
+      "color": 5793266,
+      "image": { "url": "attachment://steel-whisker.png" }
+    },
+    {
+      "title": "Grave-Leech",
+      "description": "drains health with every clash it survives",
+      "color": 5793266,
+      "image": { "url": "attachment://grave-leech.png" }
+    },
+    {
+      "title": "Gutter-Acolyte",
+      "description": "saps the whole enemy line's attack",
+      "color": 5793266,
+      "image": { "url": "attachment://gutter-acolyte.png" }
+    },
+    {
+      "title": "Gutter Gourmand",
+      "description": "season 3 prestige reskin — dedicated to Raabi",
+      "color": 5793266,
+      "image": { "url": "attachment://gutter-gourmand.png" }
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "embeds": [
+    {
+      "title": "v0.7.0 — The drains grow teeth (2/3)",
+      "description": "**Retired**\n• Twilight-Runt — Replaced in the shop by Gutter Gourmand, same slot\n• Rat-Piper — Bought back at par, made room for this season's roster\n• Warren-Warden — Swapped back out; MD Rattyfock takes the day-1 slot again\n\n**Tuned**\n• Warren-Warden / MD Rattyfock — Own attack 2 → 3, felt dead-weight early\n• Ward-Weaver — Swaps its old full-block for flat armor on the whole warren. The old version let a strong board take zero damage all the way to the Boss Trial's cap; this one still gets worn down\n• Slink-Rat — Merging now hits more targets at ★2/★3 instead of one target for silly damage\n\n**The drains hit harder**\nEnemy health and attack scaling both stepped up again this pass, and the new enchanter wing (Muster-Herald, Sluice-Warden) starts showing up past wave 12 — the gauntlet should feel noticeably less soft past the midgame.",
+      "color": 5793266,
+      "footer": { "text": "we ride at dawn · season resets Monday 06:00 CET" }
+    }
+  ]
+}
