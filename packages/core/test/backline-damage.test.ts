@@ -355,6 +355,57 @@ describe('backline damage primitive (issue #85)', () => {
     });
   });
 
+  describe('interaction decision 5: Glass Shard\'s first-hit bonus (bug fix, 2026-07-27)', () => {
+    it('applies its wave-scaling bonus to the backline hit, same as a normal front clash', () => {
+      // Before the fix, backlineDamage computed its own perHitAttack
+      // entirely independent of firstHitBonus/firstHitBonusScalesWithWave,
+      // so a sniper wearing Glass Shard got no bonus, ever (player report).
+      const { events } = simulate(
+        lineup({ defId: 'dire-rat' }, { defId: 'test-sniper', relicIds: ['glass-shard'] }),
+        gauntletOf([dummy(0, 1000)], [dummy(0, 1000)])
+      );
+      const waveStarts = ofType(events, 'waveStart');
+      const damages = ofType(events, 'damage');
+      const firstHitOf = (w: number) => damages.find((d) => d.targetId === waveStarts[w].enemies[0].instanceId);
+      expect(firstHitOf(0)?.amount).toBe(4); // base 3 + wave 1
+      expect(firstHitOf(1)?.amount).toBe(5); // base 3 + wave 2 — fires anew each wave
+    });
+
+    it('does not multiply across multiple ★2/★3 targets — one bonus per unit per wave, not per enemy struck', () => {
+      // Glass Shard's wave-scaling bonus is deliberately uncapped (accepted
+      // risk — see its declaration in units.ts). Multiplying it by
+      // backlineTargetsForTier's growing target count would stack two
+      // unbounded axes (wave number AND merge tier) — the same AOE-nuke
+      // shape backlineTargetsForTier's own doc comment already rejected
+      // once for per-hit damage itself. Only the first target struck gets
+      // the bonus; the rest take the unit's plain per-hit damage.
+      const { events } = simulate(
+        lineup({ defId: 'dire-rat' }, { defId: 'test-sniper', tier: 2, relicIds: ['glass-shard'] }),
+        gauntletOf([dummy(0, 1000), dummy(0, 1000)])
+      );
+      const enemies = ofType(events, 'waveStart')[0].enemies;
+      const hitOn = (foeId: number) => ofType(events, 'damage').find((d) => d.targetId === foeId);
+      expect(hitOn(enemies[0].instanceId)?.amount).toBe(4); // base 3 + wave 1, first target only
+      expect(hitOn(enemies[1].instanceId)?.amount).toBe(3); // base 3, no bonus
+    });
+
+    it('a flat-attack relic (Rusted Nail) still adds to every target struck, unlike Glass Shard', () => {
+      // Sanity check that the fix didn't change the OTHER relic path:
+      // Rusted Nail's flat +2 is a permanent attack-stat increase baked
+      // into perHitAttack itself, so every target this hits still gets it —
+      // only Glass Shard's one-time first-hit bonus is restricted to the
+      // first target.
+      const { events } = simulate(
+        lineup({ defId: 'dire-rat' }, { defId: 'test-sniper', tier: 2, relicIds: ['rusted-nail'] }),
+        gauntletOf([dummy(0, 1000), dummy(0, 1000)])
+      );
+      const enemies = ofType(events, 'waveStart')[0].enemies;
+      const hitOn = (foeId: number) => ofType(events, 'damage').find((d) => d.targetId === foeId);
+      expect(hitOn(enemies[0].instanceId)?.amount).toBe(5); // base 3 + 2
+      expect(hitOn(enemies[1].instanceId)?.amount).toBe(5); // base 3 + 2, both targets
+    });
+  });
+
   describe('shipped consumers (issue #85 scope)', () => {
     it('exactly Slink-Rat is wired to backlineDamage — the only shipped consumer', () => {
       // `UNIT_DEFS` is mutated at the top of this file to register the
