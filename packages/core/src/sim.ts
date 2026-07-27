@@ -933,9 +933,30 @@ export function simulate(
           (source.side === 'horde' ? teamAttack : 0) +
           source.attackBuffs;
         if (perHitAttack <= 0) break;
+        // First-hit relics (Glass Shard) — same `firstAttackDone`-gated bonus
+        // the tick loop's front-vs-front clash grants below (see `bonusOf`
+        // there), extended to this path since this hit lands BEFORE the tick
+        // loop even starts and previously bypassed the bonus entirely (a
+        // Slink-Rat wearing Glass Shard got no bonus, ever — reported bug).
+        // Applied to only the FIRST target, not every target this hits at
+        // ★2/★3: Glass Shard's wave-scaling bonus is deliberately uncapped
+        // (accepted risk, see its declaration in units.ts), so letting merge
+        // tier multiply it too would stack two unbounded axes (wave number
+        // AND target count) — exactly the compounding-law risk
+        // `backlineTargetsForTier`'s doc comment already rejected once for
+        // per-hit damage itself. "First hit each wave" reads as one bonus
+        // per unit per wave, not one per enemy struck.
+        const firstHitBonus = source.firstAttackDone
+          ? 0
+          : source.relics.reduce(
+              (s, r) => s + (r.firstHitBonusScalesWithWave ? currentWave : (r.firstHitBonus ?? 0)),
+              0
+            );
+        source.firstAttackDone = true;
         const targets = opposing(source.side).slice(0, backlineTargetsForTier(source.tier));
-        for (const target of targets) {
-          if (!target || target.health <= 0) continue;
+        targets.forEach((target, i) => {
+          if (!target || target.health <= 0) return;
+          const amount = perHitAttack + (i === 0 ? firstHitBonus : 0);
           // Deliberately a direct `applyDamage` call, not routed through the
           // tick loop's clash machinery below — this is what keeps the three
           // interaction questions answered by construction rather than by a
@@ -963,8 +984,8 @@ export function simulate(
           // ticks inside the tick loop, after the clash) — so backline damage
           // always lands first, same relative order as Plague-Bearer's
           // `poisonFrontEnemy` already establishes for its own startOfWave hit.
-          applyDamage(target, perHitAttack, 'attack');
-        }
+          applyDamage(target, amount, 'attack');
+        });
         break;
       }
     }
