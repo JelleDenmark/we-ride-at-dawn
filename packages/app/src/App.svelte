@@ -626,7 +626,7 @@
     }
     if (e.kind === 'grantArmor') {
       const who = e.all ? 'every ' + own : 'itself';
-      return `At the dawn of battle, wards ${who} with +${wardArmorForTier(1)} armor (★2 +${wardArmorForTier(2)}, ★3 +${wardArmorForTier(3)}) — every hit they take lands for that much less, all ride long.`;
+      return `At the dawn of battle, wards ${who} with +${wardArmorForTier(1)} armor (★2 +${wardArmorForTier(2)}, ★3 +${wardArmorForTier(3)}) — every hit they take lands for that much less, all ride long, but a hit always lands for at least 1.`;
     }
     if (e.kind === 'chargeWhileBenched') {
       // Bespoke sentence (not the generic trigger/condition template below):
