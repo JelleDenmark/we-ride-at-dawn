@@ -120,6 +120,7 @@
     isMe,
     type BoardRow,
   } from './leaderboard';
+  import { submitPvpBoard } from './pvp-board';
   import {
     submitBossTrialScore,
     fetchBossTrialTop,
@@ -481,12 +482,45 @@
     await refreshBoard();
   }
 
+  // PvP league board sync (nightly duel). Unlike submitBest (a monotonic
+  // best-ride snapshot), this mirrors the player's CURRENT fighting board to
+  // pvp_boards as live, last-write-wins state — whatever's deployed now is what
+  // the 20:00 job duels and others scout. Debounced so a buy->place->merge
+  // burst is one sync, and signature-guarded so an unchanged board never
+  // re-POSTs (same shape as submitBest's lastSubmit guard).
+  let lastPvpSync = ''; // signature actually written to the server
+  let pvpPending = ''; // signature the debounce timer is currently waiting on
+  let pvpSyncTimer: ReturnType<typeof setTimeout> | undefined;
+  $effect(() => {
+    const season = build.seasonId;
+    const name = playerName;
+    // Read the full lineup SYNCHRONOUSLY so every nested change (tier, relics,
+    // order, count) is a tracked dependency — the debounced write below runs
+    // outside the effect's tracking scope, so it can't establish them itself.
+    const lineupJson = build.board.length > 0 ? JSON.stringify(lineupFromBuild(build)) : '';
+    const sig = `${season}|${name}|${lineupJson}`;
+    // The idle heartbeat reassigns `build` every second (nowTick), so this
+    // effect re-runs constantly. Only (re)arm the debounce when the board
+    // signature genuinely changed — otherwise the timer is cleared and reset
+    // every second and never fires. This is the fix for the sync silently
+    // never happening.
+    if (sig === pvpPending) return;
+    pvpPending = sig;
+    clearTimeout(pvpSyncTimer);
+    pvpSyncTimer = setTimeout(() => {
+      if (!name || lineupJson === '' || sig === lastPvpSync) return;
+      lastPvpSync = sig;
+      void submitPvpBoard({ seasonId: season, name, board: JSON.parse(lineupJson) });
+    }, 1500);
+  });
+
   function confirmName() {
     const n = nameDraft.trim().slice(0, 24) || defaultName();
     playerName = n;
     savePlayerName(n);
     nameEntryOpen = false;
     lastSubmit = ''; // force a resubmit so the board shows the new name
+    lastPvpSync = ''; // and re-sync the PvP board under the new name
     void submitBest();
   }
 
