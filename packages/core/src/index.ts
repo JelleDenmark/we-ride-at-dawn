@@ -98,6 +98,13 @@ export {
 } from './sim';
 export { simulateDuel, type DuelResult } from './duel';
 export {
+  scoreRound,
+  validateBoard,
+  legalEntrants,
+  type LeagueEntrant,
+  type RoundStanding,
+} from './pvp';
+export {
   simulateBossTrial,
   simulateBossTrialReplay,
   buildBossTrialGauntlet,
