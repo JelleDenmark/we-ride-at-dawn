@@ -1,66 +1,78 @@
--- Nightly PvP league — first backend pass (WRAD's first continuously-stored
--- per-player state; every prior table is a "best run so far" snapshot,
--- these are live/ongoing state a nightly job reads and writes).
+-- Nightly PvP league — backend. Also a TAKEOVER of the pvp_* namespace.
 --
--- Players keep building the ONE board (horde) that already rides the PvE
--- gauntlet; this migration adds the plumbing to sync that same board
--- server-side and let a nightly 20:00 job fight everyone's ghost, all-vs-all
--- round robin (max ~6 players), football scoring (win=3/draw=1/loss=0),
--- survivor-differential tiebreak, over a 7-day league window that resets
--- Monday 06:00. The scheduling/matchmaking/scoring logic itself is NOT here
--- — this is only the three tables + one client-facing RPC the job and the
--- client both need:
+-- WRAD's league and the retired Rats_PvP prototype share this one Supabase
+-- project (wvrllhiktnkvbpclmrpq). The prototype already created pvp_boards /
+-- pvp_results / pvp_rounds and a submit_pvp_board(text,uuid,text,jsonb) — all
+-- ROUND-keyed, built for its 2-hourly flat-budget format. WRAD's league is
+-- SEASON-keyed with a continuously-synced board (tiers + relics allowed), so
+-- the schemas are incompatible: a plain `create table if not exists` no-ops
+-- against the prototype's tables and the client would write season data into a
+-- round-keyed shape, and `create or replace function` fails 42P13 because the
+-- first parameter is renamed p_round -> p_season.
 --
---   * pvp_boards  — each player's current synced board (one row per player
---                   per season; overwritten in place as they keep editing).
---   * pvp_rounds  — league round lifecycle (one row per nightly round).
---   * pvp_results — standings the nightly job writes per round.
+-- Decision (owner, 2026-07-30): retire the Rats_PvP backend and take over the
+-- pvp_* names for WRAD. This migration DROPS the prototype's pvp_* tables and
+-- function and rebuilds them to WRAD's schema. The prototype's PvP data is
+-- discarded — that is the intent.
 --
--- Three brand-new, independent tables — NOT a modification of `scores`,
--- `boss_trial_scores`, or anything else in this schema.
+-- SIDE EFFECTS you must handle out-of-band (not SQL):
+--   * The Rats_PvP repo's `rats-cron.yml` will start erroring once these
+--     tables change shape — disable that workflow in the Rats_PvP repo.
+--   * The deployed rats-pvp client will break (wrong submit signature, wrong
+--     data shape) — expected; the fork is being retired.
+-- This migration deliberately touches ONLY pvp_* + submit_pvp_board. It does
+-- NOT touch scores / boss_trial_scores / runs / feedback, which WRAD still uses.
 --
--- DO NOT RUN THIS AUTOMATICALLY. Apply by hand against the live Supabase
--- project (wvrllhiktnkvbpclmrpq) via the SQL editor or CLI, before any PvP
--- app code or nightly-job code ships — everything described here is inert
--- until applied.
+-- DO NOT RUN AUTOMATICALLY. Apply by hand (SQL editor / CLI) against the live
+-- project before any PvP client or nightly-job code ships. Everything here is
+-- inert until applied.
 --
--- Arity note (same guard as submit_score / submit_boss_trial — see
--- 2026-07-06-add-kills.sql lines 57-65 for the incident this protects
--- against): submit_pvp_board is a brand-new function name with no prior
--- overload, so `create or replace` below is safe as a first apply. If this
--- signature is EVER changed later (a param added/removed), that change must
--- explicitly `drop function if exists public.submit_pvp_board(<old
--- signature>)` in the same migration, or PostgREST will see two matching
--- candidates for an old-shaped call and every such submit starts failing
--- silently with PGRST203.
+-- Re-run safety: the table drops are GUARDED on the prototype's fingerprint
+-- (pvp_boards having a `round_id` column). Once WRAD's season-keyed tables are
+-- in place that guard is false, so re-running this migration will NOT drop
+-- WRAD's own data — it becomes a no-op past the guard. The function is
+-- unconditionally dropped-then-created (same type signature either way, so this
+-- is the clean idempotent path that sidesteps the 42P13 rename error).
 --
--- RLS posture note (WRAD's standing rule — see boss-trial migration and the
--- Supabase RLS/grant gotcha memory): `grant select` alone does NOT restrict
--- anon to read-only. Supabase's default privileges hand anon
--- INSERT/UPDATE/DELETE/TRUNCATE on new public tables too, so every table
--- below enables RLS with a single public-read SELECT policy and nothing
--- else — anon's only write path is through the security-definer RPC, which
--- bypasses RLS by design.
+-- RLS posture (WRAD's standing rule / the Supabase RLS-grant gotcha): `grant
+-- select` alone does NOT restrict anon — Supabase hands anon write on new
+-- public tables too. Every table below enables RLS with a single public-read
+-- policy; anon's only write path is the security-definer submit RPC.
+
+-- ---------------------------------------------------------------------
+-- 0. Retire the Rats_PvP prototype's pvp_* objects (guarded).
+-- ---------------------------------------------------------------------
+do $$
+begin
+  -- Fingerprint the prototype: its pvp_boards is round-keyed (has round_id).
+  -- WRAD's is season-keyed (no round_id on pvp_boards), so this is false once
+  -- the takeover has happened — making the whole block a no-op on re-run.
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'pvp_boards'
+      and column_name = 'round_id'
+  ) then
+    drop table if exists public.pvp_boards  cascade;
+    drop table if exists public.pvp_results cascade;
+    drop table if exists public.pvp_rounds  cascade;
+  end if;
+end
+$$;
 
 -- ---------------------------------------------------------------------
 -- 1. pvp_boards — the synced current board per player per season.
 --
--- Unlike `scores`/`boss_trial_scores` (best-attempt-so-far, monotonic),
--- this is live state: it always holds whatever the player's board looks
--- like RIGHT NOW, so the nightly job can pick it up and other players can
--- scout it as "last night's ghost". `board` stores the same `Lineup` shape
--- already used for gauntlet runs and (per packages/core/src/sim.ts) duel
--- mode: `{ units: [{ defId, tier?, relicIds? }], teamRelicIds?, combatCap?
--- }` — see packages/core/src/data/units.ts LineupUnit/Lineup.
---
--- season_id is `text` and device_id is `uuid`, matching every existing
--- table in this schema (`scores`, `boss_trial_scores`) — device_id comes
--- from `deviceId()` in packages/app/src/telemetry.ts
--- (`crypto.randomUUID()`, persisted in localStorage), and season_id is
--- whatever the client passes through `boardSeason()`
--- (packages/app/src/leaderboard.ts), which prepends `dev-` on dev-channel
--- builds so dev and prod boards never mix. No new prefixing logic needed
--- here — it's entirely a client-side string, same as every other board.
+-- Live state (NOT best-attempt-monotonic like scores): always holds whatever
+-- the player's board looks like right now, so the nightly job fights the last
+-- edit and others scout it as "last night's ghost". `board` stores the same
+-- Lineup shape gauntlet runs and duel mode use: { units: [{ defId, tier?,
+-- relicIds? }], teamRelicIds?, combatCap? } (packages/core/src/data/units.ts).
+-- season_id text / device_id uuid match every existing table in this schema
+-- (scores, boss_trial_scores); device_id is deviceId() in telemetry.ts and
+-- season_id is boardSeason() in leaderboard.ts (dev- prefixed on the dev
+-- channel, so dev and prod boards never mix — no new prefixing here).
+-- ---------------------------------------------------------------------
 create table if not exists public.pvp_boards (
   season_id  text not null,
   device_id  uuid not null,
@@ -70,8 +82,6 @@ create table if not exists public.pvp_boards (
   primary key (season_id, device_id)
 );
 
--- Public read: the client scouts opponents' current boards directly via
--- PostgREST GET, same access pattern as `scores`/`boss_trial_scores`.
 grant select on public.pvp_boards to anon;
 alter table public.pvp_boards enable row level security;
 
@@ -88,28 +98,24 @@ begin
 end
 $$;
 
--- Upsert RPC. Last-write-wins on updated_at (NOT a monotonic
--- greatest()-style board like depth/damage/kills — a player is allowed to
--- freely rework their horde between now and 20:00, and only the latest
--- edit should be what the nightly job fights).
+-- Upsert RPC. Last-write-wins on updated_at (NOT monotonic like depth/kills —
+-- a player reworks their horde freely through the day and the nightly 20:00
+-- job fights whatever was synced last).
 --
--- Anti-cheat posture: "cheap sanity bounds", not a full server-authoritative
--- economy (matches every other board in this schema — client-trusted,
--- flagged not solved). The checks below only reject payloads that could not
--- possibly be a legal board — malformed/corrupted JSON, an absurd unit
--- count, or an absurd combat cap — they do NOT validate that the specific
--- defIds/tiers/relicIds were legitimately earned; that would need the full
--- shop economy replayed server-side, which is explicitly out of scope here.
+-- Anti-cheat posture: "cheap sanity bounds", not a server-authoritative
+-- economy (matches every other board here — client-trusted). These checks only
+-- reject payloads that could not possibly be a legal board (malformed JSON,
+-- absurd unit count / combat cap); they do NOT verify the specific
+-- defIds/tiers/relics were earned. The two numeric bounds mirror
+-- packages/core/src/sim.ts (BOARD_CAP=8, COMBAT_CAP_BONUS=6 -> cap headroom),
+-- hand-copied since SQL can't import them and deliberately loose.
 --
--- The two bounds mirror packages/core/src/sim.ts constants, hand-copied
--- since SQL can't import them — BOARD_CAP=8 (hard deploy-slot ceiling) and
--- COMBAT_CAP_BONUS=6 (the largest summon-cap bonus above BOARD_CAP a
--- legitimate build reaches, see the summon-cap rework / issue #105). If
--- either constant changes in packages/core, these bounds should be
--- revisited in a follow-up migration — they are deliberately generous
--- ("cheap"), not exact mirrors, so a sim-side tweak won't need a same-day
--- DB migration to avoid false-rejecting legal boards.
-create or replace function public.submit_pvp_board(
+-- Dropped-then-created (not create-or-replace): the retired prototype's
+-- submit_pvp_board has the same type signature (text,uuid,text,jsonb) but a
+-- renamed first param, which create-or-replace rejects with 42P13. Drop-first
+-- is the clean idempotent path.
+drop function if exists public.submit_pvp_board(text, uuid, text, jsonb);
+create function public.submit_pvp_board(
   p_season text,
   p_device uuid,
   p_name text,
@@ -163,18 +169,12 @@ grant execute on function public.submit_pvp_board(text, uuid, text, jsonb) to an
 
 -- ---------------------------------------------------------------------
 -- 2. pvp_rounds — league round lifecycle. One row per nightly round.
--- `status` transitions open -> scoring -> closed as the (not-yet-written)
--- nightly job processes each round: open while boards can still be synced
--- and read as "current", scoring while the job is running the round-robin,
--- closed once pvp_results for the round is final. season_id ties a round
--- back to the 7-day league window it belongs to (the league itself resets
--- Monday 06:00 — that reset is enforced by whatever seeds new rounds, not
--- by this table).
---
--- round_id is left as an opaque `text` primary key rather than a generated
--- id, same shape as the fork's pvp_rounds — the nightly job's seeding logic
--- (not written yet) decides the exact format (e.g. `${season_id}-YYYY-MM-DD`
--- for one round per night). See PVP-NOTES.md.
+-- status transitions open -> scoring -> closed as the nightly job runs.
+-- season_id ties a round to its 7-day league window (the league resets Monday
+-- 06:00 — enforced by whatever seeds rounds, not by this table).
+-- round_id is an opaque text PK; the nightly job decides the format (e.g.
+-- `${season_id}-YYYY-MM-DD` for one round per night).
+-- ---------------------------------------------------------------------
 create table if not exists public.pvp_rounds (
   round_id   text primary key,
   season_id  text not null,
@@ -186,8 +186,6 @@ create table if not exists public.pvp_rounds (
 
 create index if not exists pvp_rounds_season_id_idx on public.pvp_rounds (season_id);
 
--- Public read only — no anon write policy. Only the service-role key
--- (bypasses RLS), used by the nightly job, opens/advances/closes rounds.
 grant select on public.pvp_rounds to anon;
 alter table public.pvp_rounds enable row level security;
 
@@ -205,23 +203,13 @@ end
 $$;
 
 -- ---------------------------------------------------------------------
--- 3. pvp_results — per-round, per-player standings written by the nightly
--- job (with the service-role key, which bypasses RLS — anon has no write
--- path to this table at all, unlike pvp_boards). One row per player per
--- round: primary key (round_id, device_id).
---
--- `points` is football scoring for the round (win=3, draw=1, loss=0),
--- summed across the round's matches — the value the 7-day league table
--- ranks on. `survivor_diff` is the tiebreak (sum of your surviving units
--- minus theirs, across the round's matches) — kept as a separate column
--- rather than folded into `points` so the headline standing isn't swingy
--- (same reasoning as the fork's `margin` column, renamed here to match
--- this migration's brief).
---
--- round_id is not declared as a foreign key to pvp_rounds — no table in
--- this schema uses foreign keys (season_id on `scores` isn't FK'd to
--- anything either); the nightly job is trusted to write consistent rows,
--- matching the rest of this schema's posture.
+-- 3. pvp_results — per-round, per-player standings written by the nightly job
+-- (service-role key, bypasses RLS — anon has NO write path here, unlike
+-- pvp_boards). One row per player per round: PK (round_id, device_id).
+-- `points` is football scoring for the round (win=3/draw=1/loss=0), the value
+-- the 7-day league ranks on; `survivor_diff` is the tiebreak, a separate
+-- column so the headline standing isn't swingy.
+-- ---------------------------------------------------------------------
 create table if not exists public.pvp_results (
   round_id      text not null,
   season_id     text not null,
@@ -238,9 +226,6 @@ create table if not exists public.pvp_results (
 
 create index if not exists pvp_results_season_id_idx on public.pvp_results (season_id);
 
--- Public read only — same posture as pvp_rounds. The client reads this
--- table directly via PostgREST GET to render standings; only the
--- service-role nightly job writes it.
 grant select on public.pvp_results to anon;
 alter table public.pvp_results enable row level security;
 

@@ -1,6 +1,27 @@
 # PvP league migration — assumptions to double-check
 
-Drafted, NOT applied. File: `2026-07-30-add-pvp-league.sql`.
+NOT yet applied. File: `2026-07-30-add-pvp-league.sql`.
+
+## ⚠️ This migration is a TAKEOVER of the pvp_* namespace (owner decision, 2026-07-30)
+
+The retired **Rats_PvP** prototype shares this exact Supabase project
+(`wvrllhiktnkvbpclmrpq`) and already created `pvp_boards` / `pvp_results` /
+`pvp_rounds` + `submit_pvp_board(text,uuid,text,jsonb)`, all ROUND-keyed for
+its 2-hourly format. WRAD's league is SEASON-keyed with a continuously-synced
+board, so the schemas are incompatible — a first apply of the naive draft hit
+`42P13: cannot change name of input parameter "p_round"`.
+
+Owner chose to **retire the fork backend and take over pvp_***. The migration
+now: (0) guarded-drops the prototype's pvp_* tables (guard = `pvp_boards` still
+has a `round_id` column, so it's a no-op once WRAD's tables exist — safe to
+re-run, won't drop WRAD's data), then (1–3) rebuilds them to WRAD's schema, and
+drops-then-creates `submit_pvp_board` with the `p_season` signature.
+
+**Out-of-band follow-ups (not SQL):**
+- Disable `rats-cron.yml` in the **Rats_PvP** repo — it will error once these
+  tables change shape.
+- The deployed rats-pvp client will break (retired game — expected).
+- The prototype's PvP data is discarded. That is the intent.
 
 This note records where the draft had to infer something rather than read
 it directly off an existing WRAD table, so it's easy to spot-check before
