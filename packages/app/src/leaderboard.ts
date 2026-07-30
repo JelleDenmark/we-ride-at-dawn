@@ -33,19 +33,10 @@ export function defaultName(): string {
   return `${a}-${n}`;
 }
 
-export interface BoardRow {
-  name: string;
-  depth: number;
-  day: number;
-  device_id: string;
-  /** Cumulative season enemies-defeated total — the depth tiebreak. */
-  kills: number;
-}
-
 /** True if this row belongs to the player on this device. Typed structurally
- * (just the device_id column) rather than `BoardRow` so other boards with
- * different score columns — e.g. pvp-board.ts's `GhostRow`/`StandingRow` — can
- * reuse this instead of redefining the same one-liner. */
+ * (just the device_id column) so the various board row shapes — e.g.
+ * pvp-board.ts's `GhostRow`/`StandingRow` — can reuse this instead of
+ * redefining the same one-liner. */
 export function isMe(row: { device_id: string }): boolean {
   return row.device_id === deviceId();
 }
@@ -97,52 +88,9 @@ export async function submitScore(args: {
   }
 }
 
-// The depth board: the `scores` table ordered depth → kills. The ranked
-// PvP league lives in pvp-board.ts; this board is now purely the "deepest
-// ride this week" personal-best display, no longer the season score.
-const DEPTH_ORDER = 'depth.desc,kills.desc,updated_at.asc';
-
-/** Top-N of a season by depth, kills breaking depth ties. Empty array on any failure. */
-export async function fetchTop(seasonId: string, limit = 20): Promise<BoardRow[]> {
-  try {
-    const url =
-      `${SUPABASE_URL}/rest/v1/scores?season_id=eq.${encodeURIComponent(boardSeason(seasonId))}` +
-      `&order=${DEPTH_ORDER}&limit=${limit}` +
-      `&select=name,depth,day,device_id,kills`;
-    const res = await fetch(url, { headers: HEADERS });
-    if (!res.ok) return [];
-    return (await res.json()) as BoardRow[];
-  } catch {
-    return [];
-  }
-}
-
-/**
- * This device's rank on the depth board (1-based). A rider outranks you if
- * they're strictly deeper, OR tied on depth with more kills — mirrors
- * DEPTH_ORDER's two levels. Returns null if unranked or on failure.
- */
-export async function fetchRank(
-  seasonId: string,
-  depth: number,
-  kills: number
-): Promise<number | null> {
-  if (depth <= 0) return null;
-  try {
-    const outrank =
-      `or=(depth.gt.${depth},` +
-      `and(depth.eq.${depth},kills.gt.${kills}))`;
-    const url =
-      `${SUPABASE_URL}/rest/v1/scores?season_id=eq.${encodeURIComponent(boardSeason(seasonId))}` +
-      `&${outrank}&select=device_id`;
-    const res = await fetch(url, {
-      headers: { ...HEADERS, Prefer: 'count=exact' },
-    });
-    if (!res.ok) return null;
-    const range = res.headers.get('content-range'); // e.g. "0-24/25"
-    const total = range ? Number(range.split('/')[1]) : NaN;
-    return Number.isFinite(total) ? total + 1 : null;
-  } catch {
-    return null;
-  }
-}
+// NOTE: depth is no longer a ranked, in-app leaderboard — the nightly PvP
+// league (pvp-board.ts) is the season score now. `scores` still stores each
+// device's deepest ride for the personal "deepest ride this week" stat, the
+// anti-cheat re-simulation plumbing (issue #81), and the nightly Discord
+// "deepest ride" flex, so submitScore stays; the fetchTop/fetchRank ranked
+// read path was deleted with the Boss Trial removal.

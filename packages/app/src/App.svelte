@@ -13,7 +13,8 @@
   //   - `clickShopSlot` and nearby — shop purchase/reroll/freeze actions,
   //     thin wrappers around the pure functions imported from `core`'s
   //     `shop.ts` (this file never mutates game rules itself).
-  //   - `fetchTop` / `fetchRank` — leaderboard panel data, from `leaderboard.ts`.
+  //   - `refreshLeague` / `fetchLatestStandings` / `fetchGhosts` — nightly
+  //     league panel data (standings + scout ghosts), from `pvp-board.ts`.
   //   - the closing script tag below this block — the markup/template
   //     starts right after it; component state above is what drives it.
   import { onMount } from 'svelte';
@@ -103,15 +104,14 @@
     telemetryEnabled,
     setTelemetryEnabled,
   } from './telemetry';
+  import { submitScore, defaultName, isMe } from './leaderboard';
   import {
-    submitScore,
-    fetchTop,
-    fetchRank,
-    defaultName,
-    isMe,
-    type BoardRow,
-  } from './leaderboard';
-  import { submitPvpBoard } from './pvp-board';
+    submitPvpBoard,
+    fetchLatestStandings,
+    fetchGhosts,
+    type StandingRow,
+    type GhostRow,
+  } from './pvp-board';
   import { startUpdateCheck } from './updateCheck';
   import { startPwaUpdate } from './pwaUpdate';
   import { startInstallPromptCapture, promptInstall, isIOS, isStandalone } from './pwaInstall';
@@ -257,28 +257,11 @@
   );
   let telemetry = $state(telemetryEnabled());
 
-  // Leaderboard identity: a themed default until the player names their
-  // warlord (keyed by the anonymous device id, renameable).
+  // League identity: a themed default until the player names their warlord
+  // (keyed by the anonymous device id, renameable).
   let playerName = $state(loadPlayerName() ?? '');
   let nameEntryOpen = $state(loadPlayerName() === null);
   let nameDraft = $state(playerName || defaultName());
-  let board = $state<BoardRow[]>([]);
-  let myRank = $state<number | null>(null);
-  let boardBusy = $state(false);
-
-  async function refreshBoard() {
-    boardBusy = true;
-    try {
-      const [rows, rank] = await Promise.all([
-        fetchTop(build.seasonId, 20),
-        fetchRank(build.seasonId, seasonBest, seasonKills),
-      ]);
-      board = rows;
-      myRank = rank;
-    } finally {
-      boardBusy = false;
-    }
-  }
 
   // Guard so an unchanged best/name/day doesn't re-POST on every rebuild.
   let lastSubmit = '';
@@ -302,7 +285,6 @@
       rideDate: seasonBestSnapshot?.date,
       kills: seasonKills,
     });
-    await refreshBoard();
   }
 
   // PvP league board sync (nightly duel). Unlike submitBest (a monotonic
@@ -336,6 +318,40 @@
       void submitPvpBoard({ seasonId: season, name, board: JSON.parse(lineupJson) });
     }, 1500);
   });
+
+  // League read side: last night's standings (the season score) and the
+  // ghosts to scout for tonight. Both empty-on-failure, same posture as the
+  // depth board's refreshBoard. Scouting shows an opponent's currently-synced
+  // board — real info, at worst a day stale (see pvp-board.ts's fetchGhosts).
+  let standings = $state<StandingRow[]>([]);
+  let ghosts = $state<GhostRow[]>([]);
+  let leagueBusy = $state(false);
+  // Which rival's board the scout panel is expanded to, by device_id (null =
+  // collapsed). One at a time keeps the panel phone-sized.
+  let scoutedGhost = $state<string | null>(null);
+
+  async function refreshLeague() {
+    leagueBusy = true;
+    try {
+      const [rows, gh] = await Promise.all([
+        fetchLatestStandings(build.seasonId),
+        fetchGhosts(build.seasonId),
+      ]);
+      standings = rows;
+      ghosts = gh;
+    } finally {
+      leagueBusy = false;
+    }
+  }
+
+  // A scouted board's units as "Name ★tier" chips, in placement order.
+  function ghostUnits(g: GhostRow): { key: string; label: string }[] {
+    return g.board.units.map((u, i) => {
+      const name = UNIT_DEFS[u.defId]?.name ?? u.defId;
+      const tier = u.tier ?? 1;
+      return { key: `${g.device_id}-${i}`, label: tier > 1 ? `${name} ★${tier}` : name };
+    });
+  }
 
   function confirmName() {
     const n = nameDraft.trim().slice(0, 24) || defaultName();
@@ -755,9 +771,11 @@
       saveBuild(build);
     }
     const id = setInterval(() => (nowTick = Date.now()), 1000);
-    // Load the board now, then keep it loosely fresh while the tab is open.
-    void refreshBoard();
-    const boardId = setInterval(() => void refreshBoard(), 60_000);
+    // Load the league now, then keep it loosely fresh while the tab is open.
+    // Standings only change once a day (at 20:00), but the ghosts to scout
+    // update as rivals rebuild.
+    void refreshLeague();
+    const leagueId = setInterval(() => void refreshLeague(), 60_000);
     const stopUpdateCheck = startUpdateCheck(() => {
       updateDismissed = false;
       updateAvailable = true;
@@ -785,7 +803,7 @@
     })();
     return () => {
       clearInterval(id);
-      clearInterval(boardId);
+      clearInterval(leagueId);
       stopUpdateCheck();
       stopInstallCapture();
       stopPwaUpdate?.();
@@ -904,7 +922,7 @@
       saveSeasonBest(build.seasonId, 0);
       saveSeasonKills(build.seasonId, 0);
       saveRideLog(build.seasonId, []);
-      void refreshBoard(); // new week → pull the fresh (empty) board
+      void refreshLeague(); // new week → pull the fresh (empty) league + ghosts
     }
     // Auto-submit the season-best on any improvement (guarded so an
     // unchanged score never re-POSTs).
@@ -1564,27 +1582,64 @@
 
   <div class="leaderboard">
     <div class="lb-head">
-      <span class="panel-label">Deepest riders · week of {build.seasonId.slice(0, 10)}</span>
-      <button class="lb-refresh" onclick={() => void refreshBoard()} disabled={boardBusy}>
-        {boardBusy ? '…' : '↻'}
+      <span class="panel-label">Nightly league · week of {build.seasonId.slice(0, 10)}</span>
+      <button class="lb-refresh" onclick={() => void refreshLeague()} disabled={leagueBusy}>
+        {leagueBusy ? '…' : '↻'}
       </button>
     </div>
-    {#if board.length === 0}
-      <p class="lb-empty">{boardBusy ? 'reading the war-drums…' : 'no riders yet this week — be the first'}</p>
+    <p class="lg-blurb">
+      Your horde duels every rival's at <strong>20:00 CET</strong> — one board does both jobs, riding the drains for scrap by day and fighting the duel at night. Points: <strong>win 3 · draw 1 · loss 0</strong> against each rival, summed. Monday wipes the table.
+    </p>
+    {#if standings.length === 0}
+      <p class="lb-empty">{leagueBusy ? 'reading the war-drums…' : 'no duel yet — the first table posts after tonight\'s 20:00 CET'}</p>
     {:else}
+      <p class="lg-caption">last night's table</p>
       <ol class="lb-rows">
-        {#each board as row, i}
+        {#each standings as row, i}
           <li class="lb-row" class:me={isMe(row)}>
-            <span class="lb-rank">{i + 1}</span>
+            <span class="lb-rank">{i === 0 ? '👑' : i + 1}</span>
             <span class="lb-name">{row.name}{isMe(row) ? ' · you' : ''}</span>
-            <span class="lb-depth">depth {row.depth}</span>
+            <span class="lg-record" title="wins–draws–losses">{row.wins}–{row.draws}–{row.losses}</span>
+            <span class="lg-points">{row.points} pts</span>
           </li>
         {/each}
       </ol>
     {/if}
-    {#if myRank !== null && myRank > board.length}
-      <p class="lb-myrank">your rank: <strong>#{myRank}</strong> · depth {seasonBest}</p>
-    {/if}
+
+    <div class="scout">
+      <p class="lg-caption">scout tonight's rivals · last synced boards</p>
+      {#if ghosts.length === 0}
+        <p class="lb-empty">{leagueBusy ? 'scouting the drains…' : 'no rivals synced yet this week'}</p>
+      {:else}
+        <ul class="scout-list">
+          {#each ghosts as g (g.device_id)}
+            {@const open = scoutedGhost === g.device_id}
+            <li class="scout-item">
+              <button
+                class="scout-row"
+                aria-expanded={open}
+                onclick={() => (scoutedGhost = open ? null : g.device_id)}
+              >
+                <span class="scout-name">{g.name}</span>
+                <span class="scout-count">{g.board.units.length} rats {open ? '▾' : '▸'}</span>
+              </button>
+              {#if open}
+                {#if g.board.units.length === 0}
+                  <p class="scout-empty">empty board — no horde synced</p>
+                {:else}
+                  <div class="scout-board">
+                    {#each ghostUnits(g) as u (u.key)}
+                      <span class="scout-chip">{u.label}</span>
+                    {/each}
+                  </div>
+                {/if}
+              {/if}
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </div>
+
     <p class="lb-you">
       riding as <strong>{playerName || '—'}</strong>
       <button class="lb-rename" onclick={openRename}>rename</button>
@@ -2884,19 +2939,104 @@
     white-space: nowrap;
   }
 
-  .lb-depth {
+  .lg-blurb {
+    margin: 8px 0 4px;
+    font-size: 12px;
+    color: var(--ink-dim);
+  }
+
+  .lg-caption {
+    margin: 12px 0 2px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--ink-dim);
+  }
+
+  .lg-record {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    font-size: 12px;
+    color: var(--ink-dim);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .lg-points {
     flex: 0 0 auto;
     white-space: nowrap;
     color: #d4af37;
     font-variant-numeric: tabular-nums;
   }
 
-  .lb-myrank {
-    margin: 8px 0 0;
-    padding-top: 8px;
-    border-top: 1px solid #2a221a;
-    font-size: 13px;
-    color: #c9b891;
+  .scout {
+    margin-top: 4px;
+  }
+
+  .scout-list {
+    list-style: none;
+    margin: 4px 0 0;
+    padding: 0;
+  }
+
+  .scout-item {
+    border-radius: 6px;
+  }
+
+  .scout-item:nth-child(odd) {
+    background: #1a140f;
+  }
+
+  .scout-row {
+    display: flex;
+    width: 100%;
+    align-items: baseline;
+    gap: 10px;
+    padding: 6px 8px;
+    font-family: inherit;
+    font-size: 14px;
+    color: var(--ink);
+    background: none;
+    border: none;
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .scout-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .scout-count {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    font-size: 12px;
+    color: var(--ink-dim);
+  }
+
+  .scout-empty {
+    margin: 0;
+    padding: 0 8px 8px;
+    font-size: 12px;
+    color: var(--ink-dim);
+  }
+
+  .scout-board {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 0 8px 10px;
+  }
+
+  .scout-chip {
+    padding: 3px 8px;
+    font-size: 12px;
+    color: #e7dcc4;
+    background: #241a14;
+    border: 1px solid #4a3520;
+    border-radius: 999px;
+    white-space: nowrap;
   }
 
   .lb-you {
