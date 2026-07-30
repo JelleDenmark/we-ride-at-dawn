@@ -1,0 +1,42 @@
+name: WRAD PvP nightly round
+
+# Scores the nightly PvP league: reads every board synced for the current
+# week (prod + dev channels), runs the all-vs-all round robin, writes the
+# standings to pvp_results. See packages/core/scripts/run-league-round.ts.
+#
+# Two triggers:
+#   * schedule — nightly. 18:00 UTC ≈ 20:00 Copenhagen in summer (CEST),
+#     19:00 in winter (CET). GitHub cron can't do timezones; the ±1h DST
+#     drift is fine for a friend-group evening slot, and the runner derives
+#     the correct league day from the 06:00 Copenhagen rollover regardless.
+#   * workflow_dispatch — the manual "Run workflow" button. Phone-friendly
+#     (GitHub mobile/web) and doubles as the dev trigger: click it to score
+#     the current boards on demand instead of waiting for the evening.
+on:
+  schedule:
+    - cron: '0 18 * * *'
+  workflow_dispatch:
+    inputs:
+      dry:
+        description: 'Preview only (fetch + score, write nothing)'
+        type: boolean
+        default: false
+
+jobs:
+  round:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install deps
+        run: npm ci
+      - name: Run nightly round
+        working-directory: packages/core
+        env:
+          # Service-role key — required to WRITE pvp_rounds / pvp_results (no
+          # anon write policy). Add it as a repo secret. Without it the run
+          # falls back to a read-only preview.
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npm run pvp:round -- ${{ (github.event_name == 'workflow_dispatch' && inputs.dry) && '--dry' || '' }}
