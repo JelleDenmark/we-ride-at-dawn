@@ -66,12 +66,6 @@
     wardArmorForTier,
     buffSummonedForTier,
     weakenPercentForTier,
-    simulateBossTrial,
-    simulateBossTrialReplay,
-    bossTrialPhaseAttack,
-    bossTrialPhaseHP,
-    BOSS_TRIAL_ESCALATION,
-    BOSS_TRIAL_HP_GROWTH_PER_PHASE,
     type ActionResult,
     type BattleResult,
     type BuildState,
@@ -100,11 +94,8 @@
     RIDE_LOG_MAX,
     loadInstallNudgeDismissed,
     saveInstallNudgeDismissed,
-    saveBossTrialToday,
-    loadBossTrialToday,
     type RideLogEntry,
     type LastRide,
-    type BossTrialToday,
   } from './persistence';
   import {
     submitRun,
@@ -121,12 +112,6 @@
     type BoardRow,
   } from './leaderboard';
   import { submitPvpBoard } from './pvp-board';
-  import {
-    submitBossTrialScore,
-    fetchBossTrialTop,
-    fetchBossTrialRank,
-    type BossTrialRow,
-  } from './boss-trial-board';
   import { startUpdateCheck } from './updateCheck';
   import { startPwaUpdate } from './pwaUpdate';
   import { startInstallPromptCapture, promptInstall, isIOS, isStandalone } from './pwaInstall';
@@ -286,7 +271,7 @@
     try {
       const [rows, rank] = await Promise.all([
         fetchTop(build.seasonId, 20),
-        fetchRank(build.seasonId, seasonBest, myBossDamage(), seasonKills),
+        fetchRank(build.seasonId, seasonBest, seasonKills),
       ]);
       board = rows;
       myRank = rank;
@@ -294,168 +279,6 @@
       boardBusy = false;
     }
   }
-
-  // Daily Boss Trial (issue #107, Phase 1 — a leaderboard number only, no
-  // rewards; issue #120 — fixed hour, no player trigger). `bossTrial` is the
-  // MOST RECENT stored result (persistence.ts, keyed by seasonId — the exact
-  // day it belongs to travels on `bossTrial.day`, compared against
-  // `build.day` at each use site) rather than "today's" result specifically —
-  // this is what keeps a resolved fight (and its replay) watchable across a
-  // dawn rollover as "the previous fight" instead of vanishing the moment the
-  // calendar day turns over (see the resolve effect and template below). Only
-  // a NEW resolution (next BOSS_TRIAL_HOUR) or a season rollover replaces it.
-  let bossTrial = $state<BossTrialToday | null>(loadBossTrialToday(build.seasonId));
-  let bossTrialBoard = $state<BossTrialRow[]>([]);
-  let bossTrialRank = $state<number | null>(null);
-  let bossTrialBoardBusy = $state(false);
-  // The Crown (issue #132): whoever tops the season's Boss Trial board wears a
-  // 👑 next to their name on BOTH boards — visible prestige on the board
-  // everyone reads, and it moves the instant someone out-damages them. Derived
-  // client-side from the already-fetched boss board (ordered damage desc), so
-  // no new state or query; the reigning champion needs a real score (>0) so an
-  // all-empty board crowns nobody.
-  const crownDeviceId = $derived(
-    bossTrialBoard.length > 0 && bossTrialBoard[0].damage > 0 ? bossTrialBoard[0].device_id : null
-  );
-  // This device's season-best boss damage, for the combined-board rank query
-  // (#132). Read from the fetched boss board (the authoritative season best),
-  // falling back to 0 when we're unranked/off the fetched page — a slightly
-  // stale rank self-corrects on the next refresh, same as every other board
-  // number here.
-  function myBossDamage(): number {
-    return bossTrialBoard.find((r) => isMe(r))?.damage ?? 0;
-  }
-
-  // Fixed fight hour (issue #120): 20:00 CET, matching the established
-  // 06:00 CET dawn/season-boundary convention (`copenhagenSeconds`/
-  // `timeOfDayAt` above). Named rather than a literal per the issue.
-  const BOSS_TRIAL_HOUR = 20;
-  // BOSS_TRIAL_HOUR is always >= noon, so `timeOfDayAt`'s own cutoff
-  // (`copenhagenSeconds(now) < 12 * 3600 ? 'beforeNoon' : 'afterNoon'`)
-  // would resolve to 'afterNoon' for literally any date at that hour —
-  // derived from the constant (rather than hardcoding the string) so a
-  // future re-tune of the hour can't silently desync the two. This is what
-  // "the timeOfDay as of 20:00" means; no reverse-timezone Date needs to be
-  // constructed to get it (this codebase has no such helper, and hand-
-  // rolling one just to feed it back through the same branch is pointless).
-  const BOSS_TRIAL_TIME_OF_DAY: TimeOfDay = BOSS_TRIAL_HOUR >= 12 ? 'afterNoon' : 'beforeNoon';
-
-  /** Has BOSS_TRIAL_HOUR CET passed for ride-date `date`, as of `now`? Either
-   * the ride-day has already rolled past `date` (the dawn boundary is 06:00,
-   * well after 20:00, so any later ride-date guarantees the hour already
-   * passed), or we're still on `date` and the Copenhagen clock has reached
-   * it. String-compares ride dates (`YYYY-MM-DD`, lexicographic = chronological)
-   * so a build that's ahead of real time (dev fast-forward) is correctly
-   * left alone, mirroring the day-advance effect's own comment on that. */
-  function bossTrialDue(now: Date, date: string): boolean {
-    const today = currentRideDate(now);
-    return today > date || (today === date && copenhagenSeconds(now) >= BOSS_TRIAL_HOUR * 3600);
-  }
-
-  // Reload the stored fight when the season changes (week rollover, dev
-  // fast-forward) — matches seasonBest/seasonKills' own season-only reset.
-  // Deliberately does NOT reload on every day change: unlike those two, a
-  // resolved Boss Trial should stay visible (as "the previous fight", see
-  // the template below) across a dawn rollover, not disappear until a new
-  // one actually resolves.
-  $effect(() => {
-    bossTrial = loadBossTrialToday(build.seasonId);
-  });
-
-  async function refreshBossTrialBoard() {
-    bossTrialBoardBusy = true;
-    try {
-      const [rows, rank] = await Promise.all([
-        fetchBossTrialTop(build.seasonId, 20),
-        bossTrial ? fetchBossTrialRank(build.seasonId, bossTrial.damage, bossTrial.phases) : Promise.resolve(null),
-      ]);
-      bossTrialBoard = rows;
-      bossTrialRank = rank;
-    } finally {
-      bossTrialBoardBusy = false;
-    }
-  }
-
-  /** Retroactive resolution (issue #120): the player never triggers the
-   * trial — it fights automatically the moment BOSS_TRIAL_HOUR CET has
-   * passed for the still-open day. Only the player mutates the board, so
-   * whatever's persisted RIGHT NOW is exactly the board as it stood at their
-   * last action before that hour — the same retroactive shape the offline
-   * ride-accrual loop below already relies on (≤24h/visit), just without
-   * needing any board history.
-   *
-   * Declared here (before the day-advance heartbeat further down) so that on
-   * a reload after being away, this runs against `build.date`/`build.day` as
-   * they stood BEFORE that heartbeat fast-forwards them across any elapsed
-   * dawns — checking AFTER the advance would ask "has today's 20:00 passed"
-   * about the wrong (brand new, and on a season rollover possibly emptied)
-   * day, silently losing a trial that was actually still resolvable.
-   *
-   * Empty board at the fixed hour: skip and leave the gate open (do not
-   * save/submit a 0-damage score) rather than permanently closing today's
-   * gate on an empty snapshot — if the player builds a horde later the same
-   * day, this effect re-runs (it depends on `build`) and resolves then.
-   *
-   * Gates on `bossTrial.day === build.day` rather than `bossTrial !== null`:
-   * `bossTrial` now persists across a dawn rollover as "the previous fight"
-   * (see the reload effect above and the template below), so a non-null
-   * leftover from yesterday must NOT block today's fight from resolving —
-   * only an actual record for *today* should.
-   *
-   * Factored out (rather than inlined in the `$effect` below) so
-   * `simulateDawn` — the dev "next day" fast-forward button — can call it
-   * too, BEFORE it jumps `build.date` forward. Without this, that button
-   * silently skipped a still-resolvable trial: it mutates `build` directly
-   * in a click handler, with no equivalent to the real heartbeat's
-   * declaration-order guarantee (see this function's doc comment above)
-   * that lets a page reload resolve today's trial before the date moves on.
-   * Once `build.date` is ahead of the real date, `bossTrialDue`'s own
-   * dev-fast-forward guard (see its doc comment) correctly refuses to fire
-   * early for it — so a skipped trial doesn't just resolve late, it doesn't
-   * resolve at all until real time independently catches up.
-   */
-  function resolveBossTrialIfDue(now: Date) {
-    if ((bossTrial !== null && bossTrial.day === build.day) || build.board.length === 0) return;
-    if (!bossTrialDue(now, build.date)) return;
-    // Same timedLineup pattern as every other scoring path in this file
-    // (see commit 3ba9b2d): `lineupFromBuild` does NOT set `timeOfDay`, and
-    // an omitted one makes Dawn-Runt/Dusk-Runt's condition-gated `teamBuff`
-    // silently no-op (Twilight-Runt's wave-based `teamBuffByWave` no longer
-    // depends on this — 2026-07-16 rework — but the two retired-from-shop
-    // units still do). ONE timed lineup feeds the sim, the local save, AND
-    // the submitted payload, so the
-    // stored/submitted lineup reproduces the exact score it earned (issue
-    // #118's replay, and any future server-side re-simulation for #81, both
-    // depend on that).
-    const timedLineup = { ...lineupFromBuild(build), timeOfDay: BOSS_TRIAL_TIME_OF_DAY };
-    const result = simulateBossTrial(timedLineup);
-    const today: BossTrialToday = {
-      day: build.day,
-      damage: result.totalDamage,
-      phases: result.phasesSurvived,
-      lineup: timedLineup,
-    };
-    bossTrial = today;
-    saveBossTrialToday(build.seasonId, build.day, today);
-    // Same guard as submitBest: an unnamed device still gets the local
-    // gate/result, it just doesn't post to the shared board until named.
-    if (playerName) {
-      void submitBossTrialScore({
-        seasonId: build.seasonId,
-        name: playerName,
-        damage: today.damage,
-        phases: today.phases,
-        day: build.day,
-        lineup: timedLineup,
-      });
-    }
-    void refreshBossTrialBoard();
-  }
-
-  $effect(() => {
-    void nowTick;
-    resolveBossTrialIfDue(new Date(nowTick));
-  });
 
   // Guard so an unchanged best/name/day doesn't re-POST on every rebuild.
   let lastSubmit = '';
@@ -853,12 +676,6 @@
   let player: ReplayPlayer | undefined;
   let phase: 'idle' | 'riding' | 'done' = $state('idle');
   let result: BattleResult | null = $state(null);
-  // Which replay `player` last played — the stage/controls are shared
-  // (single ReplayPlayer instance, see onMount below), but the caption and
-  // result copy read differently for an hourly ride ("wave X") vs a Boss
-  // Trial replay ("felled N bosses"). Defaults to 'ride' since that's the
-  // only kind before issue #118.
-  let replayKind: 'ride' | 'trial' = $state('ride');
 
   // Stale-tab fix (PWA-SCOPE.md Phase 1): a deployed build never reaches an
   // already-open tab on its own. `updateAvailable` flips true when the
@@ -941,8 +758,6 @@
     // Load the board now, then keep it loosely fresh while the tab is open.
     void refreshBoard();
     const boardId = setInterval(() => void refreshBoard(), 60_000);
-    void refreshBossTrialBoard();
-    const bossTrialBoardId = setInterval(() => void refreshBossTrialBoard(), 60_000);
     const stopUpdateCheck = startUpdateCheck(() => {
       updateDismissed = false;
       updateAvailable = true;
@@ -971,7 +786,6 @@
     return () => {
       clearInterval(id);
       clearInterval(boardId);
-      clearInterval(bossTrialBoardId);
       stopUpdateCheck();
       stopInstallCapture();
       stopPwaUpdate?.();
@@ -1091,7 +905,6 @@
       saveSeasonKills(build.seasonId, 0);
       saveRideLog(build.seasonId, []);
       void refreshBoard(); // new week → pull the fresh (empty) board
-      void refreshBossTrialBoard(); // and the boss-trial board alongside it
     }
     // Auto-submit the season-best on any improvement (guarded so an
     // unchanged score never re-POSTs).
@@ -1128,16 +941,13 @@
 
   // Dev: repeated `simulateDawn`/`devSkipHours` use can push `build.date`
   // arbitrarily far ahead of real time (each jump is unbounded, there's no
-  // ceiling tying it back to `currentRideDate()`). Once that happens,
-  // `bossTrialDue`'s dev-fast-forward guard (see its doc comment) correctly
-  // refuses to fire until real time independently catches up — which, for a
-  // date pushed weeks out, means the Boss Trial looks permanently broken on
-  // that device. `freshBuild` does NOT fix this (it deliberately preserves
-  // `build.date`/`build.day`, only clearing shop/board). This button re-anchors
-  // date/day/seasonId to what a genuinely fresh build would have right now,
-  // while keeping the roster/scrap/relics intact (unlike `freshBuild`, which
-  // wipes the board) — the same carry-forward `advanceAfterDawn` uses, just
-  // targeting today instead of build.date's "next day".
+  // ceiling tying it back to `currentRideDate()`). `freshBuild` does NOT fix
+  // this (it deliberately preserves `build.date`/`build.day`, only clearing
+  // shop/board). This button re-anchors date/day/seasonId to what a genuinely
+  // fresh build would have right now, while keeping the roster/scrap/relics
+  // intact (unlike `freshBuild`, which wipes the board) — the same
+  // carry-forward `advanceAfterDawn` uses, just targeting today instead of
+  // build.date's "next day".
   function resetTestDate() {
     stopReplay();
     const today = currentRideDate();
@@ -1173,11 +983,6 @@
       lastRide = ride;
       submitRun({ rideDate: build.date, lineup, result: outcome.result, dev: true });
     }
-    // Give today's Boss Trial a chance to resolve against the board as it
-    // stands RIGHT NOW, before the date jumps forward — otherwise this
-    // button can silently skip a still-resolvable trial (see
-    // `resolveBossTrialIfDue`'s doc comment).
-    resolveBossTrialIfDue(new Date());
     stopReplay();
     build = advanceAfterDawn(build, addDay(build.date));
     saveBuild(build);
@@ -1408,7 +1213,6 @@
     inspect = null;
     pendingRelic = null;
     pendingSwap = null;
-    replayKind = 'ride';
     phase = 'riding';
     stageEl?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     result = null;
@@ -1423,38 +1227,6 @@
     // that no longer exists, so don't write it over the fresh idle state.
     if (gen !== replayGeneration) return;
     result = outcome.result;
-    phase = 'done';
-  }
-
-  /**
-   * Watch TODAY's Boss Trial — the historic, already-resolved fight (issue
-   * #118), not a live preview. Only ever callable once `bossTrial` is
-   * non-null (the template gates the button on that), so `bossTrial.lineup`
-   * is always the exact timed lineup that fought at BOSS_TRIAL_HOUR — per
-   * commit 3ba9b2d and boss-trial.ts's `simulateBossTrialReplay` doc comment,
-   * re-simulating that SAME lineup reproduces the identical event stream
-   * byte-for-byte, so this is freely re-watchable (unlike fighting the
-   * trial itself, which #120 gates to once/day) — no gate here at all.
-   */
-  async function watchBossTrial() {
-    if (!player || phase === 'riding' || !bossTrial) return;
-    inspect = null;
-    pendingRelic = null;
-    pendingSwap = null;
-    replayKind = 'trial';
-    phase = 'riding';
-    stageEl?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    result = null;
-    player.speed = speed;
-    const events = simulateBossTrialReplay(bossTrial.lineup);
-    const gen = replayGeneration;
-    await player.play(events);
-    // Same stale-replay guard as watchRide: a build/season change mid-play
-    // shouldn't clobber a fresh idle state with a result for a stale watch.
-    if (gen !== replayGeneration) return;
-    // The Boss Trial has no BattleResult of its own (simulateBossTrialReplay
-    // returns only events) — the result line below reads `bossTrial` instead
-    // of `result` for trial replays, so `result` intentionally stays null.
     phase = 'done';
   }
 
@@ -1724,29 +1496,17 @@
     {/if}
 
     {#if phase !== 'idle'}
-      {#if replayKind === 'trial'}
-        <p class="ride-caption">
-          {bossTrial && bossTrial.day === build.day ? "today's" : 'the previous'} Boss Trial · the horde that fought at {BOSS_TRIAL_HOUR}:00 CET
+      <p class="ride-caption">the next hourly ride · your horde as it stands now</p>
+      {#if result}
+        <p class="result">
+          Your horde rides to <strong>depth {result.wavesCleared}</strong>
+          &middot; {result.wavesCleared >= WAVE_COUNT
+            ? `⚑ the drains cleared — ${result.survivors.length} rats ride home`
+            : result.survivors.length > 0
+              ? `${result.survivors.length} rats ride home`
+              : 'until the last rat falls'}
         </p>
-        {#if phase === 'done' && bossTrial}
-          <p class="result">
-            Dealt <strong>{bossTrial.damage}</strong> damage &middot; felled {bossTrial.phases} {bossTrial.phases === 1 ? 'boss' : 'bosses'}
-          </p>
-          <p class="result-note">watch it again any time — this fight already happened, so replaying it never costs you today's shot</p>
-        {/if}
-      {:else}
-        <p class="ride-caption">the next hourly ride · your horde as it stands now</p>
-        {#if result}
-          <p class="result">
-            Your horde rides to <strong>depth {result.wavesCleared}</strong>
-            &middot; {result.wavesCleared >= WAVE_COUNT
-              ? `⚑ the drains cleared — ${result.survivors.length} rats ride home`
-              : result.survivors.length > 0
-                ? `${result.survivors.length} rats ride home`
-                : 'until the last rat falls'}
-          </p>
-          <p class="result-note">the drains hold steady all week — resets Monday</p>
-        {/if}
+        <p class="result-note">the drains hold steady all week — resets Monday</p>
       {/if}
       <button class="ride" onclick={backToWarren} disabled={phase === 'riding'}>
         {phase === 'riding' ? 'Riding…' : '← back to the warren'}
@@ -1812,86 +1572,23 @@
     {#if board.length === 0}
       <p class="lb-empty">{boardBusy ? 'reading the war-drums…' : 'no riders yet this week — be the first'}</p>
     {:else}
-      <p class="lb-tiebreak">ties in depth are broken by best Boss Trial damage · 👑 tops the Boss Trial</p>
       <ol class="lb-rows">
         {#each board as row, i}
           <li class="lb-row" class:me={isMe(row)}>
             <span class="lb-rank">{i + 1}</span>
-            <span class="lb-name"
-              >{#if row.device_id === crownDeviceId}<span class="crown" title="tops the Boss Trial board">👑</span> {/if}{row.name}{isMe(row) ? ' · you' : ''}</span
-            >
-            <span class="lb-boss" title="best Boss Trial damage — breaks depth ties"
-              >{row.boss_attempted ? `${row.boss_damage} dmg` : '—'}</span
-            >
+            <span class="lb-name">{row.name}{isMe(row) ? ' · you' : ''}</span>
             <span class="lb-depth">depth {row.depth}</span>
           </li>
         {/each}
       </ol>
     {/if}
     {#if myRank !== null && myRank > board.length}
-      <p class="lb-myrank">your rank: <strong>#{myRank}</strong> · depth {seasonBest} · {myBossDamage() > 0 ? `${myBossDamage()} boss dmg` : 'no Boss Trial yet'}</p>
+      <p class="lb-myrank">your rank: <strong>#{myRank}</strong> · depth {seasonBest}</p>
     {/if}
     <p class="lb-you">
       riding as <strong>{playerName || '—'}</strong>
       <button class="lb-rename" onclick={openRename}>rename</button>
     </p>
-  </div>
-
-  <!-- Daily Boss Trial (issue #107, Phase 1 — leaderboard number only, no
-       rewards yet). The trial fights the player's LIVE current board (no
-       snapshot), once per calendar day; `bossTrial` holds the MOST RECENT
-       resolved fight (persistence.ts, keyed by seasonId only) — `bossTrial.day
-       === build.day` means today's shot is spent, otherwise it's still
-       yesterday's (or older) fight, kept watchable as "the previous fight"
-       until the next one resolves. -->
-  <div class="boss-trial">
-    <div class="bt-head">
-      <span class="panel-label">Boss Trial · day {build.day}/{SEASON_DAYS}</span>
-      <button class="lb-refresh" onclick={() => void refreshBossTrialBoard()} disabled={bossTrialBoardBusy}>
-        {bossTrialBoardBusy ? '…' : '↻'}
-      </button>
-    </div>
-    <img class="bt-portrait" src={ART_URL['boss-trial']} alt="" />
-    <p class="bt-blurb">
-      Every day at {BOSS_TRIAL_HOUR}:00 CET your horde automatically faces a boss — no trigger, no preview. Fell it to reach the next phase — every phase the next boss hits ×{BOSS_TRIAL_ESCALATION} as hard and carries +{BOSS_TRIAL_HP_GROWTH_PER_PHASE} health, until the horde falls. Score is total damage dealt.
-    </p>
-    {#if bossTrial && bossTrial.day === build.day}
-      <p class="bt-result">Today's damage: <strong>{bossTrial.damage}</strong> · felled {bossTrial.phases} {bossTrial.phases === 1 ? 'boss' : 'bosses'} · back tomorrow</p>
-      <button class="watch bt-watch" onclick={watchBossTrial} disabled={phase === 'riding'}>
-        ▶ watch today's trial
-      </button>
-    {:else}
-      <p class="bt-hint">
-        {build.board.length === 0
-          ? `have a horde standing by before ${BOSS_TRIAL_HOUR}:00 CET — an empty board isn't scored`
-          : `fights automatically at ${BOSS_TRIAL_HOUR}:00 CET`}
-      </p>
-      {#if bossTrial}
-        <p class="bt-result">Previous fight: <strong>{bossTrial.damage}</strong> dmg · felled {bossTrial.phases} {bossTrial.phases === 1 ? 'boss' : 'bosses'}</p>
-        <button class="watch bt-watch" onclick={watchBossTrial} disabled={phase === 'riding'}>
-          ▶ watch previous fight
-        </button>
-      {/if}
-    {/if}
-    {#if bossTrialBoard.length === 0}
-      <p class="lb-empty">{bossTrialBoardBusy ? 'reading the war-drums…' : 'no challengers yet this week — be the first'}</p>
-    {:else}
-      <ol class="bt-rows">
-        {#each bossTrialBoard as row, i}
-          <li class="bt-row" class:me={isMe(row)}>
-            <span class="bt-rank">{i + 1}</span>
-            <span class="bt-name"
-              >{#if row.device_id === crownDeviceId}<span class="crown" title="reigning Boss-Breaker">👑</span> {/if}{row.name}{isMe(row) ? ' · you' : ''}</span
-            >
-            <span class="bt-phases">{row.phases} felled</span>
-            <span class="bt-damage">{row.damage} dmg</span>
-          </li>
-        {/each}
-      </ol>
-    {/if}
-    {#if bossTrialRank !== null && bossTrialRank > bossTrialBoard.length}
-      <p class="bt-myrank">your rank: <strong>#{bossTrialRank}</strong> · {bossTrial?.damage ?? 0} dmg</p>
-    {/if}
   </div>
 
   {#if telemetryConfigured}
@@ -2039,14 +1736,7 @@
     {@const comp = compendium}
     {@const unitList = seasonUnitPool().sort((a, b) => a.cost - b.cost)}
     {@const relicList = [...Object.values(RELIC_DEFS)].sort((a, b) => a.cost - b.cost)}
-    {@const bossDef = {
-      id: 'boss-trial',
-      name: 'The Gauntlet Boss',
-      attack: Math.round(bossTrialPhaseAttack(0)),
-      health: Math.round(bossTrialPhaseHP(0)),
-      cost: 0,
-    } as UnitDef}
-    {@const enemyList = [...ENEMY_POOL, bossDef]}
+    {@const enemyList = [...ENEMY_POOL]}
     {@const selectedUnit =
       comp.tab === 'units' && comp.selected
         ? UNIT_DEFS[comp.selected]
@@ -2076,19 +1766,12 @@
               {/if}
             </div>
           </div>
-          {#if selectedUnit.id === 'boss-trial'}
-            <p class="card-ability">
-              Fought once a day in the Boss Trial, not the weekly gauntlet — a single foe that escalates every phase
-              cleared: attack ×{BOSS_TRIAL_ESCALATION}, health +{BOSS_TRIAL_HP_GROWTH_PER_PHASE}. Stats shown are phase 1.
-            </p>
-          {:else}
-            <p class="card-ability">{abilitySentence(selectedUnit, comp.tab === 'enemies' ? 'enemy' : 'horde')}</p>
-            {#if comp.tab === 'units' && isSummoner(selectedUnit)}
-              <p class="card-hint">summoned rats fight beyond your warren's size (up to {combatCapForBuild(build)} in the drains)</p>
-            {/if}
-            {#if comp.tab === 'enemies'}
-              <p class="card-hint">shown at ★1 — enemies never star up; the gauntlet may scale their stats by depth</p>
-            {/if}
+          <p class="card-ability">{abilitySentence(selectedUnit, comp.tab === 'enemies' ? 'enemy' : 'horde')}</p>
+          {#if comp.tab === 'units' && isSummoner(selectedUnit)}
+            <p class="card-hint">summoned rats fight beyond your warren's size (up to {combatCapForBuild(build)} in the drains)</p>
+          {/if}
+          {#if comp.tab === 'enemies'}
+            <p class="card-hint">shown at ★1 — enemies never star up; the gauntlet may scale their stats by depth</p>
           {/if}
           <div class="card-actions">
             <button onclick={() => (compendium = { tab: comp.tab, selected: null })}>◀ back</button>
@@ -2636,17 +2319,6 @@
     background: #241a14;
     border: 1px solid #4a3520;
     border-radius: 10px;
-  }
-
-  .bt-portrait {
-    width: 64px;
-    height: 64px;
-    object-fit: contain;
-    background: #241a14;
-    border: 1px solid #4a3520;
-    border-radius: 10px;
-    display: block;
-    margin: 12px auto;
   }
 
   .card-relic-icon {
@@ -3212,24 +2884,6 @@
     white-space: nowrap;
   }
 
-  .lb-boss {
-    flex: 0 0 auto;
-    white-space: nowrap;
-    font-size: 12px;
-    color: var(--ink-dim);
-    font-variant-numeric: tabular-nums;
-  }
-
-  .lb-tiebreak {
-    margin: 0 0 6px;
-    font-size: 11px;
-    color: var(--ink-dim);
-  }
-
-  .crown {
-    font-size: 12px;
-  }
-
   .lb-depth {
     flex: 0 0 auto;
     white-space: nowrap;
@@ -3261,112 +2915,6 @@
     border: 1px solid #4a3520;
     border-radius: 6px;
     cursor: pointer;
-  }
-
-  /* Boss Trial panel (issue #107) — deliberately the same box/row shapes as
-     .leaderboard/.lb-* just above, with a bt- prefix so the two boards'
-     columns (damage/phase vs. depth/kills) stay easy to tell apart in the
-     markup despite looking identical on screen. */
-  .boss-trial {
-    max-width: 620px;
-    margin: 14px auto 0;
-    padding: 12px 14px 14px;
-    border: 1px solid #322820;
-    border-radius: 10px;
-    background: #14100c;
-    text-align: left;
-  }
-
-  .bt-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
-
-  .bt-blurb {
-    margin: 8px 0 10px;
-    font-size: 12px;
-    color: var(--ink-dim);
-  }
-
-  .bt-result {
-    margin: 4px 0 10px;
-    font-size: 14px;
-    color: #d4af37;
-  }
-
-  .bt-watch {
-    margin: 0 0 12px;
-  }
-
-  .bt-hint {
-    margin: 2px 0 10px;
-    font-size: 12px;
-    color: var(--ink-dim);
-  }
-
-  .bt-rows {
-    list-style: none;
-    margin: 10px 0 0;
-    padding: 0;
-  }
-
-  .bt-row {
-    display: flex;
-    align-items: baseline;
-    gap: 10px;
-    padding: 5px 8px;
-    border-radius: 6px;
-    font-size: 14px;
-  }
-
-  .bt-row:nth-child(odd) {
-    background: #1a140f;
-  }
-
-  .bt-row.me {
-    background: #2c2415;
-    color: #f0e6d2;
-  }
-
-  .bt-rank {
-    min-width: 24px;
-    color: var(--ink-dim);
-    font-variant-numeric: tabular-nums;
-  }
-
-  .bt-row.me .bt-rank {
-    color: #d4af37;
-  }
-
-  .bt-name {
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .bt-phases {
-    flex: 0 0 auto;
-    white-space: nowrap;
-    font-size: 12px;
-    color: var(--ink-dim);
-    font-variant-numeric: tabular-nums;
-  }
-
-  .bt-damage {
-    flex: 0 0 auto;
-    white-space: nowrap;
-    color: #d4af37;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .bt-myrank {
-    margin: 8px 0 0;
-    padding-top: 8px;
-    border-top: 1px solid #2a221a;
-    font-size: 13px;
-    color: #c9b891;
   }
 
   .name-sheet {
@@ -3402,12 +2950,6 @@
       gap: 8px;
       padding: 2px 6px;
       font-size: 12px;
-    }
-
-    .bt-row {
-      gap: 6px;
-      padding: 4px 6px;
-      font-size: 13px;
     }
   }
 </style>

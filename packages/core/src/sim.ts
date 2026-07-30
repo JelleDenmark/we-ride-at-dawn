@@ -68,10 +68,7 @@ export const ENEMY_HEALTH_SCALE_QUADRATIC = 0.004;
 // sustain fronts. NOTE this is only a supporting knob — the armor+heal
 // immortality it was first reached for is fixed structurally by the net-damage
 // floor in the tick loop (raising this alone couldn't break that threshold
-// without cratering the whole depth ladder; see the balance-pass notes). The
-// Boss Trial is INVARIANT to this constant — `buildBossTrialGauntlet` divides
-// each boss's attack by `enemyAttackScale` and the sim multiplies it back, so
-// the two cancel; only the depth gauntlet is affected.
+// without cratering the whole depth ladder; see the balance-pass notes).
 // 0.08 -> 0.09 (2026-07-25, issue #150): layered on top as part of the same
 // general difficulty pass described above the health constant; same
 // balance-script evidence, same rejected 0.10 candidate.

@@ -104,16 +104,3 @@ export {
   type LeagueEntrant,
   type RoundStanding,
 } from './pvp';
-export {
-  simulateBossTrial,
-  simulateBossTrialReplay,
-  buildBossTrialGauntlet,
-  bossTrialPhaseAttack,
-  bossTrialPhaseHP,
-  BOSS_TRIAL_BASE_ATTACK,
-  BOSS_TRIAL_HP_BASE,
-  BOSS_TRIAL_HP_GROWTH_PER_PHASE,
-  BOSS_TRIAL_ESCALATION,
-  BOSS_TRIAL_MAX_PHASES,
-  type BossTrialResult,
-} from './boss-trial';

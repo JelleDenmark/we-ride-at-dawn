@@ -435,15 +435,14 @@ export type Effect =
    * a no-op, not a crash.
    *
    * PAYOUT-CONCENTRATION fix, v1 — RECEIVER-side cap (issue #131, shipped
-   * 2026-07-17, replaced same day): the real Boss Trial risk was never
+   * 2026-07-17, replaced same day): the real risk was never
    * Pack-Caller-buffing-Pack-Caller — it was PAYOUT CONCENTRATION as a board
    * thins: as fewer survivors remain, each subsequent faint's split lands on
    * a shrinking pool, letting a late "sink" unit (which need not be another
    * Pack-Caller — Corpse-Glutton or even a plain Dire-Rat reproduces it)
-   * accumulate enough attack/health to tank far more escalating-attack Boss
-   * Trial phases than the design assumes — reproduced hitting
-   * `BOSS_TRIAL_MAX_PHASES` (the trial's hard safety cap, which
-   * boss-trial.ts's own comment calls a bug signal, not a valid outcome),
+   * accumulate enough attack/health to tank far more escalating-attack waves
+   * than the design assumes (originally reproduced against a deep synthetic
+   * gauntlet, runaway to the tick-safety cap), and it is
    * highly sensitive to board ORDER (identical units/tiers scored 7 vs. 60
    * phases depending purely on ordering). The first fix capped what ANY
    * single recipient could absorb, tuned empirically against Jesper's actual
@@ -692,14 +691,9 @@ export type Effect =
    * power over the whole 45-wave battle is bounded by `early + late`,
    * never more, no matter how many waves are left to run.
    *
-   * This also fixes the Boss Trial dead-axis bug at the root instead of
-   * patching around it: Trial reuses `simulate` unmodified with phase=wave
-   * (see boss-trial.ts), so `currentWave` is just as real there as on a
-   * normal ride — a Trial run that survives to phase `switchWave` gets the
-   * late dose exactly like a ride would, no fixed-hour blind spot possible.
    * Weaker boards that die before `switchWave` simply never see the late
-   * dose in EITHER mode — an intentional "you have to survive to earn the
-   * survival buff" shape, not a bug.
+   * dose — an intentional "you have to survive to earn the survival buff"
+   * shape, not a bug.
    *
    * MAGNITUDES (balance pass run 2026-07-18, this rework's required gate):
    * early {attack: 2, health: 1}, late {attack: 1, health: 1}, switchWave
