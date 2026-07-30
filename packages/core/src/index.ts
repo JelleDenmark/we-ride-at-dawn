@@ -80,6 +80,7 @@ export {
 } from './shop';
 export {
   simulate,
+  simulateCore,
   BOARD_CAP,
   COMBAT_CAP_BONUS,
   MIN_ATTACK_DAMAGE,
@@ -91,8 +92,11 @@ export {
   enemyAttackScale,
   type BattleEvent,
   type BattleResult,
+  type BattleMode,
+  type CoreOutput,
   type UnitView,
 } from './sim';
+export { simulateDuel, type DuelResult } from './duel';
 export {
   simulateBossTrial,
   simulateBossTrialReplay,
