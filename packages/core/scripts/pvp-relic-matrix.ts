@@ -1,36 +1,33 @@
 /**
- * PvP relic value matrix (issue #154) — the relic companion to
- * pvp-unit-matrix.ts, and the input for the owner's "cut relics down, maybe to
- * a single shop slot" decision (2026-07-31).
+ * PvP relic value matrix (issue #154) — OPPONENT-PANEL version.
  *
- * Every relic was tuned against the 45-wave depth ladder, and a duel is ONE
- * wave (`currentWave === 1`, sim.ts) — which quietly guts the wave-keyed ones:
- *   - Glass Shard's bonus IS the wave number, so it's +1 in a duel (dead).
- *   - The "once per wave" vs "once per battle" distinction that separated Glass
- *     Shard from Tail-Charm collapses — one wave is one battle, so any
- *     first-hit / once-per relic fires exactly once regardless.
- * Meanwhile flat stats (Rusted Nail, the team buffs) and the tempo relics
- * (Marrow-Snap execute, Gore-Cleaver cleave) pay off in full in a single clash.
- * This measures all of that under the rules the league actually uses.
+ * A single reference opponent is counter-pick BLIND. The first cut of this
+ * script dueled every relic'd board against one 8x Dire-Rat board and read
+ * Gore-Cleaver as dead — but cleave does nothing to a 5-HP body and everything
+ * to a 1-HP one, so against a swarm it's the best relic in the game (the miss
+ * that motivated this rewrite, Jesper 2026-07-31). Averaging that away hides
+ * exactly the RPS texture the league wants.
  *
- * Method (relic analog of pvp-unit-matrix lens B): the reference is a full
- * board of 8x Dire-Rat (strong, change-invariant, carries the realistic
- * combatCap). For each relic we add ONE copy — a unit relic on the best of the
- * front/behind Dire-Rat carrier, a team relic on the whole board — and duel
- * that board against the untouched reference. The score is survivor-health
- * margin (healthA - healthB, the league's own tiebreak) plus the hard W/L.
- * A relic that can't win a duel it's the only differentiator in is a relic the
- * PvP league would never miss.
+ * So each relic is now measured as its MARGINAL survivor-diff — what adding it
+ * to a neutral 8x Dire-Rat carrier is worth — against a PANEL of opposing
+ * archetypes that span the counter space:
  *
- * Front vs behind matters for the same reason relic-value.ts documents: Glass
- * Shard, Gore-Cleaver and Marrow-Snap are read only off the live FRONT unit's
- * relics each tick, and Weeping Boil / Tail-Charm need the carrier to actually
- * take lethal damage — all of which only happens up front. Best of the two kept.
+ *   bulk   = 8x Dire-Rat     high-HP / armored sponge (execute & raw stats shine)
+ *   swarm  = 8x Brood-Mother  a cascade of low-HP summoned bodies (cleave/AoE shine)
+ *   glass  = 8x Gnawer        3-atk / 1-HP glass cannons (cleave & first-kill shine)
+ *   poison = 8x Blight-Witch  chip DoT that bypasses armor (sustain/bulk shine)
  *
- * Determinism: duels have no RNG, so every number is exact. Cost is printed but
- * NOT normalized into the headline (a team relic legitimately buffs all 8
- * bodies) — compare within scope, and read this next to the PvE all-relic-value
- * report to keep/cut a relic on BOTH axes at once, never one in isolation.
+ *   marginal_O(relic) = duel(carrier+relic, O).diff - duel(carrier, O).diff
+ *
+ * A relic that's flat across all four columns is generically useful; a big
+ * SPREAD is a counter-pick (bring it against that archetype). A `*` on a number
+ * marks where the relic FLIPS the duel — the bare carrier doesn't win that
+ * matchup but the relic'd one does; the sharpest "this relic wins a fight you'd
+ * otherwise lose" signal. The panel boards are synthetic archetype probes, not
+ * tuned meta boards — they exist to exercise the axes, not to be fair fights.
+ *
+ * Determinism: duels have no RNG, so every number is exact. Read this next to
+ * the PvE all-relic-value report to keep/cut on BOTH axes, never one alone.
  *
  * Run from the repo root:  npm run pvp:relics
  * (or from packages/core:  npx tsx scripts/pvp-relic-matrix.ts)
@@ -43,66 +40,78 @@ import { MAX_TIER } from '../src/shop';
 
 const CAP = BOARD_CAP;
 const COMBAT_CAP = CAP + COMBAT_CAP_BONUS;
-const TANK = 'dire-rat';
+const CARRIER = 'dire-rat';
 const RELIC_IDS = Object.keys(RELIC_DEFS);
 
-/** Reference board: 8x Dire-Rat, optionally with `teamRelic` board-wide and
- * `unitRelic` on the carrier at slot `carrier`. */
-function board(tier: number, opts: { unitRelic?: string; carrier?: number; teamRelic?: string } = {}): Lineup {
-  const units = Array.from({ length: CAP }, (_, i) => ({
-    defId: TANK,
-    tier,
-    relicIds: opts.unitRelic && i === opts.carrier ? [opts.unitRelic] : ([] as string[]),
-  }));
-  return { units, teamRelicIds: opts.teamRelic ? [opts.teamRelic] : [], combatCap: COMBAT_CAP };
+/** The opposing archetypes, spanning the counter space (see header). */
+const PANEL = [
+  { label: 'bulk', defId: 'dire-rat' },
+  { label: 'swarm', defId: 'brood-mother' },
+  { label: 'glass', defId: 'gnawer' },
+  { label: 'poison', defId: 'blight-witch' },
+] as const;
+
+/** A full board of 8 copies of one unit, at `tier`, with realistic combatCap. */
+function homogeneous(defId: string, tier: number): Lineup {
+  return { units: Array.from({ length: CAP }, () => ({ defId, tier, relicIds: [] as string[] })), teamRelicIds: [], combatCap: COMBAT_CAP };
 }
 
-function versusReference(withRelic: Lineup, tier: number): { diff: number; won: boolean } {
-  const { result } = simulateDuel(withRelic, board(tier));
+/** 8x Dire-Rat carrier, optionally with a unit relic on the FRONT clashing
+ * slot (where cleave/execute/glass/weeping/tail are read off the live front
+ * unit — see relic-value.ts) or a team relic board-wide. */
+function carrier(tier: number, relic?: { id: string; scope: 'unit' | 'team' }): Lineup {
+  const units = Array.from({ length: CAP }, (_, i) => ({
+    defId: CARRIER,
+    tier,
+    relicIds: relic?.scope === 'unit' && i === 0 ? [relic.id] : ([] as string[]),
+  }));
+  return { units, teamRelicIds: relic?.scope === 'team' ? [relic.id] : [], combatCap: COMBAT_CAP };
+}
+
+function duel(a: Lineup, b: Lineup): { diff: number; won: boolean } {
+  const { result } = simulateDuel(a, b);
   return { diff: result.healthA - result.healthB, won: result.winner === 'a' };
 }
 
-interface RelicRow {
-  id: string;
-  diff: number;
-  won: boolean;
-  pos: 'front' | 'behind' | 'team';
-}
-
-console.log('=== PvP RELIC MATRIX (issue #154) — one relic added to an 8x Dire-Rat board, dueled vs the bare board ===');
-console.log(`${RELIC_IDS.length} relics, tiers 1..${MAX_TIER}. Deterministic. survDiff>0 & WIN = the relic alone can carry the duel.\n`);
+console.log('=== PvP RELIC MATRIX (issue #154) — marginal survDiff of one relic on an 8x Dire-Rat carrier, vs an opponent panel ===');
+console.log(`${RELIC_IDS.length} relics x ${PANEL.length} archetypes (bulk/swarm/glass/poison), tiers 1..${MAX_TIER}. Deterministic. * = the relic flips that matchup to a win.\n`);
 
 for (let tier = 1; tier <= MAX_TIER; tier++) {
-  const rows: RelicRow[] = RELIC_IDS.map((id) => {
-    const def = RELIC_DEFS[id];
-    if (def.scope === 'team') {
-      const m = versusReference(board(tier, { teamRelic: id }), tier);
-      return { id, diff: m.diff, won: m.won, pos: 'team' as const };
-    }
-    const front = versusReference(board(tier, { unitRelic: id, carrier: 0 }), tier);
-    const behind = versusReference(board(tier, { unitRelic: id, carrier: CAP - 1 }), tier);
-    return front.diff >= behind.diff
-      ? { id, diff: front.diff, won: front.won, pos: 'front' as const }
-      : { id, diff: behind.diff, won: behind.won, pos: 'behind' as const };
-  });
+  // Bare carrier vs each opponent — the per-column baseline, computed once.
+  const bare = PANEL.map((p) => duel(carrier(tier), homogeneous(p.defId, tier)));
 
-  rows.sort((a, b) => b.diff - a.diff);
+  interface Row {
+    id: string;
+    marg: number[];
+    flip: boolean[];
+    best: number; // max marginal across the panel
+  }
+  const rows: Row[] = RELIC_IDS.map((id) => {
+    const def = RELIC_DEFS[id];
+    const withRelic = PANEL.map((p) => duel(carrier(tier, { id, scope: def.scope }), homogeneous(p.defId, tier)));
+    const marg = withRelic.map((w, i) => w.diff - bare[i].diff);
+    const flip = withRelic.map((w, i) => w.won && !bare[i].won);
+    return { id, marg, flip, best: Math.max(...marg) };
+  });
+  rows.sort((a, b) => b.best - a.best);
 
   console.log(`############ TIER ${tier} ############`);
-  console.log('relic                 scope  cost  result  survDiff  slot');
+  console.log(`relic                 scope  cost  ${PANEL.map((p) => p.label.padStart(7)).join(' ')}   counter`);
   for (const r of rows) {
     const def = RELIC_DEFS[r.id];
-    const sd = (r.diff >= 0 ? '+' : '') + r.diff;
-    const outcome = r.won ? 'WIN ' : r.diff === 0 ? 'draw' : 'loss';
-    console.log(
-      `${def.name.padEnd(21)} ${def.scope.padEnd(5)} ${String(def.cost).padStart(4)}  ${outcome}  ${sd.padStart(8)}  ${r.pos}`
-    );
+    const cells = r.marg
+      .map((m, i) => `${(m >= 0 ? '+' : '') + m}${r.flip[i] ? '*' : ''}`.padStart(7))
+      .join(' ');
+    const spread = r.best - Math.min(...r.marg);
+    const bestCol = PANEL[r.marg.indexOf(r.best)].label;
+    const tag = r.best <= 1 ? 'dead' : spread >= r.best ? `vs ${bestCol}` : 'generic';
+    console.log(`${def.name.padEnd(21)} ${def.scope.padEnd(5)} ${String(def.cost).padStart(4)}  ${cells}   ${tag}`);
   }
   console.log('');
 }
 
 console.log(
-  `(A team relic legitimately buffs all 8 bodies, so it outscores a single unit relic by construction — ` +
-    `compare WITHIN scope. Glass Shard is the wave-scaling casualty (+1 in a one-wave duel). ` +
-    `Read alongside PvE all-relic-value before cutting any relic.)`
+  `(Columns aren't cross-comparable — each is marginal vs a different opponent's health total; the SPREAD ` +
+    `across a row is the counter-pick signal, the sign/rank within a column is the value. Team relics buff all 8 ` +
+    `bodies so they read high by construction — compare within scope. Read alongside PvE all-relic-value.)`
 );

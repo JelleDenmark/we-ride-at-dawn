@@ -32,17 +32,16 @@
  *     Cost is printed alongside so a dominant board that's also expensive
  *     (grind-justified) is distinguishable from a cheap degenerate one.
  *
- *  B. MARGINAL VALUE vs a STRONG reference — the "is this unit better or worse
- *     than a solid body in a real PvP slot" check. The reference is a full
- *     board of 8x Dire-Rat: a strong mid-ladder body whose only trait is
- *     PASSIVE armor (no triggered ability), so retuning any unit can't move the
- *     bar (change-invariant, same reason all-unit-value uses Dire-Rat as its
- *     control tank). For each unit we swap it into the best of the front/behind
- *     slot of that board and duel it against the untouched reference. Dire-Rat
- *     itself reads as the draw/zero-line; a unit ABOVE it wins the swap, a unit
- *     that drags the board LOSES it. (An earlier pass used an ability-less
- *     filler board as the control, but it was so weak that literally every unit
- *     beat it — no loss signal at all; the strong reference is the fix.)
+ *  B. MARGINAL VALUE vs an OPPONENT PANEL — the "what is this unit worth in a
+ *     real PvP slot, and against WHAT" check. We swap the unit into a neutral
+ *     8x Dire-Rat carrier (change-invariant, passive armor only) and measure
+ *     its marginal survivor margin against a panel of opposing archetypes
+ *     (bulk / swarm / glass / poison — same panel as pvp-relic-matrix). A
+ *     single bulk mirror is counter-pick BLIND: an anti-swarm unit reads dead
+ *     against a wall of Dire-Rats. The SPREAD across the row is the counter-
+ *     pick signal; a unit flat-negative across all four is genuinely dead.
+ *     (Earlier passes used a weak filler control — every unit beat it — then a
+ *     single strong reference — counter-blind; the panel is the fix for both.)
  *
  *  A weak result here does NOT mean "delete the unit": a board that farms scrap
  *  well on the depth ladder but loses its nightly duels still earns via
@@ -102,6 +101,24 @@ function swapIn(defId: string, tier: number, pos: 'front' | 'behind'): Lineup {
   return { units: order.map((id) => ({ defId: id, tier, relicIds: [] })), teamRelicIds: [], combatCap: COMBAT_CAP };
 }
 
+/** Opposing archetypes for lens B, spanning the counter space (same panel as
+ * pvp-relic-matrix). A single reference opponent is counter-pick blind: an
+ * anti-swarm unit reads dead against a wall of Dire-Rats. bulk = high-HP
+ * sponge, swarm = low-HP summon cascade, glass = 1-HP glass cannons, poison =
+ * armor-bypassing chip. */
+const PANEL = [
+  { label: 'bulk', defId: 'dire-rat' },
+  { label: 'swarm', defId: 'brood-mother' },
+  { label: 'glass', defId: 'gnawer' },
+  { label: 'poison', defId: 'blight-witch' },
+] as const;
+
+/** Survivor-health margin of board `a` against board `b`. */
+function surv(a: Lineup, b: Lineup): number {
+  const { result } = simulateDuel(a, b);
+  return result.healthA - result.healthB;
+}
+
 const nameOf = (id: string) => UNIT_DEFS[id].name;
 
 console.log('=== PvP UNIT MATRIX (issue #154) — relic-free first pass ===');
@@ -129,41 +146,40 @@ for (let tier = 1; tier <= MAX_TIER; tier++) {
     );
   });
 
-  // ---- Lens B: marginal value vs a strong reference ------------------------
-  const ref = reference(tier);
-  interface MarginRow {
+  // ---- Lens B: marginal value vs an OPPONENT PANEL -------------------------
+  // Swap one unit into an 8x Dire-Rat carrier and measure its marginal survivor
+  // margin against each archetype (not just a bulk mirror, which is counter-
+  // pick blind). The unit's slot is chosen by the bulk column (a unit goes
+  // where it's best), then that slot is held across the panel.
+  const bareVs = PANEL.map((p) => surv(reference(tier), homogeneous(p.defId, tier)));
+  interface PanelRow {
     id: string;
-    outcome: 'WIN' | 'draw' | 'LOSS';
-    diff: number;
-    pos: 'front' | 'behind';
+    slot: 'front' | 'behind';
+    marg: number[];
+    best: number;
   }
-  const margins: MarginRow[] = CANDIDATE_IDS.map((id) => {
-    let best: MarginRow | null = null;
-    for (const pos of ['front', 'behind'] as const) {
-      const { result } = simulateDuel(swapIn(id, tier, pos), ref);
-      const outcome = result.winner === 'a' ? 'WIN' : result.winner === 'b' ? 'LOSS' : 'draw';
-      const diff = result.healthA - result.healthB;
-      // Keep the better placement: a win beats a draw beats a loss, then by margin.
-      const rank = (o: MarginRow['outcome']) => (o === 'WIN' ? 2 : o === 'draw' ? 1 : 0);
-      const row: MarginRow = { id, outcome, diff, pos };
-      if (!best || rank(outcome) > rank(best.outcome) || (rank(outcome) === rank(best.outcome) && diff > best.diff)) {
-        best = row;
-      }
-    }
-    return best!;
+  const panelRows: PanelRow[] = CANDIDATE_IDS.map((id) => {
+    const bulkFront = surv(swapIn(id, tier, 'front'), homogeneous('dire-rat', tier));
+    const bulkBehind = surv(swapIn(id, tier, 'behind'), homogeneous('dire-rat', tier));
+    const slot = bulkFront >= bulkBehind ? 'front' : 'behind';
+    const marg = PANEL.map((p, i) => surv(swapIn(id, tier, slot), homogeneous(p.defId, tier)) - bareVs[i]);
+    return { id, slot, marg, best: Math.max(...marg) };
   });
-  margins.sort((a, b) => b.diff - a.diff);
+  panelRows.sort((a, b) => b.best - a.best);
 
-  console.log(`\n--- B. MARGINAL vs strong reference [8x ${TANK}] (swap one slot -> unit; best of front/behind; ${TANK} = zero-line) ---`);
-  console.log('unit             result  survDiff  slot');
-  for (const m of margins) {
-    const sd = (m.diff >= 0 ? '+' : '') + m.diff;
-    console.log(`${nameOf(m.id).padEnd(16)} ${m.outcome.padEnd(6)}  ${sd.padStart(7)}  ${m.pos}`);
+  console.log(`\n--- B. MARGINAL vs opponent panel (swap one unit into 8x ${TANK}; marginal survDiff; slot picked by bulk) ---`);
+  console.log(`unit             slot     ${PANEL.map((p) => p.label.padStart(7)).join(' ')}   counter`);
+  for (const r of panelRows) {
+    const cells = r.marg.map((m) => `${(m >= 0 ? '+' : '') + m}`.padStart(7)).join(' ');
+    const spread = r.best - Math.min(...r.marg);
+    const bestCol = PANEL[r.marg.indexOf(r.best)].label;
+    const tag = r.best <= 1 ? 'dead' : spread >= r.best ? `vs ${bestCol}` : 'generic';
+    console.log(`${nameOf(r.id).padEnd(16)} ${r.slot.padEnd(7)}  ${cells}   ${tag}`);
   }
 }
 
 console.log(
-  `\n(No relics, no summon-only bodies, no cost normalization — equal slots & tier. ` +
-    `The RANKING is the signal, not absolute survDiff. Follow-ups: relic layer, ` +
-    `and a mixed-board combo matrix (the all-vs-all here is homogeneous spam only).)`
+  `\n(No relics, no summon-only bodies, no cost normalization — equal slots & tier. Lens-B columns ` +
+    `aren't cross-comparable (each is marginal vs a different opponent's health total); the SPREAD is ` +
+    `the counter-pick signal. Companion sims: pvp:combos (two-unit synergy), pvp:relics (relic panel).)`
 );
