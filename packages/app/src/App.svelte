@@ -66,7 +66,8 @@
     backlineTargetsForTier,
     wardArmorForTier,
     buffSummonedForTier,
-    weakenPercentForTier,
+    poisonResistForTier,
+    POISON_RESIST_CAP,
     consolationScrap,
     LOSS_CONSOLATION_DEFAULT,
     type ActionResult,
@@ -637,14 +638,13 @@
         // Linear per-star curve — repeats every clash survived (see sim.ts).
         what = `drains ${e.amount} health back (★2 ${e.amount * 2} · ★3 ${e.amount * 3}) if it survived the clash — never past its own max`;
         break;
-      case 'weakenAllEnemies': {
-        // [0.05, 0.10, 0.15] per-star curve (2026-07-25, converted from flat,
-        // then halved after the leaderboard-ceiling guardrail) — re-applies
-        // to each fresh wave, off ORIGINAL wave-start attack (see sim.ts).
-        const pct = (t: number) => Math.round(e.percent * weakenPercentForTier(t) * 100);
-        what = `saps ${pct(1)}% attack (★2 ${pct(2)}% · ★3 ${pct(3)}%) from every ${foe} in the wave — they always keep at least 1`;
+      case 'poisonResist':
+        // [1, 2, 3] per-star curve (issue #155) — banked once per wave,
+        // blunts every poison tick the whole ${team} takes. Capped across
+        // multiple casters at POISON_RESIST_CAP (one ★3's own value) —
+        // partial by design, strong poison still gets through.
+        what = `wards the whole ${team} against poison, blunting every incoming poison tick by ${poisonResistForTier(1)} (★2 ${poisonResistForTier(2)} · ★3 ${poisonResistForTier(3)}), capped at ${POISON_RESIST_CAP} across multiple casters — a ward, not an antidote, strong poison still gets through`;
         break;
-      }
     }
     const when = def.ability.condition?.timeOfDay
       ? `${TIME_OF_DAY_LABEL[def.ability.condition.timeOfDay] ?? ''}`
@@ -722,8 +722,8 @@
           return '⚔ thorns';
         case 'healSelf':
           return '✚ drain';
-        case 'weakenAllEnemies':
-          return '▼ weaken';
+        case 'poisonResist':
+          return '⛨ ward';
       }
     }
     if ((def.damageReduction ?? 0) > 0) return '⛨ armor';

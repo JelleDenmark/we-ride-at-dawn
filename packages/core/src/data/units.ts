@@ -167,40 +167,35 @@ export function backlineTargetsForTier(tier: number): number {
 }
 
 /**
- * Gutter-Acolyte's `weakenAllEnemies` shred, as a fraction of the target's
- * ORIGINAL wave-start attack, by tier (Jesper, 2026-07-25: converted from a
- * flat `attack * tier` amount, issue #137, to percentage — the flat version
- * decays into irrelevance late-ride since enemy attack scales `1 + wave *
- * ENEMY_ATTACK_SCALE_PER_WAVE` (~5x by wave 45), while a fixed -1/-2/-3 stays
- * fixed. Percentage keeps the shred proportionally meaningful at any depth.
+ * Gutter-Acolyte's `poisonResist` protection: a FLAT amount of poison tick
+ * damage negated for its own side, by tier (issue #155 remake). `[1, 2, 3]`
+ * — small explicit table, same shape as `reviveHpForTier`/`blockHitsForTier`,
+ * not a multiplier of a base value (owner call, 2026-07-31: an earlier
+ * uniform-flat-1-regardless-of-tier cut was tried and rejected — merging
+ * should still buy more protection, not just more body).
  *
- * `[0.05, 0.10, 0.15]` — halved from an initial `[0.10, 0.20, 0.30]` probe
- * after `scripts/maxed-board-guardrail.ts` found even a SINGLE ★3 Acolyte
- * swapped into the deepest existing guardrail comp erased all headroom and
- * full-cleared the 45-wave gauntlet (top-depth 41/45 -> 45/45). That's a
- * single-caster magnitude problem, not a stacking one: with only one caster,
- * "percent of current attack" and "percent of original attack" are the same
- * number, so a same-side rebase alone couldn't have fixed it — the rate
- * itself had to come down. Re-verified against the guardrail before
- * shipping; a percentage shred that GROWS in absolute terms with depth is
- * the mirror-image risk of the enemy-HP softening issue #92 rejected for
- * saturating the leaderboard, so treat any future bump here as gated by
- * that same guardrail, not just a "feels right" call.
- *
- * Applied against the target's attack AT WAVE START (`weakenOriginalAttack`
- * in sim.ts), not whatever it's been shredded down to by an earlier caster
- * this wave — that's what lets multi-caster stacking be a simple ADDITIVE
- * cap-not-sum budget (`weakenAppliedPercent`, capped at
- * `weakenPercentForTier(3)` total per enemy per wave) instead of a
- * multiplicative one: one ★3 fills the 15% budget alone, two ★2s (10% each)
- * sum to 20% and clip to 15%, same "cap-not-sum" precedent as
- * `poisonAllEnemies`/`blockCharges` — see the `weakenAllEnemies` case in
- * sim.ts.
+ * Still deliberately never a hard/100% counter: `table[2] === POISON_RESIST_CAP`
+ * (3) by construction, so a single ★3 Acolyte alone already exhausts the
+ * multi-caster cap-not-sum budget (`poisonResistApplied` in sim.ts) — extra
+ * casters on top of one ★3 add nothing further, and even the cap leaves a
+ * `poisonStacksForTier(3)` (5) source dealing 2 through per tick. See
+ * `POISON_RESIST_CAP`'s doc comment for the budget itself.
  */
-export function weakenPercentForTier(tier: number): number {
-  const table = [0.05, 0.1, 0.15];
+export function poisonResistForTier(tier: number): number {
+  const table = [1, 2, 3];
   return table[tier - 1] ?? table[table.length - 1];
 }
+
+/**
+ * Hard ceiling on total poison-tick damage `poisonResist` casters on one
+ * side can negate per wave, cap-not-sum (issue #155) — sized to exactly one
+ * ★3 Acolyte's own `poisonResistForTier(3)` value, same "one strong instance"
+ * idiom as `poisonStacksForTier(3)`'s cap on `poisonAllEnemies`: one ★3 fills
+ * the budget alone, extra casters (of any tier) clip rather than add, so
+ * poison can never be fully zeroed out no matter how many Acolytes are
+ * stacked.
+ */
+export const POISON_RESIST_CAP = 3;
 
 /**
  * Squeak-Sensei's `buffSummoned` grant per tier (Jesper, 2026-07-25: bumped
@@ -305,28 +300,41 @@ export type Effect =
    */
   | { kind: 'healSelf'; amount: number }
   /**
-   * Gutter-Acolyte (issue #137) — the first enemy-STAT debuff (poison races
-   * enemy health; nothing before this lowered the incoming number itself).
-   * Wired to `startOfWave`, same firing point as `poisonAllEnemies`: saps
-   * `percent * weakenPercentForTier(tier)` (2026-07-25, converted from the
-   * original flat `attack * tier` — see `weakenPercentForTier`'s doc comment
-   * for why, including the guardrail-driven `[0.10,0.20,0.30] ->
-   * [0.05,0.10,0.15]` cut) of EVERY living enemy's ORIGINAL wave-start attack,
-   * floored at MIN_ATTACK_DAMAGE so a stack of Acolytes can never zero-out a
-   * wave (enemies still hit for at least 1, mirroring the armor rule).
-   * Whole-line, not front-only, by design: a front-only shred inherits the
-   * exact "the front enemy was dying to the clash anyway" dead-weight
-   * problem that forced Plague-Bearer's #112 rework.
+   * Gutter-Acolyte (issue #155 remake, replacing #137's `weakenAllEnemies`
+   * enemy-attack shred — that effect read dead on the PvP panel and was
+   * bottom-tier in PvE, per the joint balance pass, so the whole unit was
+   * repurposed rather than buffed in place; see the retired effect's history
+   * in git blame if the old shred's reasoning is ever needed again). The
+   * roster's first poison COUNTER: poison bypasses armor entirely (`sim.ts`
+   * `applyDamage`: "poison is rot, it goes around the hide") and nothing else
+   * lowers the incoming poison number, which the #155 panel data showed makes
+   * Blight-Witch/Draughtsman-Moe an undefeated matchup-agnostic answer, not a
+   * counter-pickable one.
    *
-   * Compounding-law note (ADR-0003): safe — enemies are re-instantiated
-   * fresh every wave, so a stat debuff cannot carry across the 45-wave ride
-   * (identical bound to `poisonAllEnemies`). Multiple Acolytes stack
-   * ADDITIVELY against a shared per-enemy cap-not-sum budget
-   * (`weakenAppliedPercent` in sim.ts, capped at `weakenPercentForTier(3)`
-   * total) — same precedent as `poisonAllEnemies`'s stack cap (issue #116):
-   * one ★3 fills the budget alone, extra casters clip rather than add.
+   * Wired to `startOfWave`, same firing point as `weakenAllEnemies` used and
+   * `poisonAllEnemies` fires — one Acolyte per side is enough to apply, no
+   * per-target aim needed since this protects the caster's OWN side rather
+   * than debuffing the enemy's. `poisonResistForTier(tier)` (`[1, 2, 3]`) of
+   * poison tick damage this side takes is negated per caster, flat, looked
+   * up per-tier same as `poisonAllEnemies` reads `poisonStacksForTier` — no
+   * scalar field on the effect itself, the table is the whole magnitude. See
+   * the `poisonResist` case in sim.ts, applied at the point poison ticks are
+   * resolved.
+   *
+   * Deliberately partial by design (owner sign-off, #155): "not a hard or
+   * 100% counter". Multiple Acolytes stack ADDITIVELY against a shared
+   * per-side cap-not-sum budget (`poisonResistApplied` in sim.ts, capped at
+   * `POISON_RESIST_CAP` — exactly one ★3's own value) — same precedent as
+   * `poisonAllEnemies`'s stack cap (issue #116): extra casters clip rather
+   * than add, so poison can never be fully zeroed out no matter how many
+   * Acolytes are stacked.
+   *
+   * Compounding-law note (ADR-0003): safe — the budget resets every wave
+   * alongside poison itself (`waveClear`'s antidote already zeroes carried
+   * poison), so protection cannot accumulate across the 45-wave ride any
+   * more than the poison it's negating can.
    */
-  | { kind: 'weakenAllEnemies'; percent: number }
+  | { kind: 'poisonResist' }
   /**
    * Buffs the rat(s) behind the source (or `all` of them) by
    * `attack`/`health`, scaled by `tierAttackMultiplier`/`tierHealthMultiplier`
@@ -1303,16 +1311,16 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     tribe: 'brute',
     unlockDay: 3,
   },
-  // Issue #137: Gutter-Acolyte — anti-brute tech: the roster's first enemy
-  // attack-shred (armor blunts hits, poison races health; nothing lowered
-  // the incoming number itself before this). Whole-line targeting and the
-  // ≥1 floor are design calls documented on `weakenAllEnemies` above, both
-  // flagged for sign-off. Shipping AFTER the compendium (#136, already on
-  // dev) per the issue's readability dependency. Tagged plague for the
-  // Catacombs curse flavor — a soft read, like every tribe tag.
+  // Issue #155: Gutter-Acolyte remade from #137's dead-in-both attack shred
+  // into the roster's first poison counter (gutter apothecary -> antidote
+  // fits the theme). Partial by design, per owner sign-off — not a hard or
+  // 100% counter, see `poisonResist`'s doc comment above for the cap-not-sum
+  // budget that guarantees that no matter how many are stacked. Tagged
+  // plague still fits: an apothecary who works the plague wards, not just
+  // the ones who spread it.
   'gutter-acolyte': {
     id: 'gutter-acolyte', name: 'Gutter-Acolyte', attack: 2, health: 3, cost: 5,
-    ability: { trigger: 'startOfWave', effect: { kind: 'weakenAllEnemies', percent: 1 } },
+    ability: { trigger: 'startOfWave', effect: { kind: 'poisonResist' } },
     tribe: 'plague',
   },
 };

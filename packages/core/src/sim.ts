@@ -1,5 +1,5 @@
 import type { Side, UnitDef, Ability, Lineup } from './data/units';
-import { UNIT_DEFS, tierAttackMultiplier, tierHealthMultiplier, reviveHpForTier, blockHitsForTier, poisonStacksForTier, cellarCoilChargeCapForTier, backlineTargetsForTier, wardArmorForTier, buffSummonedForTier, weakenPercentForTier } from './data/units';
+import { UNIT_DEFS, tierAttackMultiplier, tierHealthMultiplier, reviveHpForTier, blockHitsForTier, poisonStacksForTier, cellarCoilChargeCapForTier, backlineTargetsForTier, wardArmorForTier, buffSummonedForTier, poisonResistForTier, POISON_RESIST_CAP } from './data/units';
 import { ENEMY_POOL } from './data/enemies';
 import { RELIC_DEFS, type RelicDef } from './data/relics';
 import type { Gauntlet } from './gauntlet';
@@ -111,12 +111,6 @@ export type BattleEvent =
   | { type: 'summon'; side: Side; index: number; unit: UnitView }
   | { type: 'revive'; side: Side; index: number; unit: UnitView }
   | { type: 'buff'; targetId: number; attack: number; health: number; newAttack: number; newHealth: number }
-  /** Gutter-Acolyte's attack shred (issue #137): `attack` is the amount
-   * actually removed (post-floor, so it may be less than the caster's full
-   * shred). A separate event from 'buff' on purpose — the replay renders
-   * buffs as green "+N" floats, and a debuff wearing that costume would
-   * read as a gift. */
-  | { type: 'weaken'; targetId: number; attack: number; newAttack: number }
   | { type: 'relicProc'; targetId: number; relicId: string; name: string }
   | { type: 'shieldGranted'; targetId: number; sourceId: number }
   | { type: 'shieldAbsorbed'; targetId: number }
@@ -817,39 +811,20 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
         }
         break;
       }
-      case 'weakenAllEnemies': {
-        // Gutter-Acolyte (issue #137, converted to percentage 2026-07-25).
-        // `startOfWave`-fired, so this runs for every live Acolyte in board
-        // order at the top of the wave, same firing point as
-        // `poisonAllEnemies` — and same compounding bound: enemies are
-        // re-instantiated fresh every wave, so the shred can never carry
-        // across waves. Percentage is taken off the target's ORIGINAL
-        // wave-start attack (`weakenOriginalAttack`, snapshotted before any
-        // Acolyte fires), not whatever it's already been shredded down to —
-        // see `weakenPercentForTier`'s doc comment for why. That makes
-        // multi-caster stacking a simple ADDITIVE cap-not-sum budget
-        // (`weakenAppliedPercent`, capped at `weakenPercentForTier(3)` total
-        // per enemy per wave), same precedent as `poisonAllEnemies`. The
-        // MIN_ATTACK_DAMAGE floor still applies on top (enemies always hit
-        // for at least 1). `attack` on the event is the amount actually
-        // removed post-floor, so replays never show a bigger shred than what
-        // happened.
-        const capPct = weakenPercentForTier(3);
-        const ownPct = effect.percent * weakenPercentForTier(tier);
-        for (const target of opposing(source.side)) {
-          if (target.health <= 0) continue;
-          const original = weakenOriginalAttack.get(target.instanceId) ?? target.attack;
-          const appliedSoFar = weakenAppliedPercent.get(target.instanceId) ?? 0;
-          const pct = Math.min(ownPct, Math.max(0, capPct - appliedSoFar));
-          if (pct <= 0) continue;
-          const shred = Math.round(original * pct);
-          const reduced = Math.max(MIN_ATTACK_DAMAGE, target.attack - shred);
-          const delta = target.attack - reduced;
-          if (delta <= 0) continue;
-          target.attack = reduced;
-          weakenAppliedPercent.set(target.instanceId, appliedSoFar + pct);
-          events.push({ type: 'weaken', targetId: target.instanceId, attack: delta, newAttack: target.attack });
-        }
+      case 'poisonResist': {
+        // Gutter-Acolyte (issue #155 remake). `startOfWave`-fired, same
+        // firing point `weakenAllEnemies` used — runs for every live Acolyte
+        // in board order at the top of the wave. Protects the CASTER'S OWN
+        // side (not a target loop over enemies, unlike this unit's old
+        // effect): adds `poisonResistForTier(tier)` (`[1, 2, 3]`) to a
+        // shared per-side cap-not-sum budget (`poisonResistApplied`, capped
+        // at `POISON_RESIST_CAP` — exactly one ★3's own value), same
+        // precedent as `poisonAllEnemies`'s stack cap. The actual reduction
+        // is applied where poison ticks resolve, in the tick loop below —
+        // this case only banks the flat amount for the wave.
+        const appliedSoFar = poisonResistApplied[source.side];
+        const amount = Math.min(poisonResistForTier(tier), Math.max(0, POISON_RESIST_CAP - appliedSoFar));
+        if (amount > 0) poisonResistApplied[source.side] = appliedSoFar + amount;
         break;
       }
       case 'chargeWhileBenched': {
@@ -1174,22 +1149,18 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
   let poisonLastApplied: Record<Side, number> = { horde: 0, gauntlet: 0 };
 
   /**
-   * Each living enemy's attack AT WAVE START, keyed by instanceId — the
-   * denominator `weakenAllEnemies` (Gutter-Acolyte, issue #137) percentages
-   * are taken against, snapshotted fresh every wave right after enemies are
-   * instantiated, before any Acolyte fires. See `weakenPercentForTier`'s doc
-   * comment in data/units.ts for why "original", not "current", is the base.
+   * Total flat `poisonResist` amount already banked for each SIDE this wave
+   * (Gutter-Acolyte, issue #155), keyed by side rather than per-target —
+   * unlike the `weakenAllEnemies` budget this replaces, resist protects the
+   * caster's own whole side uniformly, not individual enemy instances. Reset
+   * every wave alongside `poisonAllApplied`; each Acolyte's own flat
+   * `poisonResistForTier(tier)` is clipped to whatever's left of
+   * `POISON_RESIST_CAP` for that side, so multiple Acolytes stack additively
+   * up to the cap, never past it — see the `poisonResist` case's doc comment
+   * for the exact accounting and where the banked amount actually reduces
+   * poison damage.
    */
-  let weakenOriginalAttack: Map<number, number> = new Map();
-  /**
-   * Total fraction of `weakenOriginalAttack` already granted to each enemy
-   * this wave (issue #137), keyed by instanceId. Reset every wave alongside
-   * `poisonAllApplied`, same cap-not-sum shape: each `weakenAllEnemies`
-   * caster's own percent is clipped to whatever's left of
-   * `weakenPercentForTier(3)` for that specific enemy, so multiple Acolytes
-   * stack additively up to one ★3's worth, not without bound.
-   */
-  let weakenAppliedPercent: Map<number, number> = new Map();
+  let poisonResistApplied: Record<Side, number> = { horde: 0, gauntlet: 0 };
 
   /**
    * Total attack/health every `distributeStatsOnFaint` caster (Pack-Caller)
@@ -1273,11 +1244,9 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
     // Plague-Bearer's own separate per-wave budget (issue #131) — see
     // `poisonLastApplied` above. Independent of `poisonAllApplied`.
     poisonLastApplied = { horde: 0, gauntlet: 0 };
-    // weakenAllEnemies (Gutter-Acolyte, issue #137): snapshot each enemy's
-    // fresh attack as the percentage denominator, and reset the per-enemy
-    // cap-not-sum budget — see both maps' doc comments above.
-    weakenOriginalAttack = new Map(enemies.map((e) => [e.instanceId, e.attack]));
-    weakenAppliedPercent = new Map();
+    // poisonResist (Gutter-Acolyte, issue #155): reset the per-side
+    // cap-not-sum budget — see the map's doc comment above.
+    poisonResistApplied = { horde: 0, gauntlet: 0 };
 
     fireEntryTriggers(horde);
     fireEntryTriggers(enemies);
@@ -1473,13 +1442,23 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
       for (const board of [horde, enemies]) {
         for (const unit of [...board]) {
           if (unit.poison > 0 && unit.health > 0) {
+            // Gutter-Acolyte's poisonResist (issue #155) subtracts a flat
+            // amount from this side's incoming poison tick — banked once per
+            // wave above, applied here at the point every tick's damage is
+            // actually resolved. Floored at 0 (a small enough stack can be
+            // fully negated this tick), but the shared `POISON_RESIST_CAP`
+            // budget means it can never negate MORE than that flat ceiling
+            // per tick, so a strong enough poison source always gets some
+            // damage through.
+            const resisted = Math.max(0, unit.poison - poisonResistApplied[unit.side]);
             // Only poison landed on the gauntlet side counts as damage dealt
             // (issue #126) — the horde's own poison intake is upkeep, not
-            // output. Poison bypasses armor (see applyDamage), so the amount
-            // dealt always equals unit.poison exactly; no need to read a
-            // return value back out of applyDamage for the true dealt amount.
-            if (board === enemies) totalDamage += unit.poison;
-            applyDamage(unit, unit.poison, 'poison');
+            // output. Poison bypasses armor (see applyDamage); resist is
+            // applied above, before the amount reaches applyDamage, so no
+            // need to read a return value back out of it for the true dealt
+            // amount.
+            if (board === enemies) totalDamage += resisted;
+            applyDamage(unit, resisted, 'poison');
           }
         }
       }
