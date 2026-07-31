@@ -22,6 +22,30 @@ import { simulateDuel } from './duel';
  * deliberately left as a TODO rather than guessed at here.
  */
 
+/**
+ * Flat scrap paid to a duel loser — the league's anti-snowball catch-up lever
+ * (build order §6). Each LOSS in a round pays `payoutPerLoss` scrap, no matter
+ * the survivor-margin of that loss: FLAT, not scaled by margin, because
+ * scaling would reward sandbagging (throwing a duel harder to farm a bigger
+ * payout). Wins and draws pay nothing here — a win is already rewarded by
+ * league points (the season score); this is pure economy that keeps the player
+ * falling behind funded enough to stay in the race. Returns a non-negative
+ * integer (both inputs are floored and clamped at 0).
+ *
+ * `payoutPerLoss` is SERVER CONFIG (`pvp_config.loss_consolation`), read live
+ * by the client — deliberately NOT a client constant — so the owner can retune
+ * this lever mid-season without a client deploy (the amount is admitted
+ * guesswork until a full week has run). `LOSS_CONSOLATION_DEFAULT` is only the
+ * fallback the client uses when that config row can't be read.
+ */
+export const LOSS_CONSOLATION_DEFAULT = 6;
+
+export function consolationScrap(losses: number, payoutPerLoss: number): number {
+  const perLoss = Math.max(0, Math.floor(payoutPerLoss));
+  const n = Math.max(0, Math.floor(losses));
+  return perLoss * n;
+}
+
 /** One player's entry in a round: their id (device/player id) and the board
  * they're fielding. */
 export interface LeagueEntrant {

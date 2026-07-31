@@ -67,6 +67,8 @@
     wardArmorForTier,
     buffSummonedForTier,
     weakenPercentForTier,
+    consolationScrap,
+    LOSS_CONSOLATION_DEFAULT,
     type ActionResult,
     type BattleResult,
     type BuildState,
@@ -95,6 +97,8 @@
     RIDE_LOG_MAX,
     loadInstallNudgeDismissed,
     saveInstallNudgeDismissed,
+    saveConsolationCredited,
+    loadConsolationCredited,
     type RideLogEntry,
     type LastRide,
   } from './persistence';
@@ -109,8 +113,10 @@
     submitPvpBoard,
     fetchLatestStandings,
     fetchGhosts,
+    fetchLeagueConfig,
     type StandingRow,
     type GhostRow,
+    type LeagueConfig,
   } from './pvp-board';
   import { startUpdateCheck } from './updateCheck';
   import { startPwaUpdate } from './pwaUpdate';
@@ -329,18 +335,54 @@
   // Which rival's board the scout panel is expanded to, by device_id (null =
   // collapsed). One at a time keeps the panel phone-sized.
   let scoutedGhost = $state<string | null>(null);
+  // Live league tuning (server-configured). Starts at the shipped fallback so
+  // the derived consolation figure reads sensibly before the first fetch lands.
+  let leagueConfig = $state<LeagueConfig>({ lossConsolation: LOSS_CONSOLATION_DEFAULT });
+  // The round_id whose loss-consolation scrap we've already banked, so a payout
+  // credits exactly once no matter how often refreshLeague runs. Season-keyed.
+  let creditedRound = $state(loadConsolationCredited(build.seasonId));
+
+  // My row in last night's standings, if any — the source for both the payout
+  // and the "what you got" note under the table.
+  const myStanding = $derived(standings.find(isMe) ?? null);
+  const myConsolation = $derived(
+    myStanding ? consolationScrap(myStanding.losses, leagueConfig.lossConsolation) : 0
+  );
 
   async function refreshLeague() {
     leagueBusy = true;
     try {
-      const [rows, gh] = await Promise.all([
+      const [rows, gh, cfg] = await Promise.all([
         fetchLatestStandings(build.seasonId),
         fetchGhosts(build.seasonId),
+        fetchLeagueConfig(),
       ]);
       standings = rows;
       ghosts = gh;
+      leagueConfig = cfg;
+      creditConsolationIfDue(rows, cfg.lossConsolation);
     } finally {
       leagueBusy = false;
+    }
+  }
+
+  // Bank the flat loss-consolation scrap for the latest scored round, exactly
+  // once. Losing pays; income is the board's strength, so this keeps whoever's
+  // behind funded enough to stay in the race (build order §6). Idempotent via
+  // the persisted `creditedRound` marker — refreshLeague runs on an interval,
+  // so this MUST no-op on every call after the first for a given round.
+  function creditConsolationIfDue(rows: StandingRow[], payoutPerLoss: number) {
+    if (rows.length === 0) return;
+    const mine = rows.find(isMe);
+    if (!mine || mine.round_id === creditedRound) return;
+    // Mark the round credited BEFORE mutating scrap (and even when the payout
+    // is 0, e.g. a clean sweep or a disabled lever) so we never re-pay it.
+    creditedRound = mine.round_id;
+    saveConsolationCredited(build.seasonId, mine.round_id);
+    const payout = consolationScrap(mine.losses, payoutPerLoss);
+    if (payout > 0) {
+      build = { ...build, scrap: build.scrap + payout };
+      saveBuild(build);
     }
   }
 
@@ -922,6 +964,9 @@
       saveSeasonBest(build.seasonId, 0);
       saveSeasonKills(build.seasonId, 0);
       saveRideLog(build.seasonId, []);
+      // Re-key the consolation marker to the new season (empty until the new
+      // week's first round pays out).
+      creditedRound = loadConsolationCredited(build.seasonId);
       void refreshLeague(); // new week → pull the fresh (empty) league + ghosts
     }
     // Auto-submit the season-best on any improvement (guarded so an
@@ -1604,6 +1649,13 @@
           </li>
         {/each}
       </ol>
+      {#if myStanding && myConsolation > 0}
+        <p class="lg-consolation">
+          last night's {myStanding.losses}
+          {myStanding.losses === 1 ? 'loss' : 'losses'} paid
+          <strong>+{myConsolation} scrap</strong> consolation
+        </p>
+      {/if}
     {/if}
 
     <div class="scout">
@@ -2951,6 +3003,16 @@
     text-transform: uppercase;
     letter-spacing: 0.06em;
     color: var(--ink-dim);
+  }
+
+  .lg-consolation {
+    margin: 8px 0 0;
+    font-size: 12px;
+    color: #c9b891;
+  }
+
+  .lg-consolation strong {
+    color: #d4af37;
   }
 
   .lg-record {

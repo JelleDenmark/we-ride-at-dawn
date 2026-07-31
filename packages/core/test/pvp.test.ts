@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { scoreRound, validateBoard, legalEntrants } from '../src/pvp';
+import {
+  scoreRound,
+  validateBoard,
+  legalEntrants,
+  consolationScrap,
+  LOSS_CONSOLATION_DEFAULT,
+} from '../src/pvp';
 import type { LeagueEntrant } from '../src/pvp';
 import { BOARD_CAP } from '../src/sim';
 import type { Lineup } from '../src/data/units';
@@ -222,5 +228,36 @@ describe('legalEntrants', () => {
 
     const result = legalEntrants([good1, bad, good2]);
     expect(result.map((e) => e.id)).toEqual(['good-1', 'good-2']);
+  });
+});
+
+describe('consolationScrap — loss-consolation payout', () => {
+  it('pays flat per loss (scales with count, not margin)', () => {
+    expect(consolationScrap(0, 6)).toBe(0);
+    expect(consolationScrap(1, 6)).toBe(6);
+    expect(consolationScrap(3, 6)).toBe(18);
+    expect(consolationScrap(5, 6)).toBe(30);
+  });
+
+  it('is linear in losses — 5 one-loss payouts equal one 5-loss payout', () => {
+    const perLoss = LOSS_CONSOLATION_DEFAULT;
+    const five = consolationScrap(5, perLoss);
+    const oneByOne = Array.from({ length: 5 }, () => consolationScrap(1, perLoss)).reduce(
+      (a, b) => a + b,
+      0
+    );
+    expect(five).toBe(oneByOne);
+  });
+
+  it('a zero payout config disables the lever entirely', () => {
+    expect(consolationScrap(5, 0)).toBe(0);
+  });
+
+  it('clamps negative inputs and floors fractional ones to a non-negative integer', () => {
+    expect(consolationScrap(-3, 6)).toBe(0);
+    expect(consolationScrap(3, -6)).toBe(0);
+    expect(consolationScrap(2.9, 6)).toBe(12); // 2 losses * 6
+    expect(consolationScrap(3, 6.9)).toBe(18); // 3 losses * 6
+    expect(Number.isInteger(consolationScrap(3, 6))).toBe(true);
   });
 });

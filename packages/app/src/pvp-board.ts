@@ -1,4 +1,4 @@
-import type { Lineup, RoundStanding } from '@wrad/core';
+import { LOSS_CONSOLATION_DEFAULT, type Lineup, type RoundStanding } from '@wrad/core';
 import { SUPABASE_URL, SUPABASE_ANON_KEY, deviceId } from './telemetry';
 import { boardSeason, isMe } from './leaderboard';
 
@@ -146,5 +146,38 @@ export async function fetchGhosts(seasonId: string): Promise<GhostRow[]> {
     return rows.filter((r) => !isMe(r));
   } catch {
     return [];
+  }
+}
+
+/** Live league tuning read from `pvp_config`. */
+export interface LeagueConfig {
+  /** Flat scrap paid per duel LOST (the anti-snowball lever — see
+   * `consolationScrap` in @wrad/core). Server-configured so it's tunable
+   * mid-season without a client deploy. */
+  lossConsolation: number;
+}
+
+/**
+ * Read the server-side league config. Any failure (offline, missing row,
+ * malformed value) falls back to the shipped defaults rather than throwing —
+ * the lever degrades to its default, it never breaks the league read. NOT
+ * dev-prefixed: `pvp_config` is one channel-agnostic knob for dev and prod.
+ */
+export async function fetchLeagueConfig(): Promise<LeagueConfig> {
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/pvp_config?key=eq.loss_consolation&select=value`,
+      { headers: HEADERS }
+    );
+    if (!res.ok) return { lossConsolation: LOSS_CONSOLATION_DEFAULT };
+    const rows = (await res.json()) as { value: unknown }[];
+    const raw = rows[0]?.value;
+    const v = typeof raw === 'number' ? raw : Number(raw);
+    return {
+      lossConsolation:
+        Number.isFinite(v) && v >= 0 ? Math.floor(v) : LOSS_CONSOLATION_DEFAULT,
+    };
+  } catch {
+    return { lossConsolation: LOSS_CONSOLATION_DEFAULT };
   }
 }

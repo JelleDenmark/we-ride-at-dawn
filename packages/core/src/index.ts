@@ -101,6 +101,8 @@ export {
   scoreRound,
   validateBoard,
   legalEntrants,
+  consolationScrap,
+  LOSS_CONSOLATION_DEFAULT,
   type LeagueEntrant,
   type RoundStanding,
 } from './pvp';

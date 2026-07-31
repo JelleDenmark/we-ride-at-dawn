@@ -164,6 +164,30 @@ export function loadSeasonKills(seasonId: string): number {
   }
 }
 
+/** The `round_id` of the last PvP round whose loss-consolation scrap has
+ * already been credited to this device, so a payout is banked exactly once no
+ * matter how often the league refresh runs. Keyed by season (a new week starts
+ * fresh); returns '' when nothing has been credited for this season yet. */
+export function saveConsolationCredited(seasonId: string, roundId: string): void {
+  try {
+    localStorage.setItem(`${NS}:pvp-consolation`, JSON.stringify({ seasonId, roundId }));
+  } catch {
+    // Non-fatal — worst case the same round pays out again on a later load;
+    // acceptable for a small catch-up lever, and self-limited to one round.
+  }
+}
+
+export function loadConsolationCredited(seasonId: string): string {
+  try {
+    const raw = localStorage.getItem(`${NS}:pvp-consolation`);
+    if (!raw) return '';
+    const v = JSON.parse(raw) as { seasonId: string; roundId: string };
+    return v.seasonId === seasonId ? v.roundId : '';
+  } catch {
+    return '';
+  }
+}
+
 export interface RideLogEntry {
   /** Absolute hour bucket (Date.now() / 3_600_000, floored). */
   hour: number;
