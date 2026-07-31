@@ -68,13 +68,15 @@ export function blockHitsForTier(tier: number): number {
  * curve, for two reasons stacked:
  *   1. Same as `blockHitsForTier` — a steep curve on a defensive magnitude
  *      lets a ★3 no-sell whole early waves.
- *   2. More importantly, this is the fix for the Boss Trial exploit: flat
- *      armor is subtracted per hit with a `MIN_ATTACK_DAMAGE` floor (see
- *      `applyDamage` in sim.ts), so a warded unit ALWAYS takes ≥1 per hit and
- *      the exponentially-escalating trial boss eventually pierces — unlike the
- *      old full-negate block, which let a high-DPS board ride untouched to the
- *      60-phase hard cap (all three season `2026-07-20` ceiling boards ran a
- *      ★3 Ward-Weaver; the best board without one stalled at 13).
+ *   2. More importantly, it closes a full-negate exploit: flat armor is
+ *      subtracted per hit with a `MIN_ATTACK_DAMAGE` floor (see `applyDamage`
+ *      in sim.ts), so a warded unit ALWAYS takes ≥1 per hit and even an
+ *      escalating attacker eventually pierces — unlike the old full-negate
+ *      block, which let a high-DPS board ride untouched indefinitely. (Found
+ *      via the since-removed Boss Trial, where all three season `2026-07-20`
+ *      ceiling boards ran a ★3 Ward-Weaver to the 60-phase cap and the best
+ *      board without one stalled at 13; the floor now likewise bounds the PvP
+ *      duel's unkillable-front stalemate.)
  *
  * PLACEHOLDER magnitudes [2, 4, 6] — subject to the balance pass, same as
  * every new number in this file. The whole-warren reach makes this pricier
@@ -1087,15 +1089,16 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   // ARMOR REWORK (2026-07-24, prototype pending balance pass): was a
   // `startOfWave` `blockFrontHits` full-negate pool (1/2/3 hits cancelled per
   // wave). That pool was a two-mode outlier — the single best depth back-seat
-  // swap (+5.9 waves, PR #123 probe) AND the enabler of the Boss Trial exploit
-  // (every season `2026-07-20` board that rode to the 60-phase cap ran a ★3
-  // Ward-Weaver; the best board without one stalled at 13). Full hit-negation
-  // scales infinitely against the trial's exponentially-escalating boss, so it
-  // never dies. Reworked to a `startOfBattle` `grantArmor`: it now hardens the
-  // whole warren with flat armor (`wardArmorForTier`, 2/4/6) for the ride.
-  // Flat armor can't fully negate (MIN_ATTACK_DAMAGE floor), so the trial boss
-  // eventually pierces and the mode terminates — while the ward keeps a
-  // coherent "hardens the line" identity. Cost/stats untouched pending the
+  // swap (+5.9 waves, PR #123 probe) AND the enabler of a full-negate exploit
+  // (found via the since-removed Boss Trial: every season `2026-07-20` board
+  // that rode to its 60-phase cap ran a ★3 Ward-Weaver; the best board without
+  // one stalled at 13). Full hit-negation scales infinitely against any
+  // escalating attacker, so such a unit never dies. Reworked to a
+  // `startOfBattle` `grantArmor`: it now hardens the whole warren with flat
+  // armor (`wardArmorForTier`, 2/4/6) for the ride. Flat armor can't fully
+  // negate (MIN_ATTACK_DAMAGE floor), so an escalating attacker eventually
+  // pierces — while the ward keeps a coherent "hardens the line" identity.
+  // Cost/stats untouched pending the
   // pass; the whole-warren reach may want a lower table or a cost bump.
   'ward-weaver': {
     id: 'ward-weaver', name: 'Ward-Weaver', attack: 1, health: 3, cost: 6,

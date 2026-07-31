@@ -721,10 +721,10 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
         // Multi-caster stack cap (issue #131, same shape as #116's
         // `poisonAllEnemies` cap): multiple Plague-Bearers used to stack
         // additively onto the same single last-enemy target with no ceiling
-        // — against a single fixed target (e.g. Boss Trial's one boss per
-        // phase) this let 2-5x Plague-Bearer push well past the trial's
-        // intended "a few dozen phases" ceiling, all the way to its 60-phase
-        // hard cap. Capped at `poisonStacksForTier(3)` via its own budget
+        // — against a single fixed target (a lone high-HP enemy; originally
+        // reproduced on the since-removed Boss Trial's one escalating boss)
+        // this let 2-5x Plague-Bearer push runaway stacks well past the
+        // intended ceiling. Capped at `poisonStacksForTier(3)` via its own budget
         // (`poisonLastApplied`, separate from `poisonAllApplied`) — same
         // cap-not-sum precedent as `blockCharges`/`poisonAllEnemies`: one ★3
         // fills it, extra Plague-Bearers clip rather than add. Kept
