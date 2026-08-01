@@ -1595,7 +1595,7 @@
       <span>the scrap-market · ⚙ {build.scrap}</span>
       <span>❄ keeps a stall when you reroll</span>
     </div>
-    <div class="board">
+    <div class="board shop-board">
       {#each build.shop.slots as slot, i}
         {#if slot.kind === 'unit'}
           {@const def = UNIT_DEFS[slot.defId]}
@@ -2468,6 +2468,44 @@
 
   .bench-board {
     grid-template-columns: repeat(5, 1fr);
+  }
+
+  .shop-board {
+    /* SHOP_UNIT_SLOTS(4) + SHOP_RELIC_SLOTS(1) = 5 (issue #156's relic-slot
+       cut, 2026-08-01) — was the shared 6-column `.board` default, which
+       left a dead 6th track and squeezed every tile a column narrower than
+       it needed to be. A dedicated column count lets tiles actually use the
+       freed-up width instead of wrapping names/costs onto extra lines. */
+    grid-template-columns: repeat(5, 1fr);
+  }
+
+  /* Scoped to .shop-tile, not the shared .tile — the horde/bench boards
+     already sit at 5 columns and weren't part of this resize; only the shop
+     gained width from the relic-slot cut above. */
+  .shop-tile {
+    min-height: 104px;
+    padding: 9px 5px;
+  }
+
+  .shop-tile .portrait {
+    width: 48px;
+    height: 48px;
+  }
+
+  .shop-tile .tile-name {
+    font-size: 12.5px;
+  }
+
+  .shop-tile .tile-stats {
+    font-size: 15px;
+  }
+
+  .shop-tile .tile-sub {
+    font-size: 10.5px;
+  }
+
+  .shop-tile .tile-cost {
+    font-size: 11.5px;
   }
 
   .bench-tile {
