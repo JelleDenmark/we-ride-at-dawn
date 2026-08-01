@@ -672,10 +672,13 @@
       // Merge scaling grows target count, not per-hit damage (issue #86
       // follow-up) — see `backlineTargetsForTier`'s doc comment in
       // data/units.ts for why the exponential attack curve is deliberately
-      // left out here.
-      const base = def?.attack ?? 0;
+      // left out here. Per-hit damage is the unit's CURRENT attack (base +
+      // relics + team-attack pool + any runtime buffs — see the
+      // `backlineDamage` case in sim.ts's `applyEffect`), not a flat number:
+      // a buffed Slink-Rat/MBP Rat hits harder here too, so the copy must
+      // say "current attack," never bake in the def's base stat.
       const targets = (t: number) => backlineTargetsForTier(t);
-      return `At the start of every wave, if not at the front, strikes the first ${foe} for ${base} (★2 hits the first ${targets(2)} ${foes} for ${base} each · ★3 hits the first ${targets(3)} ${foes} for ${base} each) — separate hits, landed before that wave's clashing even begins, with no retaliation. At the front, it just fights normally.`;
+      return `At the start of every wave, if not at the front, strikes the first ${foe} for its current attack (★2 hits the first ${targets(2)} ${foes} for its current attack each · ★3 hits the first ${targets(3)} ${foes} for its current attack each) — separate hits, landed before that wave's clashing even begins, with no retaliation. At the front, it just fights normally.`;
     }
     let what = '';
     switch (e.kind) {
