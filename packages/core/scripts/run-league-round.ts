@@ -16,14 +16,26 @@
  * The service-role key is required to WRITE (pvp_rounds / pvp_results have no
  * anon write policy). In CI it comes from the SUPABASE_SERVICE_ROLE_KEY repo
  * secret; without it (or with --dry) the run is a read-only preview.
+ *
+ * A real (non-dry, non-preview) round on the public season also posts the
+ * standings to the #wrad Discord channel (issue #162, lib/discord-post.ts) —
+ * needs a DISCORD_BOT_TOKEN repo secret; without it that post is skipped, same
+ * degrade-not-fail shape as the missing service-role key above.
  */
 import { currentRideDate } from '../src/seed';
 import { seasonIdFor } from '../src/shop';
 import { runNightlyRound } from './lib/pvp-league';
+import { postPvpResults } from './lib/discord-post';
 
 const DRY = process.argv.slice(2).some((a) => a === '--dry' || a === 'dry');
 
-async function runSeason(seasonId: string, rideDate: string, now: Date, key: string | undefined) {
+async function runSeason(
+  seasonId: string,
+  rideDate: string,
+  now: Date,
+  key: string | undefined,
+  notifyDiscord: boolean
+) {
   const roundId = `${seasonId}#${rideDate}`;
   console.log(`\n=== round ${roundId}${DRY ? '  (DRY RUN)' : ''} ===`);
 
@@ -45,6 +57,12 @@ async function runSeason(seasonId: string, rideDate: string, now: Date, key: str
     );
   });
   console.log(key ? `Wrote ${outcome.resultRows.length} rows to pvp_results.` : '(preview — nothing written.)');
+
+  // Only the real prod round (a written, non-preview round on the public
+  // season, not the dev-<week> channel this same job also scores) goes to
+  // the public #wrad channel — a dev-channel or dry-run post would spam
+  // players with test standings.
+  if (key && notifyDiscord) await postPvpResults(rideDate, outcome.resultRows);
 }
 
 async function main() {
@@ -62,7 +80,7 @@ async function main() {
     console.log('No SUPABASE_SERVICE_ROLE_KEY set — running as a read-only preview.');
   }
   for (const seasonId of seasons) {
-    await runSeason(seasonId, rideDate, now, key);
+    await runSeason(seasonId, rideDate, now, key, seasonId === baseSeason);
   }
 }
 

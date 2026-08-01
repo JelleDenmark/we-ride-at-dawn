@@ -22,6 +22,18 @@ export interface RelicDef {
   firstHitIgnoresArmor?: boolean;
   /** On faint, deal this much damage to every enemy (Weeping Boil). */
   onFaintDamageAll?: number;
+  /**
+   * Flat armor against 'attack' damage only (Filth Totem's rework, issue
+   * #156) — same `UnitDef.damageReduction` mechanism Ward-Weaver grants
+   * (`sim.ts`'s `applyDamage`), just team-scoped instead of unit-scoped.
+   * Poison bypasses it and the net-damage floor (`MIN_ATTACK_DAMAGE`) still
+   * applies, so this reads as anti-chip/anti-swarm defense, not a poison
+   * counter (that's Gutter-Acolyte's job, issue #155). Applied once via
+   * `teamPool`/`instantiate` before the wave loop starts, not a repeating
+   * trigger, so it's flat and compounding-law safe regardless of tier or
+   * wave count.
+   */
+  damageReduction?: number;
   /** Heal this much at the start of each combat tick (Fat Tick). */
   healPerTick?: number;
   /** Survive one otherwise-lethal hit at 1 health, once per battle (Tail-Charm). */
@@ -92,9 +104,16 @@ export const RELIC_DEFS: Record<string, RelicDef> = {
     id: 'tail-charm', name: 'Tail-Charm', scope: 'unit', cost: 6,
     desc: 'cheats death once', surviveLethal: true,
   },
+  // Reworked (Jesper, 2026-08-01, issue #156): was a flat +0/+1 health, which
+  // just duplicated Forgotten Backpack's bulk on a smaller scale. Now team
+  // armor instead — differentiates from Backpack (raw HP) since armor runs
+  // through the net-damage floor and is bypassed by poison, so it reads as
+  // anti-chip/anti-swarm defense and stacks with Backpack rather than
+  // competing with it. Numbers are a first pass, not final — see
+  // `pvp:relics`/`balance:relic-value` for how to re-check it.
   'filth-totem': {
     id: 'filth-totem', name: 'Filth Totem', scope: 'team', cost: 6,
-    desc: 'all rats +0/+1', health: 1,
+    desc: 'all rats +1 armor', damageReduction: 1,
   },
   'gore-cleaver': {
     id: 'gore-cleaver', name: 'Gore-Cleaver', scope: 'unit', cost: 5,

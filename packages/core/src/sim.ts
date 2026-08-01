@@ -278,6 +278,10 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
       // a unit past its own health ceiling no matter how many of the 45 waves
       // it runs across.
       healPerTick: rs.reduce((s, r) => s + (r.healPerTick ?? 0), 0),
+      // Whole-board flat armor (Filth Totem, issue #156 rework). Same
+      // mechanism as Ward-Weaver's `damageReduction` grant, just summed
+      // across team relics instead of read off the unit def below.
+      damageReduction: rs.reduce((s, r) => s + (r.damageReduction ?? 0), 0),
     };
   };
   const hordeTeam = teamPool(lineup.teamRelicIds);
@@ -335,7 +339,10 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
       poison: 0,
       firstAttackDone: false,
       tailCharmUsed: false,
-      damageReduction: (def.damageReduction ?? 0) * tier,
+      // Team armor (Filth Totem) is a flat grant like team attack/health
+      // above, not tier-scaled — the unit's own base armor (Ward-Weaver,
+      // Dire-Rat, Steel-Whisker) is the only tier-scaled term here.
+      damageReduction: (def.damageReduction ?? 0) * tier + team.damageReduction,
       startOfBattleFired: false,
       raised: false,
       chargeStacks: 0,

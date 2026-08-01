@@ -606,15 +606,30 @@ describe('relics', () => {
     expect(ofType(events, 'relicProc').some((p) => p.relicId === 'gore-cleaver')).toBe(false);
   });
 
-  it('Filth Totem grants the whole horde +1 health, including summons', () => {
+  it('Filth Totem grants the whole horde +1 armor, stacking on top of a unit\'s own', () => {
+    // Dire-Rat already blunts 2 (its own damageReduction); the totem adds 1
+    // more team-wide, so a 5-attack foe should now land 2, not the 3 a lone
+    // Dire-Rat's own armor alone would leave (issue #156 rework).
+    const { events } = simulate(
+      { units: [{ defId: 'dire-rat' }], teamRelicIds: ['filth-totem'] },
+      gauntletOf([dummy(5, 100)])
+    );
+    const onRat = ofType(events, 'damage').filter((e) => e.targetId === 1);
+    expect(onRat.length).toBeGreaterThan(0);
+    expect(onRat.every((e) => e.amount === 2)).toBe(true);
+  });
+
+  it('Filth Totem armor also reaches summons', () => {
+    // Rat-Piper's pup lands in front of its own caster (spawn splices at the
+    // caster's own index), so it's the pup that eats the foe's hits here.
     const { events } = simulate(
       { units: [{ defId: 'rat-piper' }], teamRelicIds: ['filth-totem'] },
-      gauntletOf([dummy(0, 1)])
+      gauntletOf([dummy(3, 100)])
     );
-    const start = ofType(events, 'battleStart')[0];
-    expect(start.horde[0].health).toBe(3);
-    const summons = ofType(events, 'summon');
-    expect(summons[0].unit.health).toBe(2);
+    const pupId = ofType(events, 'summon')[0].unit.instanceId;
+    const onPup = ofType(events, 'damage').filter((e) => e.targetId === pupId);
+    expect(onPup.length).toBeGreaterThan(0);
+    expect(onPup.every((e) => e.amount === 2)).toBe(true);
   });
 
   it('The Forgotten Backpack grants the whole horde +2/+2, including summons', () => {
@@ -900,6 +915,6 @@ describe('combat cap headroom for summons', () => {
 describe('golden log regression', () => {
   it('the full showcase battle produces the pinned event-log hash', () => {
     const { events } = simulate(TEST_HORDE, generateGauntlet('2026-01-01'));
-    expect(fnv1a(JSON.stringify(events))).toMatchInlineSnapshot(`16328822`);
+    expect(fnv1a(JSON.stringify(events))).toMatchInlineSnapshot(`3491901326`);
   });
 });
