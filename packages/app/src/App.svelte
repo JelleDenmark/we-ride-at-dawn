@@ -113,9 +113,14 @@
   import {
     submitPvpBoard,
     fetchLatestStandings,
+    fetchStandingsForRound,
+    fetchSeasonStandings,
+    fetchRounds,
     fetchGhosts,
     fetchLeagueConfig,
     type StandingRow,
+    type SeasonStandingRow,
+    type RoundInfo,
     type GhostRow,
     type LeagueConfig,
   } from './pvp-board';
@@ -336,6 +341,43 @@
   // Which rival's board the scout panel is expanded to, by device_id (null =
   // collapsed). One at a time keeps the panel phone-sized.
   let scoutedGhost = $state<string | null>(null);
+
+  // Season-long totals (issue #157) alongside the existing single-night view,
+  // shown as two tabs so the panel's footprint doesn't grow — see App CSS
+  // `.lg-tabs`. "Season" is the default: it's the number that persists.
+  let leagueTab = $state<'season' | 'nights'>('season');
+  let seasonStandings = $state<SeasonStandingRow[]>([]);
+  let rounds = $state<RoundInfo[]>([]);
+  // Which past round the "Nights" tab is browsing. null = follow the latest
+  // round automatically (kept fresh by refreshLeague's interval); a specific
+  // round_id means the player picked an older, already-closed night, which
+  // never changes again, so it's fetched once and left alone.
+  let selectedRoundId = $state<string | null>(null);
+  let nightStandings = $state<StandingRow[]>([]);
+  // What the "Nights" table actually renders: the live-refreshed `standings`
+  // while following the latest round, or the one-shot fetch for a past pick.
+  const displayedNightStandings = $derived(
+    selectedRoundId === null || selectedRoundId === rounds[0]?.round_id
+      ? standings
+      : nightStandings
+  );
+
+  async function selectRound(roundId: string) {
+    if (roundId === rounds[0]?.round_id) {
+      selectedRoundId = null;
+      return;
+    }
+    selectedRoundId = roundId;
+    nightStandings = await fetchStandingsForRound(roundId);
+  }
+
+  function fmtRoundDate(closesAt: string): string {
+    return new Date(closesAt).toLocaleDateString(undefined, {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+    });
+  }
   // Live league tuning (server-configured). Starts at the shipped fallback so
   // the derived consolation figure reads sensibly before the first fetch lands.
   let leagueConfig = $state<LeagueConfig>({ lossConsolation: LOSS_CONSOLATION_DEFAULT });
@@ -353,12 +395,16 @@
   async function refreshLeague() {
     leagueBusy = true;
     try {
-      const [rows, gh, cfg] = await Promise.all([
+      const [rows, season, roundList, gh, cfg] = await Promise.all([
         fetchLatestStandings(build.seasonId),
+        fetchSeasonStandings(build.seasonId),
+        fetchRounds(build.seasonId),
         fetchGhosts(build.seasonId),
         fetchLeagueConfig(),
       ]);
       standings = rows;
+      seasonStandings = season;
+      rounds = roundList;
       ghosts = gh;
       leagueConfig = cfg;
       creditConsolationIfDue(rows, cfg.lossConsolation);
@@ -967,6 +1013,7 @@
       // Re-key the consolation marker to the new season (empty until the new
       // week's first round pays out).
       creditedRound = loadConsolationCredited(build.seasonId);
+      selectedRoundId = null; // last season's round_id means nothing this season
       void refreshLeague(); // new week → pull the fresh (empty) league + ghosts
     }
     // Auto-submit the season-best on any improvement (guarded so an
@@ -1635,26 +1682,81 @@
     <p class="lg-blurb">
       Your horde duels every rival's at <strong>20:00 CET</strong> — one board does both jobs, riding the drains for scrap by day and fighting the duel at night. Points: <strong>win 3 · draw 1 · loss 0</strong> against each rival, summed. Monday wipes the table.
     </p>
-    {#if standings.length === 0}
-      <p class="lb-empty">{leagueBusy ? 'reading the war-drums…' : 'no duel yet — the first table posts after tonight\'s 20:00 CET'}</p>
+
+    <div class="lg-tabs" role="tablist">
+      <button
+        class="lg-tab"
+        class:active={leagueTab === 'season'}
+        role="tab"
+        aria-selected={leagueTab === 'season'}
+        onclick={() => (leagueTab = 'season')}
+      >
+        Season
+      </button>
+      <button
+        class="lg-tab"
+        class:active={leagueTab === 'nights'}
+        role="tab"
+        aria-selected={leagueTab === 'nights'}
+        onclick={() => (leagueTab = 'nights')}
+      >
+        Nights
+      </button>
+    </div>
+
+    {#if leagueTab === 'season'}
+      {#if seasonStandings.length === 0}
+        <p class="lb-empty">{leagueBusy ? 'reading the war-drums…' : 'no duel yet — the first table posts after tonight\'s 20:00 CET'}</p>
+      {:else}
+        <p class="lg-caption">season total · week of {build.seasonId.slice(0, 10)}</p>
+        <ol class="lb-rows">
+          {#each seasonStandings as row, i}
+            <li class="lb-row" class:me={isMe(row)}>
+              <span class="lb-rank">{i === 0 ? '👑' : i + 1}</span>
+              <span class="lb-name">{row.name}{isMe(row) ? ' · you' : ''}</span>
+              <span class="lg-record" title="wins–draws–losses">{row.wins}–{row.draws}–{row.losses}</span>
+              <span class="lg-points">{row.points} pts</span>
+            </li>
+          {/each}
+        </ol>
+      {/if}
     {:else}
-      <p class="lg-caption">last night's table</p>
-      <ol class="lb-rows">
-        {#each standings as row, i}
-          <li class="lb-row" class:me={isMe(row)}>
-            <span class="lb-rank">{i === 0 ? '👑' : i + 1}</span>
-            <span class="lb-name">{row.name}{isMe(row) ? ' · you' : ''}</span>
-            <span class="lg-record" title="wins–draws–losses">{row.wins}–{row.draws}–{row.losses}</span>
-            <span class="lg-points">{row.points} pts</span>
-          </li>
-        {/each}
-      </ol>
-      {#if myStanding && myConsolation > 0}
-        <p class="lg-consolation">
-          last night's {myStanding.losses}
-          {myStanding.losses === 1 ? 'loss' : 'losses'} paid
-          <strong>+{myConsolation} scrap</strong> consolation
+      {#if rounds.length > 1}
+        <select
+          class="lg-round-picker"
+          value={selectedRoundId ?? rounds[0]?.round_id}
+          onchange={(e) => void selectRound(e.currentTarget.value)}
+        >
+          {#each rounds as r (r.round_id)}
+            <option value={r.round_id}>{fmtRoundDate(r.closes_at)}</option>
+          {/each}
+        </select>
+      {/if}
+      {#if displayedNightStandings.length === 0}
+        <p class="lb-empty">{leagueBusy ? 'reading the war-drums…' : 'no duel yet — the first table posts after tonight\'s 20:00 CET'}</p>
+      {:else}
+        <p class="lg-caption">
+          {selectedRoundId === null || selectedRoundId === rounds[0]?.round_id
+            ? "last night's table"
+            : `${fmtRoundDate(rounds.find((r) => r.round_id === selectedRoundId)?.closes_at ?? '')}'s table`}
         </p>
+        <ol class="lb-rows">
+          {#each displayedNightStandings as row, i}
+            <li class="lb-row" class:me={isMe(row)}>
+              <span class="lb-rank">{i === 0 ? '👑' : i + 1}</span>
+              <span class="lb-name">{row.name}{isMe(row) ? ' · you' : ''}</span>
+              <span class="lg-record" title="wins–draws–losses">{row.wins}–{row.draws}–{row.losses}</span>
+              <span class="lg-points">{row.points} pts</span>
+            </li>
+          {/each}
+        </ol>
+        {#if myStanding && myConsolation > 0 && (selectedRoundId === null || selectedRoundId === rounds[0]?.round_id)}
+          <p class="lg-consolation">
+            last night's {myStanding.losses}
+            {myStanding.losses === 1 ? 'loss' : 'losses'} paid
+            <strong>+{myConsolation} scrap</strong> consolation
+          </p>
+        {/if}
       {/if}
     {/if}
 
@@ -2942,6 +3044,46 @@
   .lb-refresh:disabled {
     opacity: 0.5;
     cursor: default;
+  }
+
+  .lg-tabs {
+    display: flex;
+    gap: 6px;
+    margin: 10px 0 0;
+  }
+
+  .lg-tab {
+    flex: 1;
+    min-height: 36px;
+    padding: 6px 10px;
+    font-family: inherit;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--ink-dim);
+    background: #1a140f;
+    border: 1px solid #322820;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+
+  .lg-tab.active {
+    color: var(--ink);
+    background: #241a14;
+    border-color: #4a3520;
+  }
+
+  .lg-round-picker {
+    display: block;
+    width: 100%;
+    margin: 10px 0 0;
+    padding: 6px 8px;
+    font-family: inherit;
+    font-size: 13px;
+    color: var(--ink);
+    background: #1a140f;
+    border: 1px solid #322820;
+    border-radius: 6px;
   }
 
   .lb-empty {

@@ -52,11 +52,73 @@ export async function submitPvpBoard(args: {
   }
 }
 
-/** One row of last night's league standings, as written by the nightly job. */
+/** One row of a single night's league standings, as written by the nightly job. */
 export interface StandingRow extends RoundStanding {
   name: string;
   round_id: string;
   device_id: string;
+}
+
+/** One closed round for a season, for the "which night" picker. */
+export interface RoundInfo {
+  round_id: string;
+  closes_at: string;
+}
+
+/**
+ * Every CLOSED round for this season, most recent first — the list the
+ * "Nights" picker browses. Empty on any failure (never throws).
+ */
+export async function fetchRounds(seasonId: string): Promise<RoundInfo[]> {
+  const season = boardSeason(seasonId);
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/pvp_rounds` +
+        `?season_id=eq.${encodeURIComponent(season)}&status=eq.closed` +
+        `&select=round_id,closes_at&order=closes_at.desc`,
+      { headers: HEADERS }
+    );
+    if (!res.ok) return [];
+    return (await res.json()) as RoundInfo[];
+  } catch {
+    return [];
+  }
+}
+
+/** Raw `pvp_results` rows for one round_id, mapped to `StandingRow`. Not
+ * exported — both `fetchLatestStandings` and `fetchStandingsForRound` funnel
+ * through this so the row-shape mapping lives in exactly one place. */
+async function fetchRoundRows(roundId: string): Promise<StandingRow[]> {
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/pvp_results` +
+      `?round_id=eq.${encodeURIComponent(roundId)}` +
+      `&select=round_id,device_id,name,points,wins,draws,losses,survivor_diff` +
+      `&order=points.desc,survivor_diff.desc,name.asc`,
+    { headers: HEADERS }
+  );
+  if (!res.ok) return [];
+  const rows = (await res.json()) as Array<{
+    round_id: string;
+    device_id: string;
+    name: string;
+    points: number;
+    wins: number;
+    draws: number;
+    losses: number;
+    survivor_diff: number;
+  }>;
+  return rows.map((r) => ({
+    round_id: r.round_id,
+    device_id: r.device_id,
+    name: r.name,
+    points: r.points,
+    wins: r.wins,
+    draws: r.draws,
+    losses: r.losses,
+    // The DB column is snake_case; RoundStanding is camelCase.
+    survivorDiff: r.survivor_diff,
+    id: r.device_id,
+  }));
 }
 
 /**
@@ -66,30 +128,63 @@ export interface StandingRow extends RoundStanding {
  * round (partial rows) never renders as a final table.
  */
 export async function fetchLatestStandings(seasonId: string): Promise<StandingRow[]> {
+  try {
+    const rounds = await fetchRounds(seasonId);
+    if (rounds.length === 0) return [];
+    return await fetchRoundRows(rounds[0].round_id);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * One specific past round's standings, for the "Nights" picker. Same shape
+ * and tiebreak ordering as `fetchLatestStandings`, just for an arbitrary
+ * already-closed `round_id` instead of always the newest.
+ */
+export async function fetchStandingsForRound(roundId: string): Promise<StandingRow[]> {
+  try {
+    return await fetchRoundRows(roundId);
+  } catch {
+    return [];
+  }
+}
+
+/** One entrant's SEASON-TOTAL standing — summed across every scored round. */
+export interface SeasonStandingRow {
+  device_id: string;
+  name: string;
+  points: number;
+  wins: number;
+  draws: number;
+  losses: number;
+  survivorDiff: number;
+}
+
+/**
+ * Season-long standings: every `pvp_results` row for the season, summed by
+ * `device_id`. No schema change needed — `pvp_results` already carries
+ * `season_id` on every row, so this is a client-side aggregation of the same
+ * per-round rows `fetchStandingsForRound` reads individually.
+ *
+ * Tiebreak mirrors `scoreRound`'s round-level rationale (see pvp.ts): points
+ * desc, then summed survivor_diff desc. The final tiebreak is name asc rather
+ * than id — unlike a single round, a season total has no meaningful "which
+ * simulateDuel ran first" order to break ties on, so name is the only stable,
+ * human-legible tiebreak available here.
+ */
+export async function fetchSeasonStandings(seasonId: string): Promise<SeasonStandingRow[]> {
   const season = boardSeason(seasonId);
   try {
-    // Latest CLOSED round for this season.
-    const roundRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/pvp_rounds` +
-        `?season_id=eq.${encodeURIComponent(season)}&status=eq.closed` +
-        `&select=round_id&order=closes_at.desc&limit=1`,
-      { headers: HEADERS }
-    );
-    if (!roundRes.ok) return [];
-    const rounds = (await roundRes.json()) as { round_id: string }[];
-    if (rounds.length === 0) return [];
-    const roundId = rounds[0].round_id;
-
     const res = await fetch(
       `${SUPABASE_URL}/rest/v1/pvp_results` +
-        `?round_id=eq.${encodeURIComponent(roundId)}` +
-        `&select=round_id,device_id,name,points,wins,draws,losses,survivor_diff` +
-        `&order=points.desc,survivor_diff.desc,name.asc`,
+        `?season_id=eq.${encodeURIComponent(season)}` +
+        `&select=device_id,name,points,wins,draws,losses,survivor_diff,updated_at` +
+        `&order=updated_at.asc`,
       { headers: HEADERS }
     );
     if (!res.ok) return [];
     const rows = (await res.json()) as Array<{
-      round_id: string;
       device_id: string;
       name: string;
       points: number;
@@ -97,19 +192,40 @@ export async function fetchLatestStandings(seasonId: string): Promise<StandingRo
       draws: number;
       losses: number;
       survivor_diff: number;
+      updated_at: string;
     }>;
-    return rows.map((r) => ({
-      round_id: r.round_id,
-      device_id: r.device_id,
-      name: r.name,
-      points: r.points,
-      wins: r.wins,
-      draws: r.draws,
-      losses: r.losses,
-      // The DB column is snake_case; RoundStanding is camelCase.
-      survivorDiff: r.survivor_diff,
-      id: r.device_id,
-    }));
+
+    // Ordered updated_at asc, so the last row seen per device is also the
+    // most recent — used to keep the player's CURRENT name on the total even
+    // if they renamed mid-season.
+    const totals = new Map<string, SeasonStandingRow>();
+    for (const r of rows) {
+      const prev = totals.get(r.device_id);
+      if (prev) {
+        prev.name = r.name;
+        prev.points += r.points;
+        prev.wins += r.wins;
+        prev.draws += r.draws;
+        prev.losses += r.losses;
+        prev.survivorDiff += r.survivor_diff;
+      } else {
+        totals.set(r.device_id, {
+          device_id: r.device_id,
+          name: r.name,
+          points: r.points,
+          wins: r.wins,
+          draws: r.draws,
+          losses: r.losses,
+          survivorDiff: r.survivor_diff,
+        });
+      }
+    }
+
+    return [...totals.values()].sort((a, b) => {
+      if (b.points !== a.points) return b.points - a.points;
+      if (b.survivorDiff !== a.survivorDiff) return b.survivorDiff - a.survivorDiff;
+      return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+    });
   } catch {
     return [];
   }
