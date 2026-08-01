@@ -668,6 +668,15 @@
       // without an awkward bolt-on clause, same reasoning as chargeWhileBenched.
       return `When it faints, splits its current attack and max health evenly across the surviving horde (any remainder goes to the frontmost survivors first). All your Pack-Callers draw from one shared pool for this, spent across the ride.`;
     }
+    if (e.kind === 'poisonResist') {
+      // Bespoke sentence (not the generic trigger template below): it's a
+      // per-wave-banked passive ward, not a one-off proc — "at the start of
+      // every wave" is mechanically true but reads as noise for something
+      // that's simplest understood as just "always up." Trimmed the
+      // "ward, not antidote" caveat too (Jesper, 2026-08-01) — the cap
+      // number already says it's partial.
+      return `Wards the whole ${team} against poison, blunting every tick by ${poisonResistForTier(1)} (★2 ${poisonResistForTier(2)} · ★3 ${poisonResistForTier(3)}), capped at ${POISON_RESIST_CAP} across multiple casters.`;
+    }
     if (e.kind === 'backlineDamage') {
       // Merge scaling grows target count, not per-hit damage (issue #86
       // follow-up) — see `backlineTargetsForTier`'s doc comment in
@@ -747,13 +756,6 @@
       case 'healSelf':
         // Linear per-star curve — repeats every clash survived (see sim.ts).
         what = `drains ${e.amount} health back (★2 ${e.amount * 2} · ★3 ${e.amount * 3}) if it survived the clash — never past its own max`;
-        break;
-      case 'poisonResist':
-        // [1, 2, 3] per-star curve (issue #155) — banked once per wave,
-        // blunts every poison tick the whole ${team} takes. Capped across
-        // multiple casters at POISON_RESIST_CAP (one ★3's own value) —
-        // partial by design, strong poison still gets through.
-        what = `wards the whole ${team} against poison, blunting every incoming poison tick by ${poisonResistForTier(1)} (★2 ${poisonResistForTier(2)} · ★3 ${poisonResistForTier(3)}), capped at ${POISON_RESIST_CAP} across multiple casters — a ward, not an antidote, strong poison still gets through`;
         break;
     }
     const when = def.ability.condition?.timeOfDay
