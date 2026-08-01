@@ -53,6 +53,7 @@ export {
   upcomingRetirements,
   shopUnitPoolForDay,
   seasonUnitPool,
+  seasonRelicPool,
   buyUnit,
   canRecruit,
   buyRelic,

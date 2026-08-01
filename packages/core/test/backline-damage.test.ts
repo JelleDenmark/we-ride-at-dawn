@@ -355,11 +355,15 @@ describe('backline damage primitive (issue #85)', () => {
     });
   });
 
-  describe('interaction decision 5: Glass Shard\'s first-hit bonus (bug fix, 2026-07-27)', () => {
-    it('applies its wave-scaling bonus to the backline hit, same as a normal front clash', () => {
-      // Before the fix, backlineDamage computed its own perHitAttack
-      // entirely independent of firstHitBonus/firstHitBonusScalesWithWave,
-      // so a sniper wearing Glass Shard got no bonus, ever (player report).
+  describe('interaction decision 5: Glass Shard\'s first-hit bonus (bug fix, 2026-07-27; reworked flat+armor-break, issue #156)', () => {
+    it('applies its bonus to the backline hit, same as a normal front clash, fresh every wave', () => {
+      // Before the original fix, backlineDamage computed its own
+      // perHitAttack entirely independent of firstHitBonus, so a sniper
+      // wearing Glass Shard got no bonus, ever (player report). The #156
+      // rework swapped the bonus from wave-scaling to a flat literal, so it
+      // no longer grows wave over wave — but it still fires anew each wave
+      // (firstAttackDone resets every wave, see sim.ts), same amount both
+      // times.
       const { events } = simulate(
         lineup({ defId: 'dire-rat' }, { defId: 'test-sniper', relicIds: ['glass-shard'] }),
         gauntletOf([dummy(0, 1000)], [dummy(0, 1000)])
@@ -367,25 +371,25 @@ describe('backline damage primitive (issue #85)', () => {
       const waveStarts = ofType(events, 'waveStart');
       const damages = ofType(events, 'damage');
       const firstHitOf = (w: number) => damages.find((d) => d.targetId === waveStarts[w].enemies[0].instanceId);
-      expect(firstHitOf(0)?.amount).toBe(4); // base 3 + wave 1
-      expect(firstHitOf(1)?.amount).toBe(5); // base 3 + wave 2 — fires anew each wave
+      expect(firstHitOf(0)?.amount).toBe(7); // base 3 + 4
+      expect(firstHitOf(1)?.amount).toBe(7); // base 3 + 4 — fires anew each wave, flat, not growing
     });
 
     it('does not multiply across multiple ★2/★3 targets — one bonus per unit per wave, not per enemy struck', () => {
-      // Glass Shard's wave-scaling bonus is deliberately uncapped (accepted
-      // risk — see its declaration in units.ts). Multiplying it by
-      // backlineTargetsForTier's growing target count would stack two
-      // unbounded axes (wave number AND merge tier) — the same AOE-nuke
-      // shape backlineTargetsForTier's own doc comment already rejected
-      // once for per-hit damage itself. Only the first target struck gets
-      // the bonus; the rest take the unit's plain per-hit damage.
+      // Even now that the bonus is flat and capped (not the pre-#156
+      // wave-scaling version), multiplying it by backlineTargetsForTier's
+      // growing target count would still stack two scaling axes (a per-hit
+      // flat bonus AND a growing target count) — the same AOE-nuke shape
+      // backlineTargetsForTier's own doc comment already rejected once for
+      // per-hit damage itself. Only the first target struck gets the bonus;
+      // the rest take the unit's plain per-hit damage.
       const { events } = simulate(
         lineup({ defId: 'dire-rat' }, { defId: 'test-sniper', tier: 2, relicIds: ['glass-shard'] }),
         gauntletOf([dummy(0, 1000), dummy(0, 1000)])
       );
       const enemies = ofType(events, 'waveStart')[0].enemies;
       const hitOn = (foeId: number) => ofType(events, 'damage').find((d) => d.targetId === foeId);
-      expect(hitOn(enemies[0].instanceId)?.amount).toBe(4); // base 3 + wave 1, first target only
+      expect(hitOn(enemies[0].instanceId)?.amount).toBe(7); // base 3 + 4, first target only
       expect(hitOn(enemies[1].instanceId)?.amount).toBe(3); // base 3, no bonus
     });
 

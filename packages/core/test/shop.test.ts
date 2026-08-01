@@ -32,6 +32,7 @@ import {
   unitStats,
   rollOfferings,
   upcomingRetirements,
+  seasonRelicPool,
   type BuildState,
 } from '../src/shop';
 import { UNIT_DEFS } from '../src/data/units';
@@ -1693,5 +1694,47 @@ describe('severance: par buyback for retired units (issue #108)', () => {
     // Par: the refund exactly equals what was spent, no profit and no loss —
     // the exploit guard this whole feature exists for.
     expect(afterSell.scrap).toBe(3 * gutterRuntCost);
+  });
+});
+
+describe('relic pool retirement (issue #156: Rusted Nail cut)', () => {
+  const everRelicAppears = (day: number, relicId: string): boolean => {
+    for (let d = 0; d < 40; d++) {
+      const date = `2026-08-${String(d + 1).padStart(2, '0')}`;
+      for (let roll = 0; roll < 10; roll++) {
+        const slots = rollOfferings(date, roll, [], day);
+        if (slots.some((s) => s.kind === 'relic' && s.relicId === relicId)) return true;
+      }
+    }
+    return false;
+  };
+
+  it('Rusted Nail never rolls in the shop, on any day (relics have no unlockDay/retireDay — a flat exclusion, unlike units)', () => {
+    for (const day of [1, 2, 3, 4, 5, 6, 7]) expect(everRelicAppears(day, 'rusted-nail')).toBe(false);
+  });
+
+  it('every OTHER relic still rolls — this is a targeted cut, not a pool-wide regression', () => {
+    for (const relicId of ['glass-shard', 'weeping-boil', 'fat-tick', 'tail-charm', 'filth-totem', 'gore-cleaver', 'marrow-snap', 'forgotten-backpack']) {
+      expect(everRelicAppears(1, relicId)).toBe(true);
+    }
+  });
+
+  it('seasonRelicPool() (the compendium listing) excludes Rusted Nail but keeps every other relic', () => {
+    const ids = seasonRelicPool().map((r) => r.id);
+    expect(ids).not.toContain('rusted-nail');
+    expect(ids).toHaveLength(Object.keys(RELIC_DEFS).length - 1);
+  });
+
+  it('an already-owned Rusted Nail (carried in from before the cut) still equips/sells fine — only the ROLL is gated', () => {
+    const nailCost = RELIC_DEFS['rusted-nail'].cost;
+    const s: BuildState = {
+      ...newBuild('2026-08-04', 3),
+      scrap: 20,
+      board: [{ defId: 'dire-rat', tier: 1, relicIds: ['rusted-nail'] }],
+    };
+    const direRatRefund = Math.max(1, Math.floor(UNIT_DEFS['dire-rat'].cost / 2));
+    const nailRefund = Math.max(1, Math.floor(nailCost / 2));
+    const afterSell = must(sellUnit(s, 0)).state;
+    expect(afterSell.scrap).toBe(20 + direRatRefund + nailRefund);
   });
 });

@@ -1,7 +1,7 @@
 import { fnv1a } from './seed';
 import { xorshift128 } from './prng';
 import { UNIT_DEFS, type Lineup, type UnitDef, tierAttackMultiplier, tierHealthMultiplier } from './data/units';
-import { RELIC_DEFS } from './data/relics';
+import { RELIC_DEFS, type RelicDef } from './data/relics';
 import { BOARD_CAP, COMBAT_CAP_BONUS } from './sim';
 
 export const DAILY_SCRAP = 24;
@@ -268,7 +268,14 @@ const SHOP_UNIT_POOL = Object.values(UNIT_DEFS).filter(
     u.id !== 'dusk-runt' &&
     u.id !== 'slink-rat'
 );
-const SHOP_RELIC_POOL = Object.values(RELIC_DEFS);
+// Rusted Nail retired from the purchasable pool (Jesper, 2026-08-01, issue
+// #156): `pvp:relics` confirmed it's duel-dead from T2 on (a flat +2 attack,
+// same niche the reworked Glass Shard now fills more interestingly) — see
+// RELIC_DEFS's own doc comment on `rusted-nail` for the numbers. Its def
+// stays in RELIC_DEFS (golden logs/replays reference it directly), only
+// SHOP_RELIC_POOL drops it — same pattern as the unit reskin exclusions
+// above, just without a replacement def taking its slot.
+const SHOP_RELIC_POOL = Object.values(RELIC_DEFS).filter((r) => r.id !== 'rusted-nail');
 
 /**
  * Day-gated shop pool (issue #12: Dawn-Runt/Dusk-Runt originally; now also
@@ -318,6 +325,19 @@ export function seasonUnitPool(): UnitDef[] {
     }
   }
   return result;
+}
+
+/**
+ * Every relic obtainable in the shop this season (issue #156's Rusted Nail
+ * retirement is the first time this has ever mattered — relics have no
+ * day-gating, unlike units, so this is just `SHOP_RELIC_POOL` unfiltered).
+ * Exported so the compendium's relic tab lists exactly what a player can
+ * actually roll, same "will I ever see this" contract as `seasonUnitPool`
+ * for rats — a retired relic should disappear from both places, not just
+ * the roll.
+ */
+export function seasonRelicPool(): RelicDef[] {
+  return SHOP_RELIC_POOL;
 }
 
 /**

@@ -365,11 +365,21 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
 
   events.push({ type: 'battleStart', horde: horde.map(view) });
 
-  const applyDamage = (unit: BattleUnit, amount: number, cause: 'attack' | 'poison'): void => {
+  const applyDamage = (
+    unit: BattleUnit,
+    amount: number,
+    cause: 'attack' | 'poison',
+    ignoreArmor = false
+  ): void => {
     // Armor blunts attacks only — poison is rot, it goes around the hide. The
     // floor keeps armor from ever producing an unkillable front rat.
+    // `ignoreArmor` (Glass Shard's rework, issue #156) punches straight
+    // through even that floor — it's an alpha strike landing before the
+    // target's hide has a chance to matter, not a reduced-but-still-blunted
+    // hit, so this branch skips MIN_ATTACK_DAMAGE too, not just the
+    // reduction subtraction.
     const dealt =
-      cause === 'attack' && unit.damageReduction > 0
+      cause === 'attack' && unit.damageReduction > 0 && !ignoreArmor
         ? Math.max(MIN_ATTACK_DAMAGE, amount - unit.damageReduction)
         : amount;
     unit.health -= dealt;
@@ -1012,19 +1022,21 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
         // loop even starts and previously bypassed the bonus entirely (a
         // Slink-Rat wearing Glass Shard got no bonus, ever — reported bug).
         // Applied to only the FIRST target, not every target this hits at
-        // ★2/★3: Glass Shard's wave-scaling bonus is deliberately uncapped
-        // (accepted risk, see its declaration in units.ts), so letting merge
-        // tier multiply it too would stack two unbounded axes (wave number
-        // AND target count) — exactly the compounding-law risk
-        // `backlineTargetsForTier`'s doc comment already rejected once for
-        // per-hit damage itself. "First hit each wave" reads as one bonus
-        // per unit per wave, not one per enemy struck.
+        // ★2/★3: even now that Glass Shard's bonus is a flat, capped number
+        // (issue #156 rework — the old wave-scaling version was uncapped and
+        // is why this comment used to warn about it), letting merge tier
+        // multiply it too would still stack two scaling axes (a per-hit flat
+        // bonus AND a growing target count) — same reasoning
+        // `backlineTargetsForTier`'s doc comment already applied to per-hit
+        // damage itself. "First hit each wave" reads as one bonus per unit
+        // per wave, not one per enemy struck.
         const firstHitBonus = source.firstAttackDone
           ? 0
-          : source.relics.reduce(
-              (s, r) => s + (r.firstHitBonusScalesWithWave ? currentWave : (r.firstHitBonus ?? 0)),
-              0
-            );
+          : source.relics.reduce((s, r) => s + (r.firstHitBonus ?? 0), 0);
+        // Armor-breaker half of Glass Shard's rework: the SAME first hit that
+        // carries the bonus above also ignores the target's armor — see
+        // `applyDamage`'s `ignoreArmor` param.
+        const ignoresArmor = !source.firstAttackDone && source.relics.some((r) => r.firstHitIgnoresArmor);
         source.firstAttackDone = true;
         const targets = opposing(source.side).slice(0, backlineTargetsForTier(source.tier));
         targets.forEach((target, i) => {
@@ -1057,7 +1069,7 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
           // ticks inside the tick loop, after the clash) — so backline damage
           // always lands first, same relative order as Plague-Bearer's
           // `poisonFrontEnemy` already establishes for its own startOfWave hit.
-          applyDamage(target, amount, 'attack');
+          applyDamage(target, amount, 'attack', i === 0 && ignoresArmor);
         });
         break;
       }
@@ -1331,9 +1343,17 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
       events.push({ type: 'clash', hordeId: front.instanceId, enemyId: foe.instanceId });
 
       const bonusOf = (u: BattleUnit): number =>
-        u.firstAttackDone ? 0 : u.relics.reduce((s, r) => s + (r.firstHitBonusScalesWithWave ? currentWave : (r.firstHitBonus ?? 0)), 0);
+        u.firstAttackDone ? 0 : u.relics.reduce((s, r) => s + (r.firstHitBonus ?? 0), 0);
+      // Armor-breaker half of Glass Shard's rework (issue #156): the same
+      // first hit that carries `bonusOf`'s bonus also ignores the target's
+      // armor — see `applyDamage`'s `ignoreArmor` param. Read BEFORE
+      // `firstAttackDone` flips below, same as `bonusOf` already does.
+      const ignoresArmorOf = (u: BattleUnit): boolean =>
+        !u.firstAttackDone && u.relics.some((r) => r.firstHitIgnoresArmor);
       const damageOut = front.attack + bonusOf(front);
       const damageIn = foe.attack + bonusOf(foe);
+      const frontIgnoresArmor = ignoresArmorOf(front);
+      const foeIgnoresArmor = ignoresArmorOf(foe);
       front.firstAttackDone = true;
       foe.firstAttackDone = true;
 
@@ -1364,14 +1384,14 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
         blockCharges[foe.side]--;
         events.push({ type: 'shieldAbsorbed', targetId: foe.instanceId });
       } else {
-        applyDamage(foe, damageOut, 'attack');
+        applyDamage(foe, damageOut, 'attack', frontIgnoresArmor);
         foeTookBlow = true;
       }
       if (blockCharges[front.side] > 0) {
         blockCharges[front.side]--;
         events.push({ type: 'shieldAbsorbed', targetId: front.instanceId });
       } else {
-        applyDamage(front, damageIn, 'attack');
+        applyDamage(front, damageIn, 'attack', foeIgnoresArmor);
         frontTookBlow = true;
       }
       // Net-damage floor: a unit whose clash blow landed must end the tick at

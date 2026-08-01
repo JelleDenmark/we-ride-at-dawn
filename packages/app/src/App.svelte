@@ -58,6 +58,7 @@
     upcomingUnlocks,
     shopUnitPoolForDay,
     seasonUnitPool,
+    seasonRelicPool,
     tierAttackMultiplier,
     tierHealthMultiplier,
     reviveHpForTier,
@@ -2033,7 +2034,7 @@
   {#if compendium}
     {@const comp = compendium}
     {@const unitList = seasonUnitPool().sort((a, b) => a.cost - b.cost)}
-    {@const relicList = [...Object.values(RELIC_DEFS)].sort((a, b) => a.cost - b.cost)}
+    {@const relicList = seasonRelicPool().sort((a, b) => a.cost - b.cost)}
     {@const enemyList = [...ENEMY_POOL]}
     {@const selectedUnit =
       comp.tab === 'units' && comp.selected

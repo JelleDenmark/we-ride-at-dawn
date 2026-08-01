@@ -6,19 +6,20 @@ export interface RelicDef {
   desc: string;
   attack?: number;
   health?: number;
-  /** Extra damage on the unit's first attack of the battle (Glass Shard). */
+  /** Extra damage on the unit's first attack each wave (Glass Shard) — fires
+   * anew every wave (a PvE ride is 45 of them; a PvP duel is exactly one),
+   * see `firstAttackDone`'s per-wave reset in sim.ts. */
   firstHitBonus?: number;
   /**
-   * Glass Shard rework (Jesper's call, 2026-07-16): the first-hit bonus
-   * damage scales with the current wave number instead of a flat literal,
-   * and is deliberately left UNCAPPED — the compounding-law risk (this
-   * relic can eventually out-damage the rest of the build by late waves)
-   * was explicitly accepted rather than capped. Recomputed fresh from
-   * `currentWave` on every wave's first hit; nothing is stored on the
-   * unit, so it cannot stack within a wave or carry over — it only grows
-   * because the wave number itself grows.
+   * That same first attack each wave also ignores the target's armor
+   * outright — not reduced-then-floored, straight through, skipping even
+   * MIN_ATTACK_DAMAGE's floor logic (Glass Shard's rework, issue #156; see
+   * `applyDamage`'s `ignoreArmor` param in sim.ts). Paired with
+   * `firstHitBonus` above under the SAME `firstAttackDone` gate — one
+   * "alpha strike," not two independent triggers — so a unit can't bank the
+   * armor-break on one attack and the bonus damage on another.
    */
-  firstHitBonusScalesWithWave?: boolean;
+  firstHitIgnoresArmor?: boolean;
   /** On faint, deal this much damage to every enemy (Weeping Boil). */
   onFaintDamageAll?: number;
   /** Heal this much at the start of each combat tick (Fat Tick). */
@@ -46,13 +47,31 @@ export interface RelicDef {
 }
 
 export const RELIC_DEFS: Record<string, RelicDef> = {
+  // Retired from the shop pool (Jesper, 2026-08-01, issue #156): `pvp:relics`
+  // confirmed a flat +2 attack is duel-dead from T2 on (a permanent bonus
+  // spread across only 8 board slots barely moves one duel's outcome, and
+  // the reworked Glass Shard below now fills the "attack relic" niche more
+  // interestingly). Def stays here for golden logs/replays; see
+  // SHOP_RELIC_POOL in shop.ts for the pool exclusion.
   'rusted-nail': {
     id: 'rusted-nail', name: 'Rusted Nail', scope: 'unit', cost: 4,
     desc: '+2 attack', attack: 2,
   },
+  // Reworked (Jesper, 2026-08-01, issue #156): was a first-hit bonus that
+  // scaled with the current wave number, UNCAPPED — both the PvP dud (a
+  // one-wave duel never gets past wave 1, so it read as a flat +1) and the
+  // last uncapped compounding-law liability in the roster (a deep PvE ride
+  // could eventually out-damage the rest of the build). Now a flat, capped
+  // "alpha strike": a fixed bonus on the first hit that ALSO ignores the
+  // target's armor outright — the deliberate counter to the Ward-Weaver
+  // armor meta, completing the RPS spine armor > swarm, armor-break > armor,
+  // swarm > poison (poison countered separately, see Gutter-Acolyte).
+  // Numbers are a first pass, not final — flagged for balance sign-off same
+  // as every other fresh magnitude in this file (see `pvp:relics`/
+  // `balance:relic-value` for how to re-check it).
   'glass-shard': {
     id: 'glass-shard', name: 'Glass Shard', scope: 'unit', cost: 4,
-    desc: '+dmg = wave number, first hit each wave', firstHitBonusScalesWithWave: true,
+    desc: '+4 dmg & ignores armor, first hit', firstHitBonus: 4, firstHitIgnoresArmor: true,
   },
   'weeping-boil': {
     id: 'weeping-boil', name: 'Weeping Boil', scope: 'unit', cost: 4,

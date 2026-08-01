@@ -424,19 +424,40 @@ describe('relics', () => {
     expect(start.horde[0].attack).toBe(3);
   });
 
-  it('Glass Shard adds damage equal to the current wave number to the first hit of each wave', () => {
+  it('Glass Shard adds a flat +4 damage bonus to the first hit of each wave (issue #156 rework)', () => {
     const { events } = simulate(
       lineup({ defId: 'gutter-runt', relicIds: ['glass-shard'] }),
       gauntletOf([dummy(0, 10)], [dummy(0, 10)])
     );
     const hits = ofType(events, 'damage').filter((d) => d.amount > 0);
-    // First hit of wave 1 is boosted by the wave number (1 + 1 = 2), the rest are 1...
-    expect(hits[0].amount).toBe(2);
+    // First hit of wave 1 is boosted (base 1 + 4 = 5), the rest are 1...
+    expect(hits[0].amount).toBe(5);
     expect(hits[1].amount).toBe(1);
-    // ...and it fires anew on the first hit of wave 2, boosted by wave 2 (1 + 2 = 3).
+    // ...and it fires anew on the first hit of wave 2, same flat bonus — NOT
+    // growing with the wave number (that was the pre-#156 behavior, cut for
+    // being both duel-dead and an uncapped compounding-law liability).
     const boosted = hits.filter((h) => h.amount > 1);
     expect(boosted).toHaveLength(2);
-    expect(boosted[1].amount).toBe(3);
+    expect(boosted[1].amount).toBe(5);
+  });
+
+  it('Glass Shard\'s first hit each wave also ignores the target\'s armor outright (issue #156)', () => {
+    // health 3 dies outright to the boosted, armor-ignored hit (base 1 +
+    // bonus 4 = 5) in exactly one clash — a normal clash against 5 armor
+    // would floor to MIN_ATTACK_DAMAGE (1) instead and take several clashes
+    // to whittle down. One armored dummy per wave keeps each wave's damage
+    // log to exactly its first (and only) hit, so `hits[w]` unambiguously
+    // means "wave w+1's first hit."
+    const armored: UnitDef = { id: 'armored-dummy', name: 'Armored Dummy', attack: 0, health: 3, cost: 0, damageReduction: 5 };
+    const { events } = simulate(
+      lineup({ defId: 'gutter-runt', relicIds: ['glass-shard'] }),
+      gauntletOf([armored], [armored])
+    );
+    const hits = ofType(events, 'damage').filter((d) => d.amount > 0);
+    expect(hits).toHaveLength(2);
+    expect(hits[0].amount).toBe(5);
+    // Wave 2's first hit ignores armor again too (fires anew each wave).
+    expect(hits[1].amount).toBe(5);
   });
 
   it('Weeping Boil damages all enemies when the bearer faints', () => {
