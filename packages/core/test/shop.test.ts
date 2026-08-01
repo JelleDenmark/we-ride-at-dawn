@@ -58,7 +58,7 @@ describe('shop basics', () => {
     const s = newBuild('2026-07-03');
     expect(s.scrap).toBe(DAILY_SCRAP);
     expect(s.board).toEqual([]);
-    expect(s.shop.slots).toHaveLength(6);
+    expect(s.shop.slots).toHaveLength(5); // 4 unit slots + 1 relic slot (issue #156's shop-slot cut)
   });
 
   it('buying a unit costs scrap, fills the board, empties the slot', () => {

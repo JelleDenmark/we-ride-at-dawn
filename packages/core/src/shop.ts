@@ -7,7 +7,12 @@ import { BOARD_CAP, COMBAT_CAP_BONUS } from './sim';
 export const DAILY_SCRAP = 24;
 export const REROLL_COST = 2;
 export const SHOP_UNIT_SLOTS = 4;
-export const SHOP_RELIC_SLOTS = 2;
+// 2 -> 1 (Jesper, 2026-08-01, issue #156's task 4): a smaller relic pool
+// makes each roll matter more, so offering fewer relics per shop visit
+// curates the pick rather than diluting it across two random rolls. Pure
+// slot-count change — `rollOfferings`'s loop already reads this constant, so
+// nothing else needed touching.
+export const SHOP_RELIC_SLOTS = 1;
 export const MAX_TIER = 3;
 export const SEASON_DAYS = 7;
 /** Bench slots: storage for rats outside the fighting horde (never enter
