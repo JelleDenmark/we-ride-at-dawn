@@ -1435,69 +1435,50 @@ describe('day-gated shop unlocks (issue #12)', () => {
     return false;
   };
 
-  it('the day-2 picks (Dire-Rat, Ward-Weaver) never appear on day 1', () => {
-    // Day-1 shop kept deliberately plain (2026-07-11): the armored tank and the
-    // front-shield hold back to day 2. (MD Rattyfock was the third day-2 pick
-    // until the season-3 swap retired it entirely — issue #115.)
+  it('the former day-2 picks (Dire-Rat, Ward-Weaver) are available every day, including day 1', () => {
+    // Day-1 shop was deliberately kept plain (2026-07-11): the armored tank
+    // and the front-shield held back to day 2. Gate REMOVED (Jesper,
+    // 2026-08-01, see the units' own doc comments) — the full pool is now
+    // offered from day 1. (MD Rattyfock was the third day-2 pick until the
+    // season-3 swap retired it entirely — issue #115.)
     for (const defId of ['dire-rat', 'ward-weaver']) {
-      expect(everAppears(1, defId)).toBe(false);
-    }
-  });
-
-  it('the day-2 picks appear from day 2 onward, every later day too', () => {
-    for (const defId of ['dire-rat', 'ward-weaver']) {
-      for (const day of [2, 3, 4, 5, 6, 7]) expect(everAppears(day, defId)).toBe(true);
+      for (const day of [1, 2, 3, 4, 5, 6, 7]) expect(everAppears(day, defId)).toBe(true);
     }
   });
 
   it('season-3 reskin swap (issue #115) + #149 pool flip: retired reskins never roll; tribute + un-retired anchor do', () => {
     // Draughtsman Moe reskins Blight-Witch, so Blight-Witch is never
-    // purchasable. Draughtsman Moe joins the pool, day-1 available (no
-    // unlockDay, matching the Blight-Witch kit Moe reskins). Per #149
-    // (2026-07-25) the Warren-Warden/MD-Rattyfock reskin pair swapped back:
-    // Warren-Warden is now the retired twin and MD Rattyfock is the
+    // purchasable. Draughtsman Moe joins the pool, day-2 gated (Jesper,
+    // 2026-08-01 — a deliberate departure from the original day-1/no-
+    // unlockDay precedent that matched the Blight-Witch kit it reskins). Per
+    // #149 (2026-07-25) the Warren-Warden/MD-Rattyfock reskin pair swapped
+    // back: Warren-Warden is now the retired twin and MD Rattyfock is the
     // purchasable one.
+    expect(everAppears(1, 'draughtsman-moe')).toBe(false);
     for (const day of [1, 2, 3, 4, 5, 6, 7]) {
       expect(everAppears(day, 'blight-witch')).toBe(false);
       expect(everAppears(day, 'warren-warden')).toBe(false);
-      expect(everAppears(day, 'draughtsman-moe')).toBe(true);
       expect(everAppears(day, 'md-rattyfock')).toBe(true);
+      if (day >= 2) expect(everAppears(day, 'draughtsman-moe')).toBe(true);
     }
   });
 
-  it('season-3 prestige reskin swap (issue #151): Gutter Gourmand replaces Twilight-Runt', () => {
+  it('season-3 prestige reskin swap (issue #151): Gutter Gourmand replaces Twilight-Runt, and its own day-3 gate is also removed', () => {
     // Twilight-Runt is retired in favor of Gutter Gourmand, its exact-kit
-    // reskin — never purchasable on any day. Gutter Gourmand inherits
-    // Twilight-Runt's unlockDay: 3, so it's absent days 1-2 and present from
-    // day 3 onward, same gate the original had.
+    // reskin — never purchasable on any day (unaffected by the gate
+    // removal below, which only concerns Gutter Gourmand's OWN unlockDay).
+    // Gutter Gourmand's day-3 gate is removed (Jesper, 2026-08-01, see its
+    // own doc comment) — available from day 1 now, same as Dire-Rat/
+    // Ward-Weaver above.
     for (const day of [1, 2, 3, 4, 5, 6, 7]) {
       expect(everAppears(day, 'twilight-runt')).toBe(false);
-    }
-    for (const day of [1, 2]) {
-      expect(everAppears(day, 'gutter-gourmand')).toBe(false);
-    }
-    for (const day of [3, 4, 5, 6, 7]) {
       expect(everAppears(day, 'gutter-gourmand')).toBe(true);
     }
   });
 
-  it('rerollShop and autoRerollShop respect the build day, not just newBuild', () => {
-    // A day-4 build should be able to roll a day-2-unlocked pick on reroll
-    // too, not just on the initial shop — this exercises the s.day plumbing
-    // through rerollShop/autoRerollShop, not just newBuild's initial
-    // rollOfferings.
-    let found = false;
-    let s = newBuild('2026-07-04', 4);
-    for (let i = 0; i < 40 && !found; i++) {
-      s = { ...s, scrap: 50 };
-      const rolled = rerollShop(s);
-      if (!rolled.ok) break;
-      s = rolled.state;
-      if (s.shop.slots.some((sl) => sl.kind === 'unit' && sl.defId === 'ward-weaver')) {
-        found = true;
-      }
-    }
-    expect(found).toBe(true);
+  it('Grave-Leech: gate changed from day-3 to day-2 (Jesper, 2026-08-01)', () => {
+    expect(everAppears(1, 'grave-leech')).toBe(false);
+    for (const day of [2, 3, 4, 5, 6, 7]) expect(everAppears(day, 'grave-leech')).toBe(true);
   });
 });
 
@@ -1537,6 +1518,16 @@ describe('day-gated shop retirement (issue #108: retireDay primitive)', () => {
   it('upcomingRetirements never lists Gutter-Runt (already gone before day 1, not "leaving soon")', () => {
     for (const day of [1, 2, 3, 4, 5, 6, 7]) {
       expect(upcomingRetirements(day).map((u) => u.id)).not.toContain('gutter-runt');
+    }
+  });
+
+  it('Cellar-Coil (retireDay: 1, retired for the upcoming season 2026-08-01) never appears in the shop pool, on any day', () => {
+    for (const day of [1, 2, 3, 4, 5, 6, 7]) expect(everAppears(day, 'cellar-coil')).toBe(false);
+  });
+
+  it('upcomingRetirements never lists Cellar-Coil (already gone before day 1, not "leaving soon")', () => {
+    for (const day of [1, 2, 3, 4, 5, 6, 7]) {
+      expect(upcomingRetirements(day).map((u) => u.id)).not.toContain('cellar-coil');
     }
   });
 });

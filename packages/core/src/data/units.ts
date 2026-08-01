@@ -1035,6 +1035,10 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     id: 'draughtsman-moe', name: 'Draughtsman Moe', attack: 3, health: 3, cost: 8,
     ability: { trigger: 'startOfWave', effect: { kind: 'poisonAllEnemies' } },
     tribe: 'plague',
+    // Day-2 gate added (Jesper, 2026-08-01) — a deliberate departure from the
+    // "day-1, matching Blight-Witch" precedent noted above; holds the
+    // poison-all prestige pick back one day this season.
+    unlockDay: 2,
   },
   gnawer: {
     id: 'gnawer', name: 'Gnawer', attack: 3, health: 1, cost: 4,
@@ -1068,14 +1072,12 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   'dire-rat': {
     id: 'dire-rat', name: 'Dire-Rat', attack: 4, health: 5, cost: 7,
     damageReduction: 2,
-    // Day-1 shop is deliberately kept plain (Jesper, 2026-07-11): the three
-    // strongest early picks — the armored tank, the Season-1 anchor, and the
-    // front-shield — hold back to day 2, so day 1 is a humble scramble and the
-    // shop gets visibly stronger as the expedition opens up (days 2-4 are the
-    // exciting stretch). Only gates the SHOP roll; a unit already owned/on the
-    // board is unaffected, and the balance scripts build lineups directly so
-    // they don't see this gate.
-    unlockDay: 2,
+    // Day-1 gate REMOVED (Jesper, 2026-08-01): was held back to day 2
+    // (2026-07-11) so day 1 read as a humble scramble before the shop opened
+    // up. Lifted for the upcoming season — day 1 now offers the full pool
+    // immediately, no ramp-in. `unlockDay` is a pure function of `day`, so
+    // this takes effect for any day rolled from this deploy forward, not just
+    // future seasons.
     tribe: 'brute',
   },
   'md-rattyfock': {
@@ -1111,7 +1113,7 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   'ward-weaver': {
     id: 'ward-weaver', name: 'Ward-Weaver', attack: 1, health: 3, cost: 6,
     ability: { trigger: 'startOfBattle', effect: { kind: 'grantArmor', all: true } },
-    unlockDay: 2, // day-1 shop kept plain — see Dire-Rat's note.
+    // Day-1 gate removed (Jesper, 2026-08-01) — see Dire-Rat's note above.
   },
   // Issue #12: a parallel "Runt" pair (Gutter-Runt precedent) tied to the
   // game's dawn/dusk duality rather than literal noon-splitting — the actual
@@ -1235,7 +1237,9 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
         switchWave: 15,
       },
     },
-    unlockDay: 3,
+    // Day-3 gate removed (Jesper, 2026-08-01), same season-wide lift as
+    // Dire-Rat/Ward-Weaver's day-2 gate above — day 1 now offers the full
+    // pool immediately.
   },
   // Issue #106: Cellar-Coil — "positional patience" (docs/design/future-minions.md
   // concept 2). Attack 2 / health 4 / cost 5 are the design doc's rough
@@ -1259,6 +1263,12 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
       effect: { kind: 'chargeWhileBenched', attackPerWave: 1 },
       condition: { notFront: true },
     },
+    // Retired outright for the upcoming season (Jesper, 2026-08-01), same
+    // mechanism/precedent as Gutter-Runt/Rat-Piper above — out of the shop
+    // pool from day 1 on. Par-buyback severance (`sellRefund` in shop.ts)
+    // still applies, so any copy carried in from a prior season sells for
+    // exactly what was spent, never a loss.
+    retireDay: 1,
   },
   // ---- Season 4 (issues #133-#135, #137) — every stat line below is a
   // placeholder pending Jesper's balance sign-off, same as every other new
@@ -1298,18 +1308,21 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   // Warren-Warden incident shape) and the only one whose cost-efficiency
   // ROSE with tier. afterAttack repeats every clash (compounding law), so
   // the sustain number, not the body, is the lever that compounds.
-  // unlockDay: 3 — a warded Grave-Leech (Ward-Weaver armor pushing incoming
-  // damage to the MIN_ATTACK_DAMAGE floor) runs a genuine zero-net-damage
-  // window in the earliest waves, verified by probe: flat health for the
-  // first 6 waves before enemy attack scaling starts to bite. Day-gating
-  // pushes its first legal appearance past day 1-2's shallowest, softest
-  // waves so that window buys less. Not a fix for the underlying interaction
-  // (still worth a real balance-script pass), just a blast-radius limiter.
+  // Gate changed from day-3 to day-2 (Jesper, 2026-08-01) — still a
+  // blast-radius limiter, NOT a fix, for a still-unaddressed interaction: a
+  // warded Grave-Leech (Ward-Weaver armor pushing incoming damage to the
+  // MIN_ATTACK_DAMAGE floor) runs a genuine zero-net-damage window in the
+  // earliest waves, verified by probe — flat health for the first 6 waves
+  // before enemy attack scaling starts to bite. Ward-Weaver itself has NO
+  // gate this season (day-1 available, see its own note above), so the combo
+  // is reachable from day 2 either way — day-2 buys one day less runway than
+  // the old day-3 gate did, not a full mitigation. Worth a real
+  // balance-script pass if it turns out to matter in practice.
   'grave-leech': {
     id: 'grave-leech', name: 'Grave-Leech', attack: 3, health: 6, cost: 6,
     ability: { trigger: 'afterAttack', effect: { kind: 'healSelf', amount: 1 } },
     tribe: 'brute',
-    unlockDay: 3,
+    unlockDay: 2,
   },
   // Issue #155: Gutter-Acolyte remade from #137's dead-in-both attack shred
   // into the roster's first poison counter (gutter apothecary -> antidote
