@@ -233,6 +233,44 @@ export type Effect =
    */
   | { kind: 'maintainSummons'; unitId: string; count: number }
   /**
+   * Rat-Piper's issue #161 rework, replacing `maintainSummons` above.
+   * Wired to `startOfBattle` (fires exactly once per unit instance across
+   * the whole run — see `fireEntryTriggers`'s `startOfBattleFired` flag),
+   * NOT `startOfWave`: the owner's spec was "summon one pup per wave," but a
+   * repeating per-wave summon needs the `maintainSummons`-style self-bound
+   * ownership tracking to stay safe under ADR-0003 (ADR-0003, the
+   * compounding law). Firing once instead sidesteps that entirely — same
+   * shape as Gnawer's `bequeathAttack`/Warren-Warden's `buffBehind`, which
+   * is exactly why THIS effect's summoned body is instantiated at the
+   * CASTER's own tier (see the `summonScaledPup` case in sim.ts) rather
+   * than through a new per-tier magnitude table: tier scales the pup's
+   * STRENGTH via the same exponential `tierAttackMultiplier`/
+   * `tierHealthMultiplier` curve every recruited unit already gets, per the
+   * fire-once precedent (issue #58) that only a REPEATING trigger needs the
+   * flatter linear curve. `count` is fixed, not `* tier` — tier scales the
+   * one pup's body, never how many spawn.
+   *
+   * Compounding-law note (ADR-0003, issue #161 open question #1): trivially
+   * bounded — this fires once, ever, per Piper instance, so there is no
+   * accumulation to police across the other 44 waves. In a duel (one wave)
+   * it fires exactly once, same as PvE's wave 1 — "summon one pup" reads
+   * the same in both modes, per the issue's open question #3.
+   *
+   * Relic inheritance (issue #161 follow-up, Jesper 2026-08-01): the
+   * summoned pup also gets a COPY of whatever unit relics the caster itself
+   * is wearing — see the `summonScaledPup` case in sim.ts for exactly how
+   * (`source.relics`, already `scope === 'unit'`-filtered). This is the one
+   * exception to the game-wide rule that summoned bodies are always
+   * relic-less (Brood-Mother's cascade included) — deliberate, to make
+   * Rat-Piper's own relic choice do double duty. Compounding-law-safe for
+   * the same reason the summon itself is: fire-once means a fixed one-time
+   * duplication, not a repeating one. Equipping the SAME relic on two
+   * separately-purchased units is already normal play (nothing here is a
+   * new relic-sharing mechanic), so the only new thing is getting a second
+   * copy for free — a balance question (`pvp:relics`), not a correctness one.
+   */
+  | { kind: 'summonScaledPup'; unitId: string; count: number }
+  /**
    * Squeak-Sensei (issue #133) — the swarm archetype's first payoff. Wired to
    * the new `allySummoned` trigger: whenever an ally is summoned onto this
    * side, the NEWLY-SUMMONED body enters with `+attack/+health`, scaled by
@@ -924,8 +962,9 @@ export interface Lineup {
  *     tribe already has the deepest bench (5 other units), which makes an
  *     all-runt board a genuinely buildable theme rather than a trap with no
  *     support.
- *   - "swarm": breeding/summon-focused units — Rat-Piper (pipes in pups
- *     every wave) and Brood-Mother (births pups on faint).
+ *   - "swarm": breeding/summon-focused units — Rat-Piper (pipes in
+ *     one pup at battle start, issue #161) and Brood-Mother (births pups on
+ *     faint).
  *   - "plague": poison-dealing units — Plague-Bearer and Blight-Witch.
  *   - "brute": big, tanky anchors — Warren-Warden, Dire-Rat (armored),
  *     MD Rattyfock (Warren-Warden's kit, reskinned).
@@ -960,32 +999,34 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     // sells for exactly what was spent, never a loss.
     retireDay: 1,
   },
-  // Rat-Piper (issue #105 rework): maintenance summoner. Keeps a litter of
-  // `count * tier` = 1/2/3 pups topped up — summons only the shortfall each
-  // wave, nothing when the litter is full. Its permanent contribution is
-  // bounded at the source (see `maintainSummons`), which is what lets the
-  // global combat cap rise for Brood-Mother's cascade.
+  // Rat-Piper (issue #161 rework, replacing #105's `maintainSummons`):
+  // brought back into the season roster in place of Gnawer (see Gnawer's own
+  // note below). Summons exactly ONE pup, ONCE, at the start of the run —
+  // see `summonScaledPup`'s doc comment above for why `startOfBattle` (not
+  // `startOfWave`) and why tier scales the pup's body instead of the count.
+  // The pup also inherits a copy of whatever unit relic(s) Piper itself
+  // wears (issue #161 follow-up) — makes Piper's own relic pick do double
+  // duty, e.g. a Glass-Shard Piper fields TWO armor-breaking alpha strikers.
   'rat-piper': {
     id: 'rat-piper', name: 'Rat-Piper', attack: 1, health: 2, cost: 4,
-    // Target 2/4/6 pups (count*tier). count is 2, not 1, per the #105 balance
-    // read: the OLD `summon 1/wave` accidentally accumulated ~2 pups against
-    // the tiny +2 cap before no-op'ing, so a target of 1 was a stealth nerf
-    // (T1 value rank fell 15->18). Two restores its effective power while
-    // keeping the litter bounded at the source. Still nowhere near flagged in
-    // exploit-stress (weak 1/1 bodies, hard-capped by combatCap).
-    ability: { trigger: 'startOfWave', effect: { kind: 'maintainSummons', unitId: 'pup', count: 2 } },
+    ability: { trigger: 'startOfBattle', effect: { kind: 'summonScaledPup', unitId: 'pup', count: 1 } },
     tribe: 'swarm',
-    // Season rotation (Jesper, 2026-07-24): retired outright to make roster
-    // room for the season-4 intake, same mechanism/precedent as Gutter-Runt
-    // above — out of the shop pool from day 1 on, carried-in copies still
-    // sell at par (`sellRefund`). NOTE the #105 `maintainSummons` rework only
-    // landed 2026-07-21; the cap-raise it justified (COMBAT_CAP_BONUS=6) is
-    // now carried by Brood-Mother alone, which is fine (see
-    // [[wrad-summon-cap-rework]]). CAVEAT: Squeak-Sensei (#133) was
-    // sign-off-probed as "Rat-Piper + Brood-Mother + Sensei"; retiring Piper
-    // leaves Brood-Mother as Sensei's sole summon feeder — Sensei still
-    // works, but re-check its swarm-payoff read before season start.
-    retireDay: 1,
+    // Un-retired 2026-08-01 (issue #161) for the swap-in — see Gnawer's
+    // retirement note below for the season-roster rationale. The #105
+    // `maintainSummons` history (target 2/4/6 pups, self-bound litter) is
+    // now dead code path context only; this season's kit is the
+    // `summonScaledPup` fire-once summon above. CAVEAT carried forward from
+    // the #105 retirement: Squeak-Sensei's `allySummoned` payoff (#133) only
+    // sees ONE summon event from Piper per battle now (fire-once, not
+    // per-wave) — a much thinner feed than the repeating engine the issue's
+    // rationale envisioned. Brood-Mother remains Sensei's main summon
+    // source; Piper is a minor top-up, not a second real engine.
+    // `pvp:combos` checked (issue #161 open question #4): Piper+Sensei
+    // doesn't surface in the top-15-synergy, combo-unlocks-a-win, or
+    // bottom-5-anti-synergy lists at any tier — no red flag, but also no
+    // real payoff in the duel format (expected: a fire-once single pup is a
+    // PvE-swarm play, not a PvP one — see `pvp:matrix`'s Rat-Piper row, near
+    // the bottom of the panel at every tier, same as retired Gnawer was).
   },
   // Brood-Mother (issue #105 rework): the babushka. On faint she spawns two
   // Brood-Broodlings; each broodling, on ITS faint, spawns two Brood-Runts;
@@ -1048,6 +1089,15 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     // compounding-law/Cellar-Coil reasoning behind the cap living here.
     ability: { trigger: 'faint', effect: { kind: 'bequeathAttack', waveBonusCapMultiplier: 2 } },
     tribe: 'runt',
+    // Retired for the upcoming season (Jesper, 2026-08-01, issue #161), same
+    // mechanism/precedent as Gutter-Runt/Cellar-Coil above — out of the shop
+    // pool from day 1 on, carried-in copies still sell at par (`sellRefund`).
+    // Rationale: `pvp:matrix` measures Gnawer duel-dead at every tier —
+    // `bequeathAttack`'s wave-died-on bonus is near-zero in a duel's single
+    // wave, so it was tuned purely for the (now economy-only) depth ladder
+    // and contributes nothing to the scored PvP mode. Rat-Piper, reworked,
+    // takes its roster slot (see Rat-Piper's own note above).
+    retireDay: 1,
   },
   'corpse-glutton': {
     id: 'corpse-glutton', name: 'Corpse-Glutton', attack: 3, health: 2, cost: 7,

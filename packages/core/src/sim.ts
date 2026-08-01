@@ -519,12 +519,30 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
    * Returns false (and does nothing) when the side is already at the cap, so
    * callers can stop their litter loop. `owner` tags the body's `summonedBy`
    * for `maintainSummons` accounting (Rat-Piper); omit it for one-shot summons
-   * (Brood-Mother's cascade). Fires `allySummoned` (Squeak-Sensei) per body.
+   * (Brood-Mother's cascade). `tier` defaults to 1 (Brood-Mother's cascade
+   * children are always tier-1 by design); Rat-Piper's `summonScaledPup`
+   * (issue #161) passes the CASTER's own tier so the summoned pup gets the
+   * normal exponential `tierAttackMultiplier`/`tierHealthMultiplier` scaling
+   * every recruited unit gets — see that effect's doc comment in
+   * data/units.ts for why tier belongs on the body, not the count, here.
+   * `relicIds` defaults to `[]` (Brood-Mother's cascade children, and every
+   * OTHER summon shape, are always relic-less by design — a summoned body is
+   * not a purchase); `summonScaledPup` is the sole exception, passing the
+   * CASTER's own equipped unit relic ids through so Rat-Piper's pup fights
+   * with a copy of whatever Piper itself is wearing (issue #161 follow-up).
+   * Fires `allySummoned` (Squeak-Sensei) per body.
    */
-  const spawn = (def: UnitDef, index: number, side: Side, owner?: number): boolean => {
+  const spawn = (
+    def: UnitDef,
+    index: number,
+    side: Side,
+    owner?: number,
+    tier = 1,
+    relicIds: string[] = []
+  ): boolean => {
     const board = boardOf(side);
     if (board.length >= capOf(side)) return false;
-    const summoned = instantiate(def, side);
+    const summoned = instantiate(def, side, relicIds, tier);
     summoned.summonedBy = owner;
     board.splice(index, 0, summoned);
     events.push({ type: 'summon', side, index, unit: view(summoned) });
@@ -549,6 +567,26 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
         const def = DEF_LOOKUP[effect.unitId];
         for (let i = 0; i < effect.count * tier; i++) {
           if (!spawn(def, index, source.side)) break;
+        }
+        break;
+      }
+      case 'summonScaledPup': {
+        // Rat-Piper rework (issue #161). `startOfBattle`-fired (see
+        // `fireEntryTriggers`), so this runs exactly once per Piper
+        // instance across the whole run — `count` fixed bodies, each
+        // instantiated at the CASTER's own tier so it gets the standard
+        // exponential tier curve instead of a bespoke magnitude table (see
+        // the effect's doc comment in data/units.ts). Also inherits a COPY
+        // of the caster's own equipped unit relics (issue #161 follow-up):
+        // `source.relics` is already pre-filtered to `scope === 'unit'` by
+        // `instantiate`, so passing their ids straight through is safe — no
+        // re-filtering needed. Fire-once means this is a fixed one-time
+        // relic duplication, not a repeating one, so it cannot compound
+        // across waves any more than the pup itself does.
+        const def = DEF_LOOKUP[effect.unitId];
+        const relicIds = source.relics.map((r) => r.id);
+        for (let i = 0; i < effect.count; i++) {
+          if (!spawn(def, index, source.side, undefined, tier, relicIds)) break;
         }
         break;
       }

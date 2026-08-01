@@ -707,6 +707,22 @@
         what = `keeps ${e.count} ${name}${e.count > 1 ? 's' : ''} (★2 ${e.count * 2} · ★3 ${e.count * 3}) at its side, piping in a fresh one whenever one falls`;
         break;
       }
+      case 'summonScaledPup': {
+        // Rat-Piper's issue #161 rework: fixed count, tier scales the
+        // summoned body's OWN stats (via `tierAttackMultiplier`/
+        // `tierHealthMultiplier`, same curve every recruited unit gets)
+        // rather than how many spawn — the inverse of `maintainSummons`
+        // above. One-time (`startOfBattle`), so the sentence says so
+        // explicitly rather than reading like a per-wave litter. Also calls
+        // out the relic-inheritance follow-up (issue #161) so equipping a
+        // relic on Piper reads as "affects two bodies," not a mystery buff
+        // on the newcomer.
+        const name = UNIT_DEFS[e.unitId]?.name ?? ENEMY_DEFS[e.unitId]?.name ?? e.unitId;
+        const base = UNIT_DEFS[e.unitId] ?? ENEMY_DEFS[e.unitId];
+        const stats = (t: number) => `${(base?.attack ?? 0) * tierAttackMultiplier(t)}/${(base?.health ?? 0) * tierHealthMultiplier(t)}`;
+        what = `summons ${e.count} ${name}${e.count > 1 ? 's' : ''} in front at ${stats(1)} strength (★2 ${stats(2)} · ★3 ${stats(3)}) — once, not a fresh litter every wave — and hands it a copy of any relic it's wearing`;
+        break;
+      }
       case 'buffBehind':
         what = `grants ${buffScale(e.attack, e.health)} to ${e.all ? `every ${own} behind it` : `the ${own} behind it`}`;
         break;
@@ -774,7 +790,7 @@
 
   function isSummoner(def: UnitDef | undefined): boolean {
     const kind = def?.ability?.effect.kind;
-    return kind === 'summon' || kind === 'maintainSummons';
+    return kind === 'summon' || kind === 'maintainSummons' || kind === 'summonScaledPup';
   }
 
   // Compendium (issue #136) lists every rat regardless of day-gating (a
@@ -802,6 +818,7 @@
       switch (ability.effect.kind) {
         case 'summon':
         case 'maintainSummons':
+        case 'summonScaledPup':
           return '❋ summon';
         case 'buffBehind':
         case 'buffAdjacent':

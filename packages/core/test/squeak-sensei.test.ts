@@ -34,19 +34,19 @@ describe('Squeak-Sensei (issue #133: allySummoned swarm payoff)', () => {
     expect(def.ability?.effect.kind).toBe('buffSummoned');
   });
 
-  it('trains each pup Rat-Piper pipes in: every newcomer arrives at +1/+1', () => {
+  it('trains the pup Rat-Piper pipes in: the newcomer arrives at +1/+1', () => {
     const { events } = simulate(
       lineup({ defId: 'rat-piper' }, { defId: 'squeak-sensei' }),
       gauntletOf([dummy(0, 100)])
     );
     const summons = ofType(events, 'summon');
-    expect(summons.length).toBe(2); // ★1 litter target is 2 pups (#105)
+    expect(summons.length).toBe(1); // fixed count, fire-once (issue #161)
     const buffs = ofType(events, 'buff');
-    expect(buffs.length).toBe(2); // one training buff per pup
-    const summonedIds = summons.map((s) => s.unit.instanceId).sort();
-    expect(buffs.map((b) => b.targetId).sort()).toEqual(summonedIds);
-    // Each pup: base 1/1 + the Sensei's +1/+1.
-    expect(buffs.every((b) => b.newAttack === 2 && b.newHealth === 2)).toBe(true);
+    expect(buffs.length).toBe(1); // one training buff for the one pup
+    expect(buffs[0].targetId).toBe(summons[0].unit.instanceId);
+    // The pup: base 1/1 + the Sensei's +1/+1.
+    expect(buffs[0].newAttack).toBe(2);
+    expect(buffs[0].newHealth).toBe(2);
   });
 
   it("trains Brood-Mother's whole babushka cascade, one buff per body (#105 interaction)", () => {
@@ -76,29 +76,31 @@ describe('Squeak-Sensei (issue #133: allySummoned swarm payoff)', () => {
       gauntletOf([dummy(0, 100)])
     );
     const buffs = ofType(events, 'buff');
-    expect(buffs.length).toBe(2); // ★1 Piper's two pups, each trained once
+    expect(buffs.length).toBe(1); // Piper's one pup, trained once
     expect(buffs.every((b) => b.attack === 3 && b.health === 3)).toBe(true);
   });
 
-  it('the buff count tracks the SUMMON count across waves — one per newcomer, never more', () => {
+  it('Rat-Piper only ever feeds Sensei once, even across many waves (issue #161: fire-once, not maintained)', () => {
     const waves = 6;
-    // Lethal dummies (1 attack) kill the health-1 pup each wave, so Rat-Piper's
-    // maintenance summon refills the shortfall wave after wave (#105) — several
-    // summons across the grind, each training exactly one newcomer.
+    // Lethal dummies (1 attack) kill the health-1 pup on wave 1. Under the
+    // pre-#161 `maintainSummons` this refilled every wave, training a fresh
+    // newcomer each time; the `startOfBattle` rework fires exactly once for
+    // this Piper instance, so the training buff count stays pinned at 1
+    // regardless of how many more waves follow.
     const { events } = simulate(
       lineup({ defId: 'rat-piper' }, { defId: 'squeak-sensei' }),
       gauntletOf(...Array.from({ length: waves }, () => [dummy(1, 1)]))
     );
     const summons = ofType(events, 'summon');
     const buffs = ofType(events, 'buff');
-    expect(summons.length).toBeGreaterThan(1); // refilled across waves as pups fall
+    expect(summons.length).toBe(1);
     expect(buffs.length).toBe(summons.length);
   });
 
-  it('DANGEROUS-VARIANT canary: the Sensei itself never gains a point from all that summoning', () => {
+  it('DANGEROUS-VARIANT canary: the Sensei itself never gains a point from summoning', () => {
     // Buffing the summoner (or any persistent unit) per summon is the exact
     // Warren-Warden compounding shape the issue forbids without a hard cap.
-    // The Sensei's own stats must stay at base across a long feeder grind.
+    // The Sensei's own stats must stay at base no matter how many waves pass.
     const { events, result } = simulate(
       lineup({ defId: 'rat-piper' }, { defId: 'squeak-sensei' }),
       gauntletOf(...Array.from({ length: 10 }, () => [dummy(0, 1)]))

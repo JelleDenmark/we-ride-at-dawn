@@ -339,39 +339,78 @@ describe('unit abilities', () => {
     expect(buffs.every((b) => b.attack === 1 && b.health === 1)).toBe(true);
   });
 
-  it('Rat-Piper maintains a litter: summons up to target, then nothing while it is full (issue #105)', () => {
-    // Harmless dummies (0 attack) — the pups never die, so after the wave-1
-    // fill the litter is always full and the maintenance summon is a no-op.
-    // Target at ★1 is count(2)*tier(1) = 2 pups.
+  it('Rat-Piper summons exactly one pup, once, at battle start (issue #161 rework)', () => {
+    // `startOfBattle`-fired: even across several waves (each with a fresh
+    // harmless dummy so nothing dies to trigger a revive/second death), the
+    // pup only ever comes in on wave 1 — no per-wave re-piping.
     const { events } = simulate(
       lineup({ defId: 'rat-piper' }),
       gauntletOf([dummy(0, 1)], [dummy(0, 1)], [dummy(0, 1)])
     );
     const summons = ofType(events, 'summon');
-    expect(summons.length).toBe(2); // two pups, ONCE — NOT two per wave
-    expect(summons.every((s) => s.unit.defId === 'pup')).toBe(true);
+    expect(summons.length).toBe(1);
+    expect(summons[0].unit.defId).toBe('pup');
     expect(summons[0].index).toBe(0);
   });
 
-  it('Rat-Piper tops the litter back up when a pup falls', () => {
-    // A 1-attack dummy kills the front summoned pup (health 1) each wave; the
-    // piper itself (health 2) survives, so it re-summons the shortfall.
+  it('Rat-Piper does not re-summon on a later wave even if the pup already died', () => {
+    // A 1-attack dummy kills the summoned pup (health 1) on wave 1; Rat-Piper
+    // itself (health 2) survives. Unlike the old #105 `maintainSummons`
+    // top-up, `startOfBattle` has already fired once for this instance and
+    // never fires again — the litter is not maintained across waves.
     const { events } = simulate(
       lineup({ defId: 'rat-piper' }),
       gauntletOf([dummy(1, 1)], [dummy(1, 1)], [dummy(1, 1)])
     );
     const summons = ofType(events, 'summon');
-    expect(summons.length).toBeGreaterThan(2); // wave-1 fill (2) plus refills as pups die
-    expect(summons.every((s) => s.unit.defId === 'pup')).toBe(true);
+    expect(summons.length).toBe(1);
   });
 
-  it('Rat-Piper maintains count*tier pups (2/4/6 by tier)', () => {
+  it("Rat-Piper's summoned pup scales with tier via the standard exponential curve, not the count", () => {
+    // The pup is instantiated at the CASTER's own tier (issue #161): a t2
+    // Piper's pup gets tierAttackMultiplier/tierHealthMultiplier(2) = 3x on
+    // its base 1/1 stats, i.e. 3/3 — count stays fixed at 1 regardless of
+    // tier.
     const { events } = simulate(
       lineup({ defId: 'rat-piper', tier: 2 }),
       gauntletOf([dummy(0, 1)])
     );
     const summons = ofType(events, 'summon');
-    expect(summons.length).toBe(4); // target 2*2 = 4 pups on the opening wave
+    expect(summons.length).toBe(1);
+    expect(summons[0].unit.attack).toBe(3);
+    expect(summons[0].unit.health).toBe(3);
+  });
+
+  it("Rat-Piper's summoned pup inherits a copy of Piper's own equipped relic (issue #161 follow-up)", () => {
+    // Rusted Nail (+2 attack) on Piper: Piper's own attack is 1+2=3, and the
+    // pup — base 1/1, tier 1, no tier scaling difference here — should ALSO
+    // read 1+2=3 attack, not the bare 1 a relic-less summon would carry.
+    const { events } = simulate(
+      lineup({ defId: 'rat-piper', relicIds: ['rusted-nail'] }),
+      gauntletOf([dummy(0, 100)])
+    );
+    const start = ofType(events, 'battleStart')[0];
+    expect(start.horde[0].attack).toBe(3); // Piper itself
+    const summons = ofType(events, 'summon');
+    expect(summons.length).toBe(1);
+    expect(summons[0].unit.attack).toBe(3); // the pup, inherited
+  });
+
+  it("a relic-less Rat-Piper's pup carries no relic bonus", () => {
+    const { events } = simulate(lineup({ defId: 'rat-piper' }), gauntletOf([dummy(0, 100)]));
+    const summons = ofType(events, 'summon');
+    expect(summons[0].unit.attack).toBe(1);
+  });
+
+  it("the inherited relic actually FUNCTIONS on the pup, not just a display stat: Weeping Boil procs on the pup's own faint", () => {
+    // The pup (health 1) dies to a 1-attack dummy; Weeping Boil should fire
+    // ITS OWN faint nova, independent of Piper (who never dies here).
+    const { events } = simulate(
+      lineup({ defId: 'rat-piper', relicIds: ['weeping-boil'] }),
+      gauntletOf([dummy(1, 1)])
+    );
+    const procs = ofType(events, 'relicProc').filter((p) => p.relicId === 'weeping-boil');
+    expect(procs.length).toBe(1);
   });
 });
 
@@ -739,14 +778,14 @@ describe('startOfBattle fires once per unit, startOfWave every wave', () => {
     expect(ofType(events, 'buff')).toHaveLength(1);
   });
 
-  it('Rat-Piper re-pipes every wave when its pups keep dying (startOfWave still fires; #105 maintenance)', () => {
-    // Lethal grinder (1 attack kills the health-1 pup each wave), so the
-    // maintenance summon has a shortfall to refill every wave — proving the
-    // startOfWave trigger still fires each wave, it just no-ops when the
-    // litter is already full (covered separately in the Rat-Piper suite).
+  it('Rat-Piper does not re-pipe even when its pup keeps dying (startOfBattle, issue #161)', () => {
+    // Lethal grinder (1 attack kills the health-1 pup each wave). Under the
+    // pre-#161 `maintainSummons` this refilled every wave; the `startOfBattle`
+    // rework fires exactly once for this Piper instance regardless of how
+    // many waves follow or whether the pup survives them.
     const lethal = gauntletOf(...Array.from({ length: 5 }, () => [dummy(1, 1)]));
     const { events } = simulate(lineup({ defId: 'rat-piper' }), lethal);
-    expect(ofType(events, 'summon').length).toBeGreaterThan(1);
+    expect(ofType(events, 'summon').length).toBe(1);
   });
 
   it('Plague-Bearer still re-poisons each wave (poison clears at waveClear)', () => {
@@ -829,11 +868,11 @@ describe('combat cap headroom for summons', () => {
     expect(ofType(events, 'summon')).toHaveLength(0);
   });
 
-  it('combatCap gives the pups somewhere to land', () => {
-    // Board 8, cap 10 → 2 slots of headroom, and Rat-Piper's ★1 target is 2
-    // pups (count 2 * tier 1), so both land.
+  it('combatCap gives the pup somewhere to land', () => {
+    // Board 8, cap 10 → 2 slots of headroom; Rat-Piper's fixed count (1,
+    // issue #161) only needs one, so it lands.
     const { events } = simulate({ units: fullBoard(), combatCap: 10 }, gauntletOf([dummy(0, 100)]));
-    expect(ofType(events, 'summon')).toHaveLength(2);
+    expect(ofType(events, 'summon')).toHaveLength(1);
   });
 });
 
