@@ -402,6 +402,16 @@
   let duelReplay = $state<{ opponentName: string; playing: boolean; result: DuelResult | null } | null>(
     null
   );
+  // Playback speed for the duel replay — separate from the ride replay's
+  // `speed`/`setSpeed` (a different ReplayPlayer instance, and switching
+  // duels shouldn't fight over one shared multiplier). Persists across duels
+  // in one sitting, same as the ride replay's `speed` persists across rides.
+  let duelSpeed = $state(1);
+
+  function setDuelSpeed(s: number) {
+    duelSpeed = s;
+    if (duelReplayPlayer) duelReplayPlayer.speed = s;
+  }
 
   async function watchDuelReplay(opponent: StandingRow) {
     const mine = myNightBoard;
@@ -411,6 +421,7 @@
       duelReplayPlayer = new ReplayPlayer();
       await duelReplayPlayer.init(duelStageEl);
     }
+    duelReplayPlayer.speed = duelSpeed;
     const { events, result } = simulateDuel(mine, opponent.board);
     await duelReplayPlayer.play(events);
     // The sheet may have been closed (or another duel started) mid-play —
@@ -2134,6 +2145,13 @@
         <button class="duel-close" onclick={closeDuelReplay} aria-label="close replay">✕</button>
       </div>
       <div class="stage duel-stage" bind:this={duelStageEl}></div>
+      {#if duelReplay?.playing}
+        <div class="ride-controls">
+          {#each [1, 2, 4] as s}
+            <button class:active={duelSpeed === s} onclick={() => setDuelSpeed(s)}>{s}×</button>
+          {/each}
+        </div>
+      {/if}
       {#if duelReplay && !duelReplay.playing && duelReplay.result}
         <p class="duel-result">{duelResultText(duelReplay.opponentName, duelReplay.result)}</p>
       {/if}
