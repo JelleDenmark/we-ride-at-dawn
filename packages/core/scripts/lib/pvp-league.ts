@@ -39,6 +39,12 @@ export interface ResultRow {
   draws: number;
   losses: number;
   survivor_diff: number;
+  /** The exact board this device fielded for the round — snapshotted here
+   * because `pvp_boards` is live state and would drift the moment the player
+   * edits their horde (see issue #158 / the migration's doc comment). Lets a
+   * client re-run `simulateDuel` against this row's opponent later and get
+   * back the byte-identical fight, with no separate event-log storage. */
+  board: Lineup;
 }
 
 export interface RoundOutcome {
@@ -64,6 +70,11 @@ export function roundResultsFor(
   roundId: string
 ): RoundOutcome {
   const nameById = new Map(boards.map((b) => [b.device_id, b.name]));
+  // Snapshotted alongside points below — the whole reason this map exists is
+  // that `boards` (pvp_boards, live) is the ONLY place the exact fielded
+  // Lineup is available; a moment after this round is scored it may already
+  // have changed.
+  const boardById = new Map(boards.map((b) => [b.device_id, b.board]));
   const legal = legalEntrants(boards.map((b) => ({ id: b.device_id, board: b.board })));
   const legalIds = new Set(legal.map((e) => e.id));
   const dropped = boards.filter((b) => !legalIds.has(b.device_id));
@@ -82,6 +93,9 @@ export function roundResultsFor(
     draws: s.draws,
     losses: s.losses,
     survivor_diff: s.survivorDiff,
+    // legal.length >= 2 and boardById is built from the same `boards` legal
+    // was derived from, so every legal id has a board — the `!` is safe.
+    board: boardById.get(s.id)!,
   }));
   return { resultRows, scored: legal.length, dropped, skipped: false };
 }

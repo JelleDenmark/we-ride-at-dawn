@@ -57,6 +57,12 @@ export interface StandingRow extends RoundStanding {
   name: string;
   round_id: string;
   device_id: string;
+  /** The exact board this device fielded for the round (issue #158) — lets a
+   * client replay any matchup via `simulateDuel(rowA.board, rowB.board)`,
+   * deterministic and byte-identical to the fight that actually happened.
+   * `null` for rounds scored before the snapshot column existed — those just
+   * can't be replayed. */
+  board: Lineup | null;
 }
 
 /** One closed round for a season, for the "which night" picker. */
@@ -92,7 +98,7 @@ async function fetchRoundRows(roundId: string): Promise<StandingRow[]> {
   const res = await fetch(
     `${SUPABASE_URL}/rest/v1/pvp_results` +
       `?round_id=eq.${encodeURIComponent(roundId)}` +
-      `&select=round_id,device_id,name,points,wins,draws,losses,survivor_diff` +
+      `&select=round_id,device_id,name,points,wins,draws,losses,survivor_diff,board` +
       `&order=points.desc,survivor_diff.desc,name.asc`,
     { headers: HEADERS }
   );
@@ -106,6 +112,7 @@ async function fetchRoundRows(roundId: string): Promise<StandingRow[]> {
     draws: number;
     losses: number;
     survivor_diff: number;
+    board: Lineup | null;
   }>;
   return rows.map((r) => ({
     round_id: r.round_id,
@@ -118,6 +125,7 @@ async function fetchRoundRows(roundId: string): Promise<StandingRow[]> {
     // The DB column is snake_case; RoundStanding is camelCase.
     survivorDiff: r.survivor_diff,
     id: r.device_id,
+    board: r.board,
   }));
 }
 

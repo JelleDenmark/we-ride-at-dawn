@@ -76,4 +76,13 @@ describe('roundResultsFor (pure nightly transform)', () => {
     const boards = [b('a', 'A', triRat), b('b2', 'B', soloRat), b('c', 'C', soloRat)];
     expect(roundResultsFor(boards, 's', 'r')).toEqual(roundResultsFor(boards, 's', 'r'));
   });
+
+  it('snapshots each device\'s exact fielded board onto its result row (issue #158)', () => {
+    const boards = [b('a', 'A', triRat), b('c', 'C', soloRat)];
+    const { resultRows } = roundResultsFor(boards, 's', 'r');
+    const titan = resultRows.find((r) => r.device_id === 'a')!;
+    const weakling = resultRows.find((r) => r.device_id === 'c')!;
+    expect(titan.board).toEqual({ units: triRat });
+    expect(weakling.board).toEqual({ units: soloRat });
+  });
 });

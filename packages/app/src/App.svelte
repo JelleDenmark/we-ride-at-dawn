@@ -70,9 +70,11 @@
     POISON_RESIST_CAP,
     consolationScrap,
     LOSS_CONSOLATION_DEFAULT,
+    simulateDuel,
     type ActionResult,
     type BattleResult,
     type BuildState,
+    type DuelResult,
     type TimeOfDay,
     type UnitDef,
   } from '@wrad/core';
@@ -377,6 +379,54 @@
       month: 'short',
       day: 'numeric',
     });
+  }
+
+  // My board as fielded in the round currently shown by the "Nights" tab —
+  // the other half every replay needs alongside an opponent's snapshotted
+  // board (issue #158). Rounds scored before the snapshot column shipped
+  // have `board: null`, so this (and every opponent's board) can be missing.
+  const myNightBoard = $derived(displayedNightStandings.find(isMe)?.board ?? null);
+
+  // Duel replay (issue #158): re-runs `simulateDuel` against the round's
+  // SNAPSHOTTED boards (never the live `pvp_boards` — those drift the moment
+  // either player edits their horde) so the replay is byte-identical to the
+  // fight that actually happened that night, no stored event log needed.
+  //
+  // `duelStageEl` is bound to an ALWAYS-mounted div (see the `.duel-overlay`
+  // markup near the end of the template, outside any `{#if}`) — same
+  // approach as the main ride `stageEl`/`player` — so `duelReplayPlayer`'s
+  // Pixi app stays attached to a live element across sheet open/close and
+  // league-tab switches instead of getting torn down with a conditional block.
+  let duelReplayPlayer: ReplayPlayer | undefined;
+  let duelStageEl: HTMLDivElement;
+  let duelReplay = $state<{ opponentName: string; playing: boolean; result: DuelResult | null } | null>(
+    null
+  );
+
+  async function watchDuelReplay(opponent: StandingRow) {
+    const mine = myNightBoard;
+    if (!mine || !opponent.board) return;
+    duelReplay = { opponentName: opponent.name, playing: true, result: null };
+    if (!duelReplayPlayer) {
+      duelReplayPlayer = new ReplayPlayer();
+      await duelReplayPlayer.init(duelStageEl);
+    }
+    const { events, result } = simulateDuel(mine, opponent.board);
+    await duelReplayPlayer.play(events);
+    // The sheet may have been closed (or another duel started) mid-play —
+    // don't resurrect it with a stale result.
+    if (!duelReplay || duelReplay.opponentName !== opponent.name) return;
+    duelReplay = { ...duelReplay, playing: false, result };
+  }
+
+  function closeDuelReplay() {
+    duelReplay = null;
+  }
+
+  function duelResultText(name: string, result: DuelResult): string {
+    if (result.winner === 'draw') return 'draw';
+    const won = result.winner === 'a';
+    return won ? `you beat ${name}` : `${name} beat you`;
   }
   // Live league tuning (server-configured). Starts at the shipped fallback so
   // the derived consolation figure reads sensibly before the first fetch lands.
@@ -1747,9 +1797,15 @@
               <span class="lb-name">{row.name}{isMe(row) ? ' · you' : ''}</span>
               <span class="lg-record" title="wins–draws–losses">{row.wins}–{row.draws}–{row.losses}</span>
               <span class="lg-points">{row.points} pts</span>
+              {#if !isMe(row) && myNightBoard && row.board}
+                <button class="lg-replay" title="watch this duel" onclick={() => void watchDuelReplay(row)}>▶</button>
+              {/if}
             </li>
           {/each}
         </ol>
+        {#if myNightBoard === null && displayedNightStandings.length > 0}
+          <p class="lg-caption">no replay for this night — scored before replays existed</p>
+        {/if}
         {#if myStanding && myConsolation > 0 && (selectedRoundId === null || selectedRoundId === rounds[0]?.round_id)}
           <p class="lg-consolation">
             last night's {myStanding.losses}
@@ -2065,6 +2121,24 @@
       </div>
     </div>
   {/if}
+
+  <!-- Duel replay (issue #158). This wrapper and the stage inside it are
+       ALWAYS mounted (not `{#if duelReplay}`) so `duelReplayPlayer`'s Pixi
+       app stays attached to a live element — same reasoning as the main ride
+       `stage`/`player`. Only visibility and the surrounding text react to
+       `duelReplay`. -->
+  <div class="duel-overlay" class:hidden={!duelReplay} role="presentation" onclick={closeDuelReplay}>
+    <div class="duel-sheet" role="dialog" aria-modal="true" onclick={(e) => e.stopPropagation()}>
+      <div class="duel-head">
+        <span>{duelReplay ? `vs ${duelReplay.opponentName}` : ''}</span>
+        <button class="duel-close" onclick={closeDuelReplay} aria-label="close replay">✕</button>
+      </div>
+      <div class="stage duel-stage" bind:this={duelStageEl}></div>
+      {#if duelReplay && !duelReplay.playing && duelReplay.result}
+        <p class="duel-result">{duelResultText(duelReplay.opponentName, duelReplay.result)}</p>
+      {/if}
+    </div>
+  </div>
 </main>
 
 <style>
@@ -2797,6 +2871,71 @@
 
   .stage.hidden {
     display: none;
+  }
+
+  .duel-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: rgba(0, 0, 0, 0.7);
+  }
+
+  .duel-overlay.hidden {
+    display: none;
+  }
+
+  .duel-sheet {
+    width: 100%;
+    max-width: 620px;
+    background: #1a140f;
+    border: 1px solid #4a3520;
+    border-radius: 12px;
+    padding: 14px;
+  }
+
+  .duel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    font-size: 13px;
+    color: var(--ink-dim);
+  }
+
+  .duel-close {
+    min-width: 32px;
+    min-height: 32px;
+    font-family: inherit;
+    font-size: 14px;
+    color: var(--ink);
+    background: #241a14;
+    border: 1px solid #4a3520;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+
+  .duel-result {
+    margin: 10px 0 0;
+    font-size: 14px;
+    text-align: center;
+    color: #f0e6d2;
+  }
+
+  .lg-replay {
+    min-width: 32px;
+    min-height: 32px;
+    padding: 2px 8px;
+    font-family: inherit;
+    font-size: 12px;
+    color: var(--ink);
+    background: #241a14;
+    border: 1px solid #4a3520;
+    border-radius: 6px;
+    cursor: pointer;
   }
 
   .idle {
