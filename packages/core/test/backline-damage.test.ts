@@ -407,21 +407,22 @@ describe('backline damage primitive (issue #85)', () => {
   });
 
   describe('shipped consumers (issue #85 scope)', () => {
-    it('exactly Slink-Rat is wired to backlineDamage — the only shipped consumer', () => {
+    it('exactly Slink-Rat and its prestige reskin MBP Rat are wired to backlineDamage', () => {
       // `UNIT_DEFS` is mutated at the top of this file to register the
       // test-only `sniper`/`zeroAttackTank` fixtures (horde units are
       // looked up by defId from that record in sim.ts, unlike gauntlet
       // enemies) — so this check excludes exactly those test-injected ids
       // and looks at everything else, which is the actual shipped roster
       // from data/units.ts. Issue #85 shipped as the primitive only, with
-      // no consumer; Slink-Rat (issue #86) is now the first (and, as of
-      // this test, only) real one — see slink-rat.test.ts for its own
-      // dedicated coverage.
+      // no consumer; Slink-Rat (issue #86) was the first real one — see
+      // slink-rat.test.ts for its own dedicated coverage. MBP Rat (issue
+      // #159) is its exact-kit prestige reskin, so it carries the same
+      // effect by construction, not a second independent consumer.
       const testFixtureIds = new Set([sniper.id, zeroAttackTank.id]);
       const shippedCarriers = Object.values(UNIT_DEFS).filter(
         (u) => !testFixtureIds.has(u.id) && u.ability?.effect.kind === 'backlineDamage'
       );
-      expect(shippedCarriers.map((u) => u.id)).toEqual(['slink-rat']);
+      expect(shippedCarriers.map((u) => u.id).sort()).toEqual(['mbp-rat', 'slink-rat']);
     });
   });
 });

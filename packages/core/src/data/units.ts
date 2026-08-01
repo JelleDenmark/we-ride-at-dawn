@@ -1169,6 +1169,12 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   // point, NOT final — flagged for Jesper's balance sign-off. 1 HP is
   // deliberate: worthless (dies to almost anything) if it ever reaches the
   // front, rewarding a durable front wall built to protect it.
+  //
+  // Retired from the purchasable pool (issue #159): MBP Rat below is its
+  // exact-kit prestige reskin, same replacement pattern as Draughtsman Moe
+  // (Blight-Witch, #115), MD Rattyfock (Warren-Warden, #149), and Gutter
+  // Gourmand (Twilight-Runt, #151). This def stays in UNIT_DEFS for golden
+  // logs/replays — only SHOP_UNIT_POOL (shop.ts) drops it.
   'slink-rat': {
     id: 'slink-rat', name: 'Slink-Rat', attack: 3, health: 1, cost: 6,
     // startOfWave, via `backlineDamage` (see that Effect's doc comment for
@@ -1178,6 +1184,16 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     // see `backlineTargetsForTier` — not the per-hit damage, which stays this
     // unit's flat base attack (3) regardless of tier. No accumulation across
     // waves; multiple Slink-Rats stack additively, bounded by board/wave size.
+    ability: { trigger: 'startOfWave', effect: { kind: 'backlineDamage' } },
+  },
+  // Prestige reskin (issue #159): MBP Rat reskins Slink-Rat's exact
+  // kit/stats — same "prestige replaces the base" pattern as Draughtsman Moe/
+  // Gutter Gourmand above. Owner-specced flavor: glasses (the "professional"
+  // look — matches the pun on the name) and a glass of Nutella somewhere in
+  // the art (see mbp-rat.svg). Stats/ability are a byte-for-byte carryover,
+  // not a fresh tune — balance sign-off already covers Slink-Rat's numbers.
+  'mbp-rat': {
+    id: 'mbp-rat', name: 'MBP Rat', attack: 3, health: 1, cost: 6,
     ability: { trigger: 'startOfWave', effect: { kind: 'backlineDamage' } },
   },
   // Issue #110: single-unit fusion of the Dawn-Runt/Dusk-Runt pair above —

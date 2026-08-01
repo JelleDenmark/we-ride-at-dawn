@@ -1480,6 +1480,16 @@ describe('day-gated shop unlocks (issue #12)', () => {
     expect(everAppears(1, 'grave-leech')).toBe(false);
     for (const day of [2, 3, 4, 5, 6, 7]) expect(everAppears(day, 'grave-leech')).toBe(true);
   });
+
+  it('prestige reskin swap (issue #159): MBP Rat replaces Slink-Rat', () => {
+    // Slink-Rat is retired in favor of MBP Rat, its exact-kit reskin — never
+    // purchasable on any day. MBP Rat has no unlockDay, so it's available
+    // from day 1 like every other reskin above.
+    for (const day of [1, 2, 3, 4, 5, 6, 7]) {
+      expect(everAppears(day, 'slink-rat')).toBe(false);
+      expect(everAppears(day, 'mbp-rat')).toBe(true);
+    }
+  });
 });
 
 describe('day-gated shop retirement (issue #108: retireDay primitive)', () => {

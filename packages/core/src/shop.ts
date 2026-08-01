@@ -239,6 +239,9 @@ export type ActionResult = { ok: true; state: BuildState } | { ok: false; reason
 //     same "prestige replaces the base" pattern as Draughtsman Moe/Blight-
 //     Witch above — the wave-buff kit is only offered under the prestige
 //     name this season.
+//   - 'slink-rat' is excluded (Jesper, 2026-08-01, issue #159): MBP Rat is
+//     the newest prestige reskin, same pattern again — the `backlineDamage`
+//     kit is only offered under the prestige name this season.
 // Every excluded def stays intact in UNIT_DEFS (tests/golden logs/replays
 // reference them directly) — only presence in the purchasable pool changes.
 //
@@ -262,7 +265,8 @@ const SHOP_UNIT_POOL = Object.values(UNIT_DEFS).filter(
     u.id !== 'warren-warden' &&
     u.id !== 'twilight-runt' &&
     u.id !== 'dawn-runt' &&
-    u.id !== 'dusk-runt'
+    u.id !== 'dusk-runt' &&
+    u.id !== 'slink-rat'
 );
 const SHOP_RELIC_POOL = Object.values(RELIC_DEFS);
 
