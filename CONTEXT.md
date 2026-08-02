@@ -35,7 +35,7 @@ A tag (`swarm | brute | armored | plague`) on an **Enemy**, describing its strat
 _Avoid_: Class, type (Type is used for other things in code; Archetype is the domain term)
 
 **Keyword Family**:
-The classification of what a Unit does, derived from its Ability's effect kind: `poison | defence | offence | summon | buff | sustain`. Owned by core (`data/keyword-family.ts`), which pairs each family with one colour and one glyph. Covers the whole roster — both sides — where Archetype and `tribe` do not. Per ADR-0005 every unit-facing surface states a Unit's family in its family colour, and a new Rat declares a family before it ships.
+The classification of what a Unit does, derived from its Ability's effect kind: `poison | defence | offence | summon | buff | sustain`. Owned by core (`data/keyword-family.ts`), which pairs each family with one colour and one glyph. Covers the whole roster — both sides — where Archetype and `tribe` do not. Relics carry a family too (`RelicDef.family`, required), drawn from the same six rather than a second vocabulary. Per ADR-0005 every unit-facing surface states a Unit's or Relic's family in its family colour, classified by mechanism rather than flavour, and a new Rat or Relic declares a family before it ships.
 
 **Ability**:
 A Unit's triggered combat behavior — a `(trigger, effect)` pair. Not every Unit has one.

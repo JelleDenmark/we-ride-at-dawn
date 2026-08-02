@@ -195,3 +195,29 @@ export function unitKeyword(def: UnitDef): UnitKeyword | null {
 export function keywordFamily(def: UnitDef): KeywordFamily | null {
   return unitKeyword(def)?.family ?? null;
 }
+
+/**
+ * The keyword for a RELIC. Relics reuse the unit families rather than getting
+ * a second vocabulary — pinning Glass Shard to a rat genuinely does make that
+ * rat more offensive — so a player learns one encoding, not two that nearly
+ * rhyme.
+ *
+ * Takes a structural `{ family }` rather than `RelicDef` on purpose:
+ * `relics.ts` imports `KeywordFamily` from here, and importing `RelicDef`
+ * back would close a module cycle for no gain. Unlike a unit, a relic can
+ * never be family-less — `RelicDef.family` is required, which is the whole
+ * enforcement — so this returns `UnitKeyword`, never null.
+ */
+export function relicKeyword(relic: { family: KeywordFamily }): UnitKeyword {
+  const glyph = FAMILY_GLYPH[relic.family];
+  // Relics carry the family GLYPH, not the ✦ the UI stamps on them as a
+  // "this is an item" marker — the two say different things and both are
+  // rendered, so neither has to do the other's job.
+  return {
+    family: relic.family,
+    glyph,
+    label: relic.family,
+    color: FAMILY_COLOR[relic.family],
+    text: `${glyph} ${relic.family}`,
+  };
+}

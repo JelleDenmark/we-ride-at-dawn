@@ -74,6 +74,7 @@
     LOSS_CONSOLATION_DEFAULT,
     simulateDuel,
     unitKeyword,
+    relicKeyword,
     MAX_TIER,
     type ActionResult,
     type BattleResult,
@@ -1561,7 +1562,11 @@
           {/if}
           <span class="tile-name">{def.name}</span>
           <span class="tile-stats">{stats.attack}/{stats.health}</span>
-          <span class="tile-sub" class:keyword={unit.relicIds.length === 0}>
+          <span
+            class="tile-sub"
+            class:keyword={unit.relicIds.length === 0}
+            class:relic-text={unit.relicIds.length > 0}
+          >
             {#if unit.relicIds.length > 0}
               ✦ {unit.relicIds.map((r) => RELIC_DEFS[r].name).join(', ')}
             {:else}
@@ -1619,7 +1624,11 @@
           {/if}
           <span class="tile-name">{def.name}</span>
           <span class="tile-stats">{stats.attack}/{stats.health}</span>
-          <span class="tile-sub" class:keyword={unit.relicIds.length === 0}>
+          <span
+            class="tile-sub"
+            class:keyword={unit.relicIds.length === 0}
+            class:relic-text={unit.relicIds.length > 0}
+          >
             {#if unit.relicIds.length > 0}
               ✦ {unit.relicIds.map((r) => RELIC_DEFS[r].name).join(', ')}
             {:else}
@@ -1679,8 +1688,10 @@
             class="tile shop-tile relic-tile"
             class:frozen={build.shop.frozen[i]}
             class:arming={pendingRelic === i}
+            style="--family: {relicKeyword(relic).color}"
             onclick={() => clickShopSlot(i)}
           >
+            <span class="relic-mark" aria-hidden="true">✦<span class="relic-family" aria-hidden="true">{relicKeyword(relic).glyph}</span></span>
             <span class="tile-name">{relic.name}</span>
             <span class="tile-sub">{relic.desc}</span>
             <span class="tile-cost">⚙ {relic.cost} · {relic.scope === 'team' ? 'whole team' : 'one rat'}</span>
@@ -2003,7 +2014,9 @@
             {@const owned = relic.scope === 'team' && build.teamRelicIds.includes(relic.id)}
             {@const noTarget = relic.scope === 'unit' && !hasValidRelicTarget(build, relic.id)}
             <div class="card-head">
-              <div class="card-relic-icon">✦</div>
+              <div class="card-relic-icon" aria-hidden="true" style="--family: {relicKeyword(relic).color}">
+                ✦<span class="relic-family" aria-hidden="true">{relicKeyword(relic).glyph}</span>
+              </div>
               <div>
                 <div class="card-name">{relic.name}</div>
                 <div class="card-sub">{relic.scope === 'team' ? 'whole team' : 'pin to one rat'}</div>
@@ -2143,7 +2156,9 @@
           </div>
         {:else if selectedRelic}
           <div class="card-head">
-            <div class="card-relic-icon">✦</div>
+            <div class="card-relic-icon" aria-hidden="true" style="--family: {relicKeyword(selectedRelic).color}">
+              ✦<span class="relic-family" aria-hidden="true">{relicKeyword(selectedRelic).glyph}</span>
+            </div>
             <div>
               <div class="card-name">{selectedRelic.name}</div>
               <div class="card-stats">⚙ {selectedRelic.cost}</div>
@@ -2185,7 +2200,9 @@
             {:else}
               {#each relicList as relic (relic.id)}
                 <button class="compendium-row" onclick={() => (compendium = { tab: 'relics', selected: relic.id })}>
-                  <div class="compendium-row-icon">✦</div>
+                  <div class="compendium-row-icon" aria-hidden="true" style="--family: {relicKeyword(relic).color}">
+                    ✦<span class="relic-family" aria-hidden="true">{relicKeyword(relic).glyph}</span>
+                  </div>
                   <span class="compendium-row-name">{relic.name}</span>
                   <span class="compendium-row-cost">⚙ {relic.cost}</span>
                 </button>
@@ -2720,6 +2737,65 @@
      to the unit's family. */
   .tile-sub.keyword {
     color: var(--family, var(--ink-dim));
+  }
+
+  /* ...and that gold register, stated. Before this the relic list simply
+     inherited `--ink-dim`, so pinning a relic read as the rat's family
+     QUIETLY DRAINING AWAY rather than as a deliberate switch of subject.
+     Brass is the app-wide relic colour (costs, the ✦ marks, `.relic-tile`
+     names) and clears 8:1 on `--surface`, where the family reds do not — so
+     this is also the contrast-safe choice for 10px text. The rat's own
+     family is never actually lost: the 3px tile edge still carries it. */
+  .tile-sub.relic-text {
+    color: var(--brass);
+    text-shadow: 0 1px 0 var(--tarnish);
+  }
+
+  /* Relic marks (issue #166 follow-up). A relic had no visual identity at
+     all: the same brass ✦ in four places while every unit beside it carried
+     a portrait, a family colour and a light source. Until the sprites land
+     this is the interim — the ✦ stays as the "this is an item, not a rat"
+     marker, with the relic's keyword-family glyph badged onto it in the
+     family colour, so a relic answers "what does this do" the same way a
+     rat's tile does. Two marks rather than one recoloured mark, because
+     they say different things. */
+  .relic-mark {
+    position: relative;
+    width: 48px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 26px;
+    line-height: 1;
+    color: var(--brass);
+    text-shadow: 0 1px 0 var(--tarnish);
+    pointer-events: none;
+  }
+
+  .card-relic-icon,
+  .compendium-row-icon {
+    position: relative;
+  }
+
+  .relic-family {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    font-size: 13px;
+    line-height: 1;
+    color: var(--family, var(--ink-dim));
+    text-shadow: none;
+  }
+
+  .card-relic-icon .relic-family {
+    right: 6px;
+    bottom: 6px;
+    font-size: 18px;
+  }
+
+  .compendium-row-icon .relic-family {
+    font-size: 11px;
   }
 
   .tile-cost {

@@ -14,12 +14,14 @@
 import { describe, expect, it } from 'vitest';
 import { UNIT_DEFS, type UnitDef } from '../src/data/units';
 import { ENEMY_POOL } from '../src/data/enemies';
+import { RELIC_DEFS } from '../src/data/relics';
 import {
   EFFECT_FAMILY,
   EFFECT_KEYWORD,
   FAMILY_COLOR,
   FAMILY_GLYPH,
   KEYWORD_FAMILIES,
+  relicKeyword,
   unitKeyword,
 } from '../src/data/keyword-family';
 
@@ -81,6 +83,26 @@ describe('keyword families', () => {
     const kw = unitKeyword(UNIT_DEFS['steel-whisker']);
     expect(kw).toMatchObject({ family: 'offence', label: 'thorns', text: '⚔ thorns' });
     expect(kw?.color).toBe(FAMILY_COLOR.offence);
+  });
+
+  // Relics reuse the unit families rather than getting a second vocabulary.
+  // `RelicDef.family` is required, so the compiler already refuses a new
+  // relic without one — this catches the runtime hole that leaves: a bad
+  // cast, or a hand-written def that predates the field.
+  it('gives every relic a real family', () => {
+    const bad = Object.values(RELIC_DEFS)
+      .filter((r) => !(KEYWORD_FAMILIES as readonly string[]).includes(r.family))
+      .map((r) => `${r.id} (${r.family})`);
+    expect(bad).toEqual([]);
+  });
+
+  it('resolves a relic keyword to its family colour and glyph', () => {
+    for (const relic of Object.values(RELIC_DEFS)) {
+      const kw = relicKeyword(relic);
+      expect(kw.family, relic.id).toBe(relic.family);
+      expect(kw.color, relic.id).toBe(FAMILY_COLOR[relic.family]);
+      expect(kw.glyph, relic.id).toBe(FAMILY_GLYPH[relic.family]);
+    }
   });
 
   // Dawn-Runt/Dusk-Runt swap the glyph for a time-of-day one; the family (and

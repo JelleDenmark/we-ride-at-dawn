@@ -29,6 +29,7 @@ export {
   EFFECT_FAMILY,
   EFFECT_KEYWORD,
   unitKeyword,
+  relicKeyword,
   keywordFamily,
   type KeywordFamily,
   type UnitKeyword,
