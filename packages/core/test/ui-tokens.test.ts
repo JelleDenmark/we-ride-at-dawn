@@ -74,10 +74,13 @@ describe('ADR-0006: UI comes from tokens', () => {
         (m) => m[1],
       ),
     );
-    // `--family` is the one exception, and a deliberate one: it is set as an
-    // inline style per tile from `FAMILY_COLOR` in core (ADR-0005), so the
-    // keyword palette has exactly one home and it is not this file.
-    const inlineDeclared = new Set(['--family']);
+    // The family pair is the one exception, and a deliberate one: both are
+    // set as inline styles per tile from `FAMILY_COLOR` / `FAMILY_TEXT_COLOR`
+    // in core (ADR-0005), so the keyword palette has exactly one home and it
+    // is not this file. `--family` paints the graphical edge with the
+    // sprite-true hex; `--family-text` is the lift that clears 4.5:1 for the
+    // keyword line and relic glyph.
+    const inlineDeclared = new Set(['--family', '--family-text']);
     const missing = new Set<string>();
     for (const { css } of componentStyleBlocks()) {
       for (const m of stripComments(css).matchAll(/var\((--[a-z0-9-]+)/g)) {

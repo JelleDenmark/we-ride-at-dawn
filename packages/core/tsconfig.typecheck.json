@@ -1,0 +1,23 @@
+/*
+ * Typecheck scope for CI (`npm run typecheck -w @wrad/core`).
+ *
+ * `src` only, deliberately. The compiler is load-bearing enforcement here —
+ * ADR-0005's guarantee that a new `Effect` kind fails the build rests on
+ * `satisfies Record<Effect['kind'], …>` in `data/keyword-family.ts`, and
+ * nothing was actually running `tsc`, so that guarantee was never checked.
+ * `src` is clean today, so gating on it costs nothing and starts working
+ * immediately.
+ *
+ * `test` and `scripts` are excluded because they carry ~30 pre-existing
+ * errors unrelated to any of this: `@types/node` is not installed (so
+ * `node:fs`, `__dirname` and friends are unresolved), several test fixtures
+ * build a `Gauntlet` literal without the `theme` field added in a later
+ * rework, and `scripts/lib/pvp-league.ts` imports a `Lineup` that `pvp.ts`
+ * declares but does not export. None of those are type errors in shipped
+ * game code and none should block a deploy — but they do need fixing before
+ * this can widen to `include: ["src", "test"]`, which is the goal.
+ */
+{
+  "extends": "./tsconfig.json",
+  "include": ["src"]
+}

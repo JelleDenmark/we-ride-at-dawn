@@ -66,6 +66,49 @@ export const FAMILY_COLOR = {
 } satisfies Record<KeywordFamily, string>;
 
 /**
+ * The same six families, lifted to clear 4.5:1 on `--surface` (#241a14) so
+ * they can be used as TEXT.
+ *
+ * `FAMILY_COLOR` above is the sprite-true hex, and three of the six are too
+ * dark to read at the sizes the UI actually renders them: offence sits at
+ * 2.93:1, defence at 3.45:1 and sustain at 3.76:1 — all below `--ink-dim`'s
+ * own 4.33:1, which ADR-0006 sets as the floor for anything under 12px. The
+ * keyword line on a tile is 10px and the relic icon glyph is 13px, so both
+ * were failing that rule the moment #166 shipped. The vignette costs roughly
+ * another 0.9 at the worst corner of the screen, which is where it stops
+ * being a rounding argument.
+ *
+ * So the two roles are split rather than compromised:
+ *   - `FAMILY_COLOR`      the 3px tile edge and other graphical marks, where
+ *                         the 3:1 non-text threshold applies and the exact
+ *                         sprite hex is the point.
+ *   - `FAMILY_TEXT_COLOR` anything rendered as glyphs or words.
+ *
+ * Each value is its `FAMILY_COLOR` counterpart lifted straight toward white
+ * by the smallest step that clears 4.5:1 (hue and character preserved; the
+ * three that already passed are unchanged, so the two maps agree wherever
+ * they can). `keyword-family.test.ts` asserts the ratio rather than trusting
+ * this comment — the numbers above are what it measures, not lore.
+ */
+export const FAMILY_TEXT_COLOR = {
+  poison: '#6fae3a',
+  defence: '#758699',
+  offence: '#b77269',
+  summon: '#b9a78f',
+  buff: '#c9a24a',
+  sustain: '#a571b9',
+} satisfies Record<KeywordFamily, string>;
+
+/** The ground family text is measured against — `--surface` in app.css. */
+export const FAMILY_TEXT_ON = '#241a14';
+
+/**
+ * WCAG AA for text under 18.66px. The tile keyword renders at 10px, so this
+ * is the threshold that applies to every value in `FAMILY_TEXT_COLOR`.
+ */
+export const FAMILY_TEXT_MIN_CONTRAST = 4.5;
+
+/**
  * One glyph per family, from the game's existing restrained-glyph vocabulary
  * (⚙ ❄ ✦ ★) — not illustrated icons or emoji. Colour carries the family for
  * a sighted player at a glance; the glyph carries it for anyone who can't
@@ -155,7 +198,10 @@ export type UnitKeyword = {
   /** Family glyph, or the time-of-day variant for a conditional `teamBuff`. */
   glyph: string;
   label: string;
+  /** Sprite-true hex. Graphical marks only — the tile edge, a chip. */
   color: string;
+  /** Readable lift of `color`. Anything rendered as glyphs or words. */
+  textColor: string;
   /** `${glyph} ${label}` — what a tile renders. */
   text: string;
 };
@@ -177,7 +223,14 @@ export function unitKeyword(def: UnitDef): UnitKeyword | null {
         ? (TIME_OF_DAY_GLYPH[ability.condition.timeOfDay] ?? FAMILY_GLYPH[family])
         : FAMILY_GLYPH[family];
     const label = EFFECT_KEYWORD[kind];
-    return { family, glyph, label, color: FAMILY_COLOR[family], text: `${glyph} ${label}` };
+    return {
+      family,
+      glyph,
+      label,
+      color: FAMILY_COLOR[family],
+      textColor: FAMILY_TEXT_COLOR[family],
+      text: `${glyph} ${label}`,
+    };
   }
   if ((def.damageReduction ?? 0) > 0) {
     return {
@@ -185,6 +238,7 @@ export function unitKeyword(def: UnitDef): UnitKeyword | null {
       glyph: FAMILY_GLYPH.defence,
       label: EFFECT_KEYWORD.grantArmor,
       color: FAMILY_COLOR.defence,
+      textColor: FAMILY_TEXT_COLOR.defence,
       text: `${FAMILY_GLYPH.defence} ${EFFECT_KEYWORD.grantArmor}`,
     };
   }
@@ -218,6 +272,7 @@ export function relicKeyword(relic: { family: KeywordFamily }): UnitKeyword {
     glyph,
     label: relic.family,
     color: FAMILY_COLOR[relic.family],
+    textColor: FAMILY_TEXT_COLOR[relic.family],
     text: `${glyph} ${relic.family}`,
   };
 }

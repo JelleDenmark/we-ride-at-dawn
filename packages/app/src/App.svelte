@@ -76,6 +76,7 @@
     unitKeyword,
     relicKeyword,
     MAX_TIER,
+    type KeywordFamily,
     type ActionResult,
     type BattleResult,
     type BuildState,
@@ -874,13 +875,23 @@
   }
 
   /**
-   * Inline `--family` for a tile: drives both the 3px top edge and the
-   * keyword text colour (see `.tile` CSS). `transparent` rather than an
-   * omitted variable so a plain body with no keyword renders a clean tile
-   * instead of inheriting an ancestor's family colour.
+   * Inline family colours for a tile. Two variables, not one, because the
+   * two jobs have different contrast floors (ADR-0006):
+   *   `--family`       the 3px top edge — a graphical mark, sprite-true hex.
+   *   `--family-text`  the keyword line (10px) and relic glyph (13px), lifted
+   *                    to clear 4.5:1 on `--surface`.
+   * `transparent` rather than an omitted variable so a plain body with no
+   * keyword renders a clean tile instead of inheriting an ancestor's family.
    */
   function familyStyle(def: UnitDef): string {
-    return `--family: ${unitKeyword(def)?.color ?? 'transparent'}`;
+    const kw = unitKeyword(def);
+    return `--family: ${kw?.color ?? 'transparent'}; --family-text: ${kw?.textColor ?? 'transparent'}`;
+  }
+
+  /** Same two variables for a relic, which always has a family. */
+  function relicFamilyStyle(relic: { family: KeywordFamily }): string {
+    const kw = relicKeyword(relic);
+    return `--family: ${kw.color}; --family-text: ${kw.textColor}`;
   }
 
   let stageEl: HTMLDivElement;
@@ -1688,7 +1699,7 @@
             class="tile shop-tile relic-tile"
             class:frozen={build.shop.frozen[i]}
             class:arming={pendingRelic === i}
-            style="--family: {relicKeyword(relic).color}"
+            style={relicFamilyStyle(relic)}
             onclick={() => clickShopSlot(i)}
           >
             <span class="relic-mark" aria-hidden="true">✦<span class="relic-family" aria-hidden="true">{relicKeyword(relic).glyph}</span></span>
@@ -2014,7 +2025,7 @@
             {@const owned = relic.scope === 'team' && build.teamRelicIds.includes(relic.id)}
             {@const noTarget = relic.scope === 'unit' && !hasValidRelicTarget(build, relic.id)}
             <div class="card-head">
-              <div class="card-relic-icon" aria-hidden="true" style="--family: {relicKeyword(relic).color}">
+              <div class="card-relic-icon" aria-hidden="true" style={relicFamilyStyle(relic)}>
                 ✦<span class="relic-family" aria-hidden="true">{relicKeyword(relic).glyph}</span>
               </div>
               <div>
@@ -2156,7 +2167,7 @@
           </div>
         {:else if selectedRelic}
           <div class="card-head">
-            <div class="card-relic-icon" aria-hidden="true" style="--family: {relicKeyword(selectedRelic).color}">
+            <div class="card-relic-icon" aria-hidden="true" style={relicFamilyStyle(selectedRelic)}>
               ✦<span class="relic-family" aria-hidden="true">{relicKeyword(selectedRelic).glyph}</span>
             </div>
             <div>
@@ -2200,7 +2211,7 @@
             {:else}
               {#each relicList as relic (relic.id)}
                 <button class="compendium-row" onclick={() => (compendium = { tab: 'relics', selected: relic.id })}>
-                  <div class="compendium-row-icon" aria-hidden="true" style="--family: {relicKeyword(relic).color}">
+                  <div class="compendium-row-icon" aria-hidden="true" style={relicFamilyStyle(relic)}>
                     ✦<span class="relic-family" aria-hidden="true">{relicKeyword(relic).glyph}</span>
                   </div>
                   <span class="compendium-row-name">{relic.name}</span>
@@ -2735,8 +2746,12 @@
   /* Only when `.tile-sub` is actually showing a keyword — a relic list (the
      other thing that span renders) belongs to the relic's gold register, not
      to the unit's family. */
+  /* `--family-text`, not `--family`: this line is 10px, and three of the six
+     sprite-true family hexes sit below `--ink-dim` on `--surface` (ADR-0006's
+     floor for anything under 12px). The lift is enforced in
+     `keyword-family.test.ts`. The edge stripe above keeps the true hex. */
   .tile-sub.keyword {
-    color: var(--family, var(--ink-dim));
+    color: var(--family-text, var(--ink-dim));
   }
 
   /* ...and that gold register, stated. Before this the relic list simply
@@ -2784,7 +2799,8 @@
     bottom: 0;
     font-size: 13px;
     line-height: 1;
-    color: var(--family, var(--ink-dim));
+    /* 13px is still small text for AA purposes — see `.tile-sub.keyword`. */
+    color: var(--family-text, var(--ink-dim));
     text-shadow: none;
   }
 

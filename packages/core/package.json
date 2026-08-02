@@ -8,6 +8,7 @@
   },
   "scripts": {
     "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
     "balance": "tsx scripts/balance.ts",
     "balance:depth": "tsx scripts/depth-scaling.ts",
     "snowball": "tsx scripts/snowball.ts",
