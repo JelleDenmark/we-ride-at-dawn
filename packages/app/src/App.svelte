@@ -66,6 +66,7 @@
     cellarCoilChargeCapForTier,
     backlineTargetsForTier,
     wardArmorForTier,
+    blockHitsForTier,
     buffSummonedForTier,
     poisonResistForTier,
     POISON_RESIST_CAP,
@@ -525,6 +526,21 @@
   // only one of the two can be armed at a time (arming either clears both).
   let pendingSwap = $state<number | null>(null);
   let inspect = $state<{ area: 'shop' | 'board' | 'bench'; index: number } | null>(null);
+  // Armed "tap sell again to confirm" mode. Selling is instant and
+  // irreversible, and its button sits directly beside `bench` in the same
+  // `.card-actions` row — a thumb-width apart on a phone — so a misfire cost
+  // players a rat with no undo (2026-08-02 playtest). Holds the identity of
+  // the card whose sell is armed rather than a bare boolean: `inspect`ing a
+  // different card, or reordering this one (which changes its index), then
+  // disarms on its own, so this needs no reset at the many sites that assign
+  // `inspect`. Deliberately NOT the pendingRelic/pendingSwap armed-selection
+  // pattern — those await a second, different target; this one just wants the
+  // same button pressed twice.
+  let sellArmed = $state<{ area: 'board' | 'bench'; index: number } | null>(null);
+
+  function isSellArmed(area: 'board' | 'bench', index: number): boolean {
+    return sellArmed?.area === area && sellArmed.index === index;
+  }
   // Compendium/bestiary (issue #136): browse full stats/abilities for every
   // UnitDef, own-horde or enemy, without needing an owned copy on the
   // board/bench/shop. `selected` holds a def id within the active tab's
@@ -643,10 +659,21 @@
       // to one, per Jesper's review of the season-4 patch notes (2026-07-25)
       // — the standalone `armorSentence` template stays untouched since
       // Dire-Rat (its only other user) has no ability to merge it with.
-      return `Shrugs off ${armor} damage a hit (★2 ${armor * 2} · ★3 ${armor * 3}) and bites back for ${e.damage} (★2 ${e.damage * 2} · ★3 ${e.damage * 3}) — poison slips past the armor, blocked hits draw no blood.`;
+      return `Shrugs off ${armor} damage a hit (★2 ${armor * 2} · ★3 ${armor * 3}) and bites back for ${e.damage} (★2 ${e.damage * 2} · ★3 ${e.damage * 3}) — poison slips past the armor, and the bite is blunted by the attacker’s own.`;
     }
     if (e.kind === 'blockFrontHits') {
-      return `Each wave, blocks the front ${own}’s first hit outright (★2 blocks 2, ★3 blocks 3) — resets every wave.`;
+      // Rewritten 2026-08-02 against sim.ts's `blockFrontHits` case. Three
+      // corrections: it is a per-SIDE pool, not a per-unit flag — the charges
+      // follow whoever is currently front and drain 1 per hit that would
+      // otherwise land, so "the front one's first hit" understated it; the
+      // counts are `blockHitsForTier`, read from core rather than the
+      // hand-copied "2"/"3" literals that were here (the drift risk this
+      // whole generator exists to prevent); and the pool is sized by
+      // `Math.max` across casters, never summed, which every other capped
+      // effect's sentence states and this one didn't. Since the Ward-Weaver
+      // block→armor rework this effect has exactly one user left, the
+      // armored rearguard enemy — so `${own}`/`${team}` render enemy-side.
+      return `Each wave, the ${team} shrugs off the next ${blockHitsForTier(1)} hit outright (★2 ${blockHitsForTier(2)}, ★3 ${blockHitsForTier(3)}) — whichever ${own} is at the front takes the save. Never stacks across multiple casters, and the pool resets every wave.`;
     }
     if (e.kind === 'grantArmor') {
       const who = e.all ? 'every ' + own : 'itself';
@@ -728,7 +755,13 @@
         what = `grants ${buffScale(e.attack, e.health)} to ${e.all ? `every ${own} behind it` : `the ${own} behind it`}`;
         break;
       case 'bequeathAttack':
-        what = `passes its OWN current attack to the rat behind it, plus a bonus for how deep into the ride it fell (capped at ${e.waveBonusCapMultiplier}× its own attack)`;
+        // The last-slot whiff is deliberate — sim.ts's `bequeathAttack` case
+        // takes `board[index]` after the splice and bails if nobody's there,
+        // which its comment calls "the intended 'wasted' placement case the
+        // issue's placement puzzle calls out." That puzzle is the whole card,
+        // so the copy has to state it (2026-08-02); silently paying nothing
+        // is exactly what a player needs to know BEFORE choosing the slot.
+        what = `passes its OWN current attack to the ${own} behind it, plus a bonus for how deep into the ride it fell (capped at ${e.waveBonusCapMultiplier}× its own attack) — from the last slot there is no one behind, and the whole payout is lost`;
         break;
       case 'poisonFrontEnemy':
         what = `applies ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) to the frontmost ${foe} — clears when the wave falls`;
@@ -746,7 +779,17 @@
         what = `gains ${gainStatsScale(e.attack, e.health)}`;
         break;
       case 'revive':
-        what = `revives your first fallen rat at ${reviveHpForTier(1)} health (★2 ${reviveHpForTier(2)} · ★3 ${reviveHpForTier(3)}), capped at its own max — once per rat`;
+        // Three engine conditions the old sentence left out (2026-08-02), all
+        // from sim.ts's `revive` case: the corpse search is
+        // `(c) => c !== source && !c.raised`, so it NEVER raises the caster
+        // (the two guards that killed the 0.6.2 immortal-Priest and the
+        // immortal-pair exploits — a player who fields one Bone-Priest and
+        // watches it fall needs to know nothing happens); it bails outright
+        // when `board.length >= capOf(side)`, so a full board silently wastes
+        // the trigger; and it sets `corpse.poison = 0`, so the raised rat
+        // comes back clean of rot. "capped at its own max" also read as the
+        // CASTER's max — it's the revived corpse's.
+        what = `raises the first ${own} to fall — never itself — at ${reviveHpForTier(1)} health (★2 ${reviveHpForTier(2)} · ★3 ${reviveHpForTier(3)}), clean of rot but never past that ${own}’s own max. Once per corpse, and only with room on the board`;
         break;
       case 'buffAdjacent':
         what = `grants ${buffScale(e.attack, e.health)} to the ${own}(s) beside it — a middle seat buffs both neighbours`;
@@ -768,7 +811,14 @@
         break;
       case 'reflectDamage':
         // Linear per-star curve — repeats every hit taken (see sim.ts).
-        what = `cuts back, dealing ${e.damage} damage (★2 ${e.damage * 2} · ★3 ${e.damage * 3}) to its attacker — a blocked hit draws no blood`;
+        // The reflect goes through `applyDamage(..., 'attack')`, so the
+        // ATTACKER's own armor blunts it (down to the MIN_ATTACK_DAMAGE
+        // floor) — say so, since Dire-Rat/Steel-Whisker/Ward-Weaver put real
+        // armor on the board. Dropped the old "a blocked hit draws no blood"
+        // clause (2026-08-02): it described `blockCharges`, and since the
+        // Ward-Weaver block→armor rework no rat or relic grants block at all,
+        // so horde-side block is permanently 0 and the caveat was unreachable.
+        what = `cuts back, dealing ${e.damage} damage (★2 ${e.damage * 2} · ★3 ${e.damage * 3}) to its attacker, blunted by that attacker’s own armor`;
         break;
       case 'healSelf':
         // Linear per-star curve — repeats every clash survived (see sim.ts).
@@ -1364,6 +1414,11 @@
 
   function sellFromCard() {
     if (inspect?.area !== 'board') return;
+    if (!isSellArmed('board', inspect.index)) {
+      sellArmed = { area: 'board', index: inspect.index };
+      return;
+    }
+    sellArmed = null;
     if (apply(sellUnit(build, inspect.index))) inspect = null;
   }
 
@@ -1389,6 +1444,11 @@
 
   function sellBenchFromCard() {
     if (inspect?.area !== 'bench') return;
+    if (!isSellArmed('bench', inspect.index)) {
+      sellArmed = { area: 'bench', index: inspect.index };
+      return;
+    }
+    sellArmed = null;
     if (apply(sellBenchUnit(build, inspect.index))) inspect = null;
   }
 
@@ -1724,6 +1784,12 @@
           {/if}
         </p>
         <button class="watch" onclick={watchRide}>▶ watch the next ride</button>
+        <!-- `watchRide` replays a live simulation of the CURRENT build (see the
+             `stopReplay`/`skipReplay` anchor at the top of this file) — it banks
+             no scrap, logs no ride, and moves neither stat below. A playtester
+             took it for a committed ride (2026-08-02); nothing on screen said
+             otherwise, so say it here. -->
+        <p class="season-hint">a look ahead, not a real ride — nothing is hauled and no depth is banked</p>
         <p class="season-best">Deepest ride this week: <strong>depth {seasonBest}</strong> · resets Monday</p>
         <p class="season-kills">Enemies felled this week: <strong>{seasonKills}</strong></p>
         {#if currentDepth > seasonBest}
@@ -1989,10 +2055,14 @@
               <button disabled={ins.index === 0} onclick={() => moveFromCard(-1)}>front ▶</button>
               <button disabled={ins.index >= build.board.length - 1} onclick={() => moveFromCard(1)}>◀ back</button>
               <button disabled={benchFull} onclick={benchFromCard}>bench</button>
-              <button onclick={sellFromCard}>sell · +{sellRefund(unit, build.day)}</button>
+              <button class:armed={isSellArmed('board', ins.index)} onclick={sellFromCard}>
+                {isSellArmed('board', ins.index) ? 'sure?' : 'sell'} · +{sellRefund(unit, build.day)}
+              </button>
               <button onclick={() => (inspect = null)}>close</button>
             </div>
-            {#if benchFull}<div class="card-warn">the bench is full</div>{/if}
+            {#if isSellArmed('board', ins.index)}
+              <div class="card-warn">tap again — the rat is gone for good</div>
+            {:else if benchFull}<div class="card-warn">the bench is full</div>{/if}
           {/if}
         {:else}
           {@const unit = build.bench[ins.index]}
@@ -2022,9 +2092,14 @@
               {:else}
                 <button class="primary" onclick={deployFromCard}>deploy</button>
               {/if}
-              <button onclick={sellBenchFromCard}>sell · +{sellRefund(unit, build.day)}</button>
+              <button class:armed={isSellArmed('bench', ins.index)} onclick={sellBenchFromCard}>
+                {isSellArmed('bench', ins.index) ? 'sure?' : 'sell'} · +{sellRefund(unit, build.day)}
+              </button>
               <button onclick={() => (inspect = null)}>close</button>
             </div>
+            {#if isSellArmed('bench', ins.index)}
+              <div class="card-warn">tap again — the rat is gone for good</div>
+            {/if}
           {/if}
         {/if}
       </div>
@@ -2761,6 +2836,14 @@
   .card-actions button:disabled {
     opacity: 0.4;
     cursor: default;
+  }
+
+  /* Armed sell (see `sellArmed`): borrows .card-warn's red so the "one more
+     tap destroys this" state reads at a glance, without the filled-in weight
+     of .primary — this is a warning, not the sheet's recommended action. */
+  .card-actions button.armed {
+    color: #d8452e;
+    border-color: #d8452e;
   }
 
   .card-warn {
