@@ -42,9 +42,19 @@ async function fetchLeaderboard(seasonId: string): Promise<ScoreRow[]> {
   const url =
     `${SUPABASE_URL}/rest/v1/scores?season_id=eq.${encodeURIComponent(seasonId)}` +
     `&order=depth.desc&select=name,device_id,depth,day,kills,lineup`;
+  // `scores` stopped granting anon select when device_id was hidden
+  // (supabase/migrations/2026-08-01-hide-device-id.sql), and this script selects
+  // device_id. Prefer the service-role key when the environment has one.
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? SUPABASE_ANON_KEY;
   const res = await fetch(url, {
-    headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+    headers: { apikey: key, Authorization: `Bearer ${key}` },
   });
+  if (res.status === 401 || res.status === 403) {
+    throw new Error(
+      `scores read denied (${res.status}) — set SUPABASE_SERVICE_ROLE_KEY. ` +
+        `anon lost select on this table when device_id was hidden.`
+    );
+  }
   if (!res.ok) throw new Error(`scores fetch failed: ${res.status} ${await res.text()}`);
   return (await res.json()) as ScoreRow[];
 }

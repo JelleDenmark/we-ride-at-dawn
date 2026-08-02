@@ -1,6 +1,6 @@
 import { LOSS_CONSOLATION_DEFAULT, type Lineup, type RoundStanding } from '@wrad/core';
 import { SUPABASE_URL, SUPABASE_ANON_KEY, deviceId } from './telemetry';
-import { boardSeason, isMe } from './leaderboard';
+import { boardSeason, isMe, playerId } from './leaderboard';
 
 // Client side of the nightly PvP league (see packages/core/src/pvp.ts for the
 // scoring, packages/core/src/duel.ts for the fight). Two jobs:
@@ -11,8 +11,15 @@ import { boardSeason, isMe } from './leaderboard';
 // Mirrors leaderboard.ts's conventions exactly — same SUPABASE_URL/anon key,
 // same `boardSeason()` dev-prefix isolation (dev boards never touch prod), same
 // fire-and-forget-write / empty-array-on-failure-read posture. All writes go
-// through the security-definer `submit_pvp_board` RPC; reads are plain
-// PostgREST GETs against the public-read tables.
+// through the security-definer `submit_pvp_board` RPC.
+//
+// READS go through the `pvp_boards_public` / `pvp_results_public` views, NOT
+// the base tables: those no longer grant anon select, because they served every
+// player's raw `device_id` — which is also the unverified key the write RPCs
+// accept. The views swap it for an opaque `player_id`. See
+// supabase/migrations/2026-08-01-hide-device-id.sql for the full rationale and
+// for why this is obscurity rather than a fix. `pvp_rounds` and `pvp_config`
+// carry no device_id and are still read straight from the table.
 
 const HEADERS = {
   apikey: SUPABASE_ANON_KEY,
@@ -56,7 +63,7 @@ export async function submitPvpBoard(args: {
 export interface StandingRow extends RoundStanding {
   name: string;
   round_id: string;
-  device_id: string;
+  player_id: string;
   /** The exact board this device fielded for the round (issue #158) — lets a
    * client replay any matchup via `simulateDuel(rowA.board, rowB.board)`,
    * deterministic and byte-identical to the fight that actually happened.
@@ -96,16 +103,16 @@ export async function fetchRounds(seasonId: string): Promise<RoundInfo[]> {
  * through this so the row-shape mapping lives in exactly one place. */
 async function fetchRoundRows(roundId: string): Promise<StandingRow[]> {
   const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/pvp_results` +
+    `${SUPABASE_URL}/rest/v1/pvp_results_public` +
       `?round_id=eq.${encodeURIComponent(roundId)}` +
-      `&select=round_id,device_id,name,points,wins,draws,losses,survivor_diff,board` +
+      `&select=round_id,player_id,name,points,wins,draws,losses,survivor_diff,board` +
       `&order=points.desc,survivor_diff.desc,name.asc`,
     { headers: HEADERS }
   );
   if (!res.ok) return [];
   const rows = (await res.json()) as Array<{
     round_id: string;
-    device_id: string;
+    player_id: string;
     name: string;
     points: number;
     wins: number;
@@ -114,9 +121,12 @@ async function fetchRoundRows(roundId: string): Promise<StandingRow[]> {
     survivor_diff: number;
     board: Lineup | null;
   }>;
+  // Warm the digest before handing rows to callers that use `isMe` — it's
+  // synchronous and this is the last await before they get the data.
+  await playerId();
   return rows.map((r) => ({
     round_id: r.round_id,
-    device_id: r.device_id,
+    player_id: r.player_id,
     name: r.name,
     points: r.points,
     wins: r.wins,
@@ -124,7 +134,7 @@ async function fetchRoundRows(roundId: string): Promise<StandingRow[]> {
     losses: r.losses,
     // The DB column is snake_case; RoundStanding is camelCase.
     survivorDiff: r.survivor_diff,
-    id: r.device_id,
+    id: r.player_id,
     board: r.board,
   }));
 }
@@ -160,7 +170,7 @@ export async function fetchStandingsForRound(roundId: string): Promise<StandingR
 
 /** One entrant's SEASON-TOTAL standing — summed across every scored round. */
 export interface SeasonStandingRow {
-  device_id: string;
+  player_id: string;
   name: string;
   points: number;
   wins: number;
@@ -170,8 +180,8 @@ export interface SeasonStandingRow {
 }
 
 /**
- * Season-long standings: every `pvp_results` row for the season, summed by
- * `device_id`. No schema change needed — `pvp_results` already carries
+ * Season-long standings: every `pvp_results_public` row for the season, summed
+ * by `player_id`. No schema change needed — `pvp_results` already carries
  * `season_id` on every row, so this is a client-side aggregation of the same
  * per-round rows `fetchStandingsForRound` reads individually.
  *
@@ -185,15 +195,15 @@ export async function fetchSeasonStandings(seasonId: string): Promise<SeasonStan
   const season = boardSeason(seasonId);
   try {
     const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/pvp_results` +
+      `${SUPABASE_URL}/rest/v1/pvp_results_public` +
         `?season_id=eq.${encodeURIComponent(season)}` +
-        `&select=device_id,name,points,wins,draws,losses,survivor_diff,updated_at` +
+        `&select=player_id,name,points,wins,draws,losses,survivor_diff,updated_at` +
         `&order=updated_at.asc`,
       { headers: HEADERS }
     );
     if (!res.ok) return [];
     const rows = (await res.json()) as Array<{
-      device_id: string;
+      player_id: string;
       name: string;
       points: number;
       wins: number;
@@ -203,12 +213,14 @@ export async function fetchSeasonStandings(seasonId: string): Promise<SeasonStan
       updated_at: string;
     }>;
 
-    // Ordered updated_at asc, so the last row seen per device is also the
+    await playerId();
+
+    // Ordered updated_at asc, so the last row seen per player is also the
     // most recent — used to keep the player's CURRENT name on the total even
     // if they renamed mid-season.
     const totals = new Map<string, SeasonStandingRow>();
     for (const r of rows) {
-      const prev = totals.get(r.device_id);
+      const prev = totals.get(r.player_id);
       if (prev) {
         prev.name = r.name;
         prev.points += r.points;
@@ -217,8 +229,8 @@ export async function fetchSeasonStandings(seasonId: string): Promise<SeasonStan
         prev.losses += r.losses;
         prev.survivorDiff += r.survivor_diff;
       } else {
-        totals.set(r.device_id, {
-          device_id: r.device_id,
+        totals.set(r.player_id, {
+          player_id: r.player_id,
           name: r.name,
           points: r.points,
           wins: r.wins,
@@ -241,7 +253,7 @@ export async function fetchSeasonStandings(seasonId: string): Promise<SeasonStan
 
 /** One opponent's synced board, for scouting. */
 export interface GhostRow {
-  device_id: string;
+  player_id: string;
   name: string;
   board: Lineup;
   updated_at: string;
@@ -260,13 +272,16 @@ export async function fetchGhosts(seasonId: string): Promise<GhostRow[]> {
   const season = boardSeason(seasonId);
   try {
     const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/pvp_boards` +
+      `${SUPABASE_URL}/rest/v1/pvp_boards_public` +
         `?season_id=eq.${encodeURIComponent(season)}` +
-        `&select=device_id,name,board,updated_at`,
+        `&select=player_id,name,board,updated_at`,
       { headers: HEADERS }
     );
     if (!res.ok) return [];
     const rows = (await res.json()) as GhostRow[];
+    // `isMe` is synchronous — resolve the digest before filtering, or a cold
+    // cache would leave the player scouting their own board.
+    await playerId();
     return rows.filter((r) => !isMe(r));
   } catch {
     return [];

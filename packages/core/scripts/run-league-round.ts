@@ -10,12 +10,14 @@
  * league week and day a player sees — including the 06:00 Copenhagen rollover.
  *
  * Run:
- *   npm run pvp:round -- --dry        # preview: fetch + score, write nothing
- *   SUPABASE_SERVICE_ROLE_KEY=... npm run pvp:round   # for real (needs the key)
+ *   SUPABASE_SERVICE_ROLE_KEY=... npm run pvp:round -- --dry   # preview
+ *   SUPABASE_SERVICE_ROLE_KEY=... npm run pvp:round            # for real
  *
  * The service-role key is required to WRITE (pvp_rounds / pvp_results have no
- * anon write policy). In CI it comes from the SUPABASE_SERVICE_ROLE_KEY repo
- * secret; without it (or with --dry) the run is a read-only preview.
+ * anon write policy) and, since device_id was hidden, to READ the boards too —
+ * anon no longer has select on `pvp_boards`. So the key is needed for both
+ * modes; `--dry` still writes nothing. In CI it comes from the
+ * SUPABASE_SERVICE_ROLE_KEY repo secret.
  *
  * A real (non-dry, non-preview) round on the public season also posts the
  * standings to the #wrad Discord channel (issue #162, lib/discord-post.ts) —
@@ -34,12 +36,13 @@ async function runSeason(
   rideDate: string,
   now: Date,
   key: string | undefined,
-  notifyDiscord: boolean
+  notifyDiscord: boolean,
+  readKey: string | undefined
 ) {
   const roundId = `${seasonId}#${rideDate}`;
   console.log(`\n=== round ${roundId}${DRY ? '  (DRY RUN)' : ''} ===`);
 
-  const outcome = await runNightlyRound(seasonId, roundId, now, key);
+  const outcome = await runNightlyRound(seasonId, roundId, now, key, readKey);
   console.log(`Fetched boards, ${outcome.dropped.length} dropped as illegal.`);
   for (const d of outcome.dropped) console.log(`  - ${d.name} (${d.device_id})`);
 
@@ -66,7 +69,11 @@ async function runSeason(
 }
 
 async function main() {
-  const key = DRY ? undefined : process.env.SUPABASE_SERVICE_ROLE_KEY;
+  // Two keys, one secret. `readKey` fetches boards (anon lost select on
+  // pvp_boards when device_id was hidden); `key` authorises the WRITES and is
+  // withheld on --dry, which is what still makes a dry run a preview.
+  const readKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const key = DRY ? undefined : readKey;
   const now = new Date();
   const rideDate = currentRideDate(now);
   const baseSeason = seasonIdFor(rideDate);
@@ -76,11 +83,13 @@ async function main() {
   // never re-scores stale past-week seasons (only this week's two candidates).
   const seasons = [baseSeason, `dev-${baseSeason}`];
 
-  if (!DRY && !key) {
-    console.log('No SUPABASE_SERVICE_ROLE_KEY set — running as a read-only preview.');
+  if (!readKey) {
+    console.log(
+      'No SUPABASE_SERVICE_ROLE_KEY set — boards are no longer anon-readable, so the fetch will fail.'
+    );
   }
   for (const seasonId of seasons) {
-    await runSeason(seasonId, rideDate, now, key, seasonId === baseSeason);
+    await runSeason(seasonId, rideDate, now, key, seasonId === baseSeason, readKey);
   }
 }
 

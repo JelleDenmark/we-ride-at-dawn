@@ -107,12 +107,31 @@ function serviceHeaders(key: string, extra: Record<string, string> = {}): Record
   return { apikey: key, Authorization: `Bearer ${key}`, ...extra };
 }
 
-/** Every board currently synced for a season (anon read). */
-export async function fetchBoards(seasonId: string): Promise<BoardRow[]> {
+/**
+ * Every board currently synced for a season.
+ *
+ * SERVICE-ROLE read, not anon. This used to use the anon key so `--dry` worked
+ * without secrets, but anon's select on `pvp_boards` was revoked when the table
+ * stopped publishing `device_id` (supabase/migrations/2026-08-01-hide-device-id.sql)
+ * — that column is the unverified key the write RPCs accept. The job can't move
+ * to the `pvp_boards_public` view either: it writes `pvp_results` rows keyed on
+ * the real `device_id`, so it needs the column the view hides.
+ *
+ * The cost is that a keyless `--dry` can no longer read. That's called out
+ * explicitly below rather than surfacing as a bare 403.
+ */
+export async function fetchBoards(seasonId: string, key: string | undefined): Promise<BoardRow[]> {
   const url =
     `${SUPABASE_URL}/rest/v1/pvp_boards?season_id=eq.${encodeURIComponent(seasonId)}` +
     `&select=device_id,name,board`;
-  const res = await fetch(url, { headers: anonHeaders() });
+  const res = await fetch(url, { headers: key ? serviceHeaders(key) : anonHeaders() });
+  if (res.status === 401 || res.status === 403) {
+    throw new Error(
+      `pvp_boards read denied (${res.status}). Reading boards needs SUPABASE_SERVICE_ROLE_KEY — ` +
+        `anon lost select on this table when device_id was hidden. ` +
+        `Re-run with the key set, even for --dry.`
+    );
+  }
   if (!res.ok) throw new Error(`pvp_boards fetch failed: ${res.status} ${await res.text()}`);
   return (await res.json()) as BoardRow[];
 }
@@ -154,22 +173,30 @@ export async function writeResults(rows: ResultRow[], key: string): Promise<void
  * when a service-role `key` is given — persist the round + standings. With
  * `key` undefined it's a pure preview (fetch + compute, write nothing) for a
  * `--dry` run.
+ *
+ * READ and WRITE keys are now separate. Boards stopped being anon-readable when
+ * device_id was hidden (see `fetchBoards`), so a `--dry` preview still needs a
+ * service-role key to fetch — but must not write. `readKey` defaults to
+ * `writeKey` so a normal run is unchanged; `--dry` passes the key as `readKey`
+ * only, which is what keeps "preview" meaning "writes nothing" rather than
+ * "scores an empty league".
  */
 export async function runNightlyRound(
   seasonId: string,
   roundId: string,
   now: Date,
-  key: string | undefined
+  writeKey: string | undefined,
+  readKey: string | undefined = writeKey
 ): Promise<RoundOutcome> {
-  const boards = await fetchBoards(seasonId);
+  const boards = await fetchBoards(seasonId, readKey);
   const outcome = roundResultsFor(boards, seasonId, roundId);
-  if (key && !outcome.skipped) {
+  if (writeKey && !outcome.skipped) {
     const ts = now.toISOString();
     await upsertClosedRound(
       { round_id: roundId, season_id: seasonId, opens_at: ts, closes_at: ts },
-      key
+      writeKey
     );
-    await writeResults(outcome.resultRows, key);
+    await writeResults(outcome.resultRows, writeKey);
   }
   return outcome;
 }

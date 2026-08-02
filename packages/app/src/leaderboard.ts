@@ -33,13 +33,66 @@ export function defaultName(): string {
   return `${a}-${n}`;
 }
 
-/** True if this row belongs to the player on this device. Typed structurally
- * (just the device_id column) so the various board row shapes — e.g.
- * pvp-board.ts's `GhostRow`/`StandingRow` — can reuse this instead of
- * redefining the same one-liner. */
-export function isMe(row: { device_id: string }): boolean {
-  return row.device_id === deviceId();
+// The board tables no longer publish `device_id` (see
+// supabase/migrations/2026-08-01-hide-device-id.sql). Reads go through the
+// `*_public` views, which serve an opaque `player_id` instead:
+//
+//     player_id = sha256('wrad:' || device_id)
+//
+// The device id is still what WRITES are keyed on — it just isn't handed to
+// every other client any more, because the write RPCs accept it as a parameter
+// without proving ownership.
+//
+// This digest MUST stay byte-identical to the view's. If they drift, `isMe()`
+// silently stops matching and every player sees themselves as a stranger — no
+// error, just a board with no "· you" on it.
+const PLAYER_ID_SALT = 'wrad:';
+
+let cachedPlayerId: string | null = null;
+let playerIdInFlight: Promise<string> | null = null;
+
+/**
+ * This device's opaque public id, memoised. Async because WebCrypto is; the
+ * fetch paths in pvp-board.ts await it before mapping rows, which is what lets
+ * `isMe` stay synchronous for template use.
+ *
+ * Never throws. `crypto.subtle` needs a secure context — always true for the
+ * deployed site and for localhost, but if it is ever missing this resolves to
+ * an empty string, which cannot collide with a 64-char hex digest. The failure
+ * mode is "nothing is highlighted as yours", not a crash.
+ */
+export function playerId(): Promise<string> {
+  if (playerIdInFlight) return playerIdInFlight;
+  playerIdInFlight = (async () => {
+    try {
+      const bytes = new TextEncoder().encode(`${PLAYER_ID_SALT}${deviceId().toLowerCase()}`);
+      const digest = await crypto.subtle.digest('SHA-256', bytes);
+      cachedPlayerId = [...new Uint8Array(digest)]
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('');
+    } catch {
+      cachedPlayerId = '';
+    }
+    return cachedPlayerId;
+  })();
+  return playerIdInFlight;
 }
+
+/** True if this row belongs to the player on this device. Typed structurally
+ * (just the player_id column) so the various board row shapes — e.g.
+ * pvp-board.ts's `GhostRow`/`StandingRow` — can reuse this instead of
+ * redefining the same one-liner.
+ *
+ * Synchronous, so it works in templates and `Array.find`. Returns false until
+ * `playerId()` has resolved; every caller reaches it via a fetch that already
+ * awaited that, so in practice the cache is always warm by then. */
+export function isMe(row: { player_id: string }): boolean {
+  return cachedPlayerId !== null && cachedPlayerId !== '' && row.player_id === cachedPlayerId;
+}
+
+// Warm the digest at module load so the cache is populated well before the
+// first network read resolves.
+void playerId();
 
 const HEADERS = {
   apikey: SUPABASE_ANON_KEY,

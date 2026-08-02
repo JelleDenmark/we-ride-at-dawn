@@ -341,7 +341,7 @@
   let standings = $state<StandingRow[]>([]);
   let ghosts = $state<GhostRow[]>([]);
   let leagueBusy = $state(false);
-  // Which rival's board the scout panel is expanded to, by device_id (null =
+  // Which rival's board the scout panel is expanded to, by player_id (null =
   // collapsed). One at a time keeps the panel phone-sized.
   let scoutedGhost = $state<string | null>(null);
 
@@ -500,7 +500,7 @@
     return g.board.units.map((u, i) => {
       const name = UNIT_DEFS[u.defId]?.name ?? u.defId;
       const tier = u.tier ?? 1;
-      return { key: `${g.device_id}-${i}`, label: tier > 1 ? `${name} ★${tier}` : name };
+      return { key: `${g.player_id}-${i}`, label: tier > 1 ? `${name} ★${tier}` : name };
     });
   }
 
@@ -1856,13 +1856,13 @@
         <p class="lb-empty">{leagueBusy ? 'scouting the drains…' : 'no rivals synced yet this week'}</p>
       {:else}
         <ul class="scout-list">
-          {#each ghosts as g (g.device_id)}
-            {@const open = scoutedGhost === g.device_id}
+          {#each ghosts as g (g.player_id)}
+            {@const open = scoutedGhost === g.player_id}
             <li class="scout-item">
               <button
                 class="scout-row"
                 aria-expanded={open}
-                onclick={() => (scoutedGhost = open ? null : g.device_id)}
+                onclick={() => (scoutedGhost = open ? null : g.player_id)}
               >
                 <span class="scout-name">{g.name}</span>
                 <span class="scout-count">{g.board.units.length} rats {open ? '▾' : '▸'}</span>
