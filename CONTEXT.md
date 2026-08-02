@@ -31,8 +31,11 @@ An opposing Unit, drawn from the fixed `ENEMY_POOL` when a Gauntlet is generated
 A Unit's power level, 1 to `MAX_TIER`. Reached by merging three copies of the same Rat at the same tier into one copy at the next tier — the game's core power-progression lever ("merging").
 
 **Archetype**:
-A tag on a Unit (`swarm | brute | armored | plague`) describing its strategic identity. Doubles as the label for a Gauntlet's daily theme (see Theme) — the same four values classify both what a Rat *is* and what a Wave leans toward.
+A tag (`swarm | brute | armored | plague`) on an **Enemy**, describing its strategic identity. Doubles as the label for a Gauntlet's daily theme (see Theme). Enemy-side only in practice: `UnitDef.archetype` is set on the 15 defs in `enemies.ts` and on zero player Rats, so it classifies what a Wave leans toward — for what a Rat *does*, see Keyword Family. (`UnitDef.tribe` is a third, vestigial tag: an untyped string on roughly half the roster that no surface reads. Don't build on it.)
 _Avoid_: Class, type (Type is used for other things in code; Archetype is the domain term)
+
+**Keyword Family**:
+The classification of what a Unit does, derived from its Ability's effect kind: `poison | defence | offence | summon | buff | sustain`. Owned by core (`data/keyword-family.ts`), which pairs each family with one colour and one glyph. Covers the whole roster — both sides — where Archetype and `tribe` do not. Per ADR-0005 every unit-facing surface states a Unit's family in its family colour, and a new Rat declares a family before it ships.
 
 **Ability**:
 A Unit's triggered combat behavior — a `(trigger, effect)` pair. Not every Unit has one.

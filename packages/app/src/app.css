@@ -1,10 +1,109 @@
+/*
+ * The token set (issue #167, ADR-0006).
+ *
+ * Everything the UI paints with lives here. Component styles reference these
+ * and carry no raw hex of their own — `packages/core/test/ui-tokens.test.ts`
+ * fails the build on a new one. The point is not tidiness: this file used to
+ * be 19 lines with five tokens while ~130 hardcoded hexes were scattered
+ * through a 1300-line <style> block in App.svelte, which is how the screen
+ * ended up as flat matte fills with no light source and no sense of place.
+ * A single ramp is the precondition for treating the whole app as one lit
+ * surface rather than a pile of independent brown boxes.
+ *
+ * Not a theme system. `color-scheme: dark` is permanent — this is a dark
+ * game and there is no light variant to maintain.
+ */
 :root {
   color-scheme: dark;
+
+  /* ---- Ground ramp, deepest to most-lit ------------------------------
+     Pick by DEPTH, not by component: `--well` is the bottom of a container
+     you look into, `--surface` is the default raised face (tiles, buttons),
+     `--surface-lit` is reserved for the one thing under direct light. */
   --bg: #0d0b09;
+  --well: #14100c;
   --panel: #17130f;
+  --surface-sunk: #1a140f;
+  --surface: #241a14;
+  --surface-raised: #2c1e15;
+  --surface-lit: #33241a;
+  /* A surface armed with a brass action (relic pinning, bench swap). */
+  --surface-brass: #2c2415;
+
+  /* ---- Edges ---------------------------------------------------------- */
+  --edge: #4a3520;
+  --edge-dim: #322820;
+  --edge-faint: #2a221a;
+  --edge-warm: #6b4a2a;
+
+  /* ---- Ink ramp, brightest to faintest --------------------------------
+     `--ink-faint` is placeholder text only. Grain plus vignette costs real
+     contrast, so anything smaller than 12px should sit at `--ink-dim` or
+     brighter — see the contrast note in ADR-0006. */
+  --ink-bright: #f0e6d2;
   --ink: #d8cdb8;
+  --ink-soft: #c9b891;
   --ink-dim: #8a7f6c;
+  --ink-faint: #5f564a;
+
+  /* ---- Accents --------------------------------------------------------- */
   --accent: #c4552e;
+  --accent-deep: #7a3018;
+  --danger: #d8452e;
+  --brass: #d4af37;
+  --brass-glow: rgba(212, 175, 55, 0.22);
+  /* Verdigris. Brass in a wet drain does not stay clean — one text-shadow
+     under every gold number is the cheapest way to say so. */
+  --tarnish: rgba(58, 92, 48, 0.55);
+  /* The frozen-stall register: the only cool colours in the player's UI. */
+  --frost: #7ba7cc;
+  --frost-edge: #3d5a75;
+  --frost-surface: #16202a;
+
+  /* ---- Wet metal --------------------------------------------------------
+     A raised face gets a light catch along its top edge and a shadow along
+     its bottom, plus `--sheen` as a background-image so the fill is never
+     flat. Because `--sheen` is an IMAGE, state rules must swap
+     `background-color` (not the `background` shorthand, which would wipe
+     it) — see the `.tile` state rules in App.svelte. */
+  --inset-light: rgba(248, 236, 214, 0.07);
+  --inset-shadow: rgba(0, 0, 0, 0.42);
+  --sheen: linear-gradient(
+    180deg,
+    rgba(255, 244, 222, 0.055) 0%,
+    rgba(255, 244, 222, 0) 38%,
+    rgba(0, 0, 0, 0.1) 100%
+  );
+
+  /* ---- Atmosphere -------------------------------------------------------
+     Three fixed layers over the whole shell, never per-panel — that is what
+     makes the screen read as one place instead of a stack of cards.
+
+     `--grain` is an inline feTurbulence data URI (~300 bytes, no build step,
+     no asset request). `--lamp` is the single light source: warm, entering
+     from above the viewport and falling off downward, so the screen reads as
+     looking DOWN into the drains. `--vignette` closes the edges. */
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+  --grain-opacity: 0.04;
+  --lamp: radial-gradient(
+    120% 62% at 50% -12%,
+    rgba(196, 85, 46, 0.13) 0%,
+    rgba(196, 85, 46, 0.05) 38%,
+    rgba(196, 85, 46, 0) 68%
+  );
+  /* The vignette sits OVER the content, so every stop is paid for in
+     contrast — it darkens text and ground together, which pushes their
+     ratio toward 1. Measured on a 375x812 viewport, the worst on-screen
+     point (a bottom corner) lands at ~0.14 alpha with these stops, costing
+     `--ink-dim` about 0.9 of its 4.33:1 on `--surface`. The heavy end of
+     the ramp is deliberately pushed past 100% of the ellipse, i.e. off
+     screen. Do not deepen these without re-measuring. */
+  --vignette: radial-gradient(
+    140% 100% at 50% 30%,
+    rgba(0, 0, 0, 0) 46%,
+    rgba(0, 0, 0, 0.12) 76%,
+    rgba(0, 0, 0, 0.34) 100%
+  );
 }
 
 * {
@@ -16,4 +115,40 @@ body {
   background: var(--bg);
   color: var(--ink);
   font-family: Georgia, 'Times New Roman', serif;
+}
+
+/* Lamp + vignette. Above the banner stack (z-index 100) so the light falls
+   on everything including overlays, and `pointer-events: none` so nothing
+   here can eat a tap. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  pointer-events: none;
+  background: var(--lamp), var(--vignette);
+}
+
+/* Grain, on its own layer above the light so the light is grained too.
+   `overlay` against a dark ground reads as texture rather than as haze;
+   at 4% it is felt more than seen, which is the entire trick. */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 201;
+  pointer-events: none;
+  opacity: var(--grain-opacity);
+  mix-blend-mode: overlay;
+  background-image: var(--grain);
+}
+
+/* A FIXED grain over a SCROLLING page shimmers, and grain over 10px
+   `--ink-dim` text is the specific combination most likely to fall below
+   legibility (ADR-0006's contrast note). Both readings say the same thing:
+   the light stays, the noise goes. */
+@media (prefers-reduced-motion: reduce), (prefers-contrast: more) {
+  body::after {
+    display: none;
+  }
 }

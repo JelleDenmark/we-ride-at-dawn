@@ -3,7 +3,13 @@
        (flat damage reduction) whose bristles cut back on every hit taken
        (stateless reflect, never gain-on-hurt). Riveted plates over the back,
        stiff metal whiskers radiating out like the thorns themselves. Cool grey
-       steel as the one accent against house-standard fur brown. -->
+       steel as the one accent against house-standard fur brown.
+
+       The blooded whisker tips (#a34a3f) are the offence family's colour
+       (issue #166 / ADR-0005). They were re-homed here from md-rattyfock.svg,
+       a dormant reskin kept only for replay compatibility — the palette the
+       UI reads from has to have a living sprite behind it, and a thorns unit
+       that cuts its attacker back is the right place for the offence red. -->
   <!-- tail -->
   <path d="M13 51 Q4 49 6 39 Q6.5 34 11 33" fill="none" stroke="#5e3120" stroke-width="2.4" stroke-linecap="round"/>
   <!-- squat, broad body (front-line tank silhouette) -->
@@ -22,6 +28,10 @@
   <path d="M44 30 L52 27" stroke="#b9c2ca" stroke-width="1.1" stroke-linecap="round"/>
   <path d="M44.5 32 L53 32.5" stroke="#b9c2ca" stroke-width="1.1" stroke-linecap="round"/>
   <path d="M44 34 L51 37" stroke="#b9c2ca" stroke-width="1.1" stroke-linecap="round"/>
+  <!-- blooded tips — the offence family's red (see header note) -->
+  <path d="M49.8 27.8 L52 27" stroke="#a34a3f" stroke-width="1.7" stroke-linecap="round"/>
+  <path d="M50.7 32.4 L53 32.5" stroke="#a34a3f" stroke-width="1.7" stroke-linecap="round"/>
+  <path d="M48.9 36.1 L51 37" stroke="#a34a3f" stroke-width="1.7" stroke-linecap="round"/>
   <!-- legs, planted wide -->
   <rect x="20" y="53" width="4.6" height="7" rx="1.8" fill="#5e3120"/>
   <rect x="34" y="53" width="4.6" height="7" rx="1.8" fill="#5e3120"/>

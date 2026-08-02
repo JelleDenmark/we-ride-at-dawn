@@ -73,6 +73,8 @@
     consolationScrap,
     LOSS_CONSOLATION_DEFAULT,
     simulateDuel,
+    unitKeyword,
+    MAX_TIER,
     type ActionResult,
     type BattleResult,
     type BuildState,
@@ -858,56 +860,26 @@
   // Compact tile tag (issue: mobile shop overflow) — the tile shows only a
   // symbol + 1-2 word keyword; the full sentence lives in the inspect sheet
   // (abilitySentence, above) which already exists as the tap-to-detail
-  // destination, so the tile no longer needs to repeat it. Symbol register
-  // matches the game's existing restrained-glyph vocabulary (⚙ ❄ ✦ ★), not
-  // illustrated icons or emoji.
-  const TIME_OF_DAY_ICON: Record<string, string> = { beforeNoon: '☀', afterNoon: '☾' };
-
+  // destination, so the tile no longer needs to repeat it.
+  //
+  // The classification itself moved into core in #166 (`unitKeyword`, in
+  // data/keyword-family.ts) — this file is now a thin consumer, not the
+  // source of truth. That is what makes it testable and what makes the
+  // compiler refuse a new `Effect` kind until it has been classified and
+  // coloured. Per ADR-0005, any NEW surface that lists units takes its
+  // colour from `UnitKeyword.color` rather than inventing its own encoding.
   function keywordTag(def: UnitDef): string | null {
-    const ability = def.ability;
-    if (ability) {
-      switch (ability.effect.kind) {
-        case 'summon':
-        case 'maintainSummons':
-        case 'summonScaledPup':
-          return '❋ summon';
-        case 'buffBehind':
-        case 'buffAdjacent':
-        case 'gainStats':
-        case 'bequeathAttack':
-        case 'chargeWhileBenched':
-        case 'teamBuffByWave':
-        case 'distributeStatsOnFaint':
-          return '▲ buff';
-        case 'teamBuff': {
-          const icon = ability.condition ? (TIME_OF_DAY_ICON[ability.condition.timeOfDay] ?? '▲') : '▲';
-          return `${icon} buff`;
-        }
-        case 'poisonFrontEnemy':
-        case 'poisonLastEnemy':
-        case 'poisonTarget':
-        case 'poisonAllEnemies':
-          return '☠ poison';
-        case 'revive':
-          return '✚ revive';
-        case 'blockFrontHits':
-          return '⛨ block';
-        case 'grantArmor':
-          return '⛨ armor';
-        case 'backlineDamage':
-          return '⚔ snipe';
-        case 'buffSummoned':
-          return '❋ train';
-        case 'reflectDamage':
-          return '⚔ thorns';
-        case 'healSelf':
-          return '✚ drain';
-        case 'poisonResist':
-          return '⛨ ward';
-      }
-    }
-    if ((def.damageReduction ?? 0) > 0) return '⛨ armor';
-    return null;
+    return unitKeyword(def)?.text ?? null;
+  }
+
+  /**
+   * Inline `--family` for a tile: drives both the 3px top edge and the
+   * keyword text colour (see `.tile` CSS). `transparent` rather than an
+   * omitted variable so a plain body with no keyword renders a clean tile
+   * instead of inheriting an ancestor's family colour.
+   */
+  function familyStyle(def: UnitDef): string {
+    return `--family: ${unitKeyword(def)?.color ?? 'transparent'}`;
   }
 
   let stageEl: HTMLDivElement;
@@ -1574,24 +1546,33 @@
     <div class="board horde-board">
       {#each build.board as unit, bi}
         {@const stats = unitStats(unit)}
+        {@const def = UNIT_DEFS[unit.defId]}
         <button
           class="tile unit-tile"
           class:selected={inspect?.area === 'board' && inspect.index === bi}
           class:pin-target={pendingRelic !== null || pendingSwap !== null}
+          class:maxed={unit.tier >= MAX_TIER}
+          class:front={bi === 0}
+          style={familyStyle(def)}
           onclick={() => clickBoardUnit(bi)}
         >
           {#if ART_URL[unit.defId]}
             <img class="portrait" src={ART_URL[unit.defId]} alt="" />
           {/if}
-          <span class="tile-name">{UNIT_DEFS[unit.defId].name}{unit.tier > 1 ? ` ★${unit.tier}` : ''}</span>
+          <span class="tile-name">{def.name}</span>
           <span class="tile-stats">{stats.attack}/{stats.health}</span>
-          <span class="tile-sub">
+          <span class="tile-sub" class:keyword={unit.relicIds.length === 0}>
             {#if unit.relicIds.length > 0}
               ✦ {unit.relicIds.map((r) => RELIC_DEFS[r].name).join(', ')}
             {:else}
-              {keywordTag(UNIT_DEFS[unit.defId]) ?? ''}
+              {keywordTag(def) ?? ''}
             {/if}
           </span>
+          {#if unit.tier > 1}
+            <span class="tier-pips" aria-label="tier {unit.tier}">
+              {#each Array.from({ length: unit.tier }) as _}<i class="pip"></i>{/each}
+            </span>
+          {/if}
         </button>
       {/each}
       {#each Array.from({ length: Math.max(0, effectiveBoardCap(build) - build.board.length) }) as _}
@@ -1624,24 +1605,32 @@
     <div class="board bench-board">
       {#each build.bench as unit, bi}
         {@const stats = unitStats(unit)}
+        {@const def = UNIT_DEFS[unit.defId]}
         <button
           class="tile unit-tile bench-tile"
           class:selected={inspect?.area === 'bench' && inspect.index === bi}
           class:arming={pendingSwap === bi}
+          class:maxed={unit.tier >= MAX_TIER}
+          style={familyStyle(def)}
           onclick={() => clickBenchUnit(bi)}
         >
           {#if ART_URL[unit.defId]}
             <img class="portrait" src={ART_URL[unit.defId]} alt="" />
           {/if}
-          <span class="tile-name">{UNIT_DEFS[unit.defId].name}{unit.tier > 1 ? ` ★${unit.tier}` : ''}</span>
+          <span class="tile-name">{def.name}</span>
           <span class="tile-stats">{stats.attack}/{stats.health}</span>
-          <span class="tile-sub">
+          <span class="tile-sub" class:keyword={unit.relicIds.length === 0}>
             {#if unit.relicIds.length > 0}
               ✦ {unit.relicIds.map((r) => RELIC_DEFS[r].name).join(', ')}
             {:else}
-              {keywordTag(UNIT_DEFS[unit.defId]) ?? ''}
+              {keywordTag(def) ?? ''}
             {/if}
           </span>
+          {#if unit.tier > 1}
+            <span class="tier-pips" aria-label="tier {unit.tier}">
+              {#each Array.from({ length: unit.tier }) as _}<i class="pip"></i>{/each}
+            </span>
+          {/if}
         </button>
       {/each}
       {#each Array.from({ length: Math.max(0, BENCH_SIZE - build.bench.length) }) as _}
@@ -1662,6 +1651,7 @@
           <button
             class="tile shop-tile"
             class:frozen={build.shop.frozen[i]}
+            style={familyStyle(def)}
             onclick={() => clickShopSlot(i)}
           >
             {#if ART_URL[def.id]}
@@ -1669,7 +1659,7 @@
             {/if}
             <span class="tile-name">{def.name}</span>
             <span class="tile-stats">{def.attack}/{def.health}</span>
-            <span class="tile-sub">{keywordTag(def) ?? ''}</span>
+            <span class="tile-sub keyword">{keywordTag(def) ?? ''}</span>
             <span class="tile-cost">⚙ {def.cost}</span>
             <span
               class="freeze"
@@ -2278,7 +2268,7 @@
 
   .update-banner {
     background: var(--accent);
-    border-bottom: 1px solid #7a3018;
+    border-bottom: 1px solid var(--accent-deep);
   }
 
   .install-banner {
@@ -2294,7 +2284,7 @@
     font-family: inherit;
     font-size: 13px;
     font-weight: bold;
-    color: #f5ead2;
+    color: var(--ink-bright);
     background: transparent;
     border: none;
     cursor: pointer;
@@ -2309,7 +2299,7 @@
     padding: 8px 14px;
     font-family: inherit;
     font-size: 13px;
-    color: #f5ead2;
+    color: var(--ink-bright);
     background: transparent;
     border: none;
     cursor: pointer;
@@ -2317,7 +2307,7 @@
   }
 
   .update-banner-dismiss {
-    border-left: 1px solid #7a3018;
+    border-left: 1px solid var(--accent-deep);
   }
 
   .install-banner-dismiss {
@@ -2362,15 +2352,15 @@
     justify-content: center;
     flex-wrap: wrap;
     gap: 6px;
-    border: 1px dashed #322820;
+    border: 1px dashed var(--edge-dim);
     border-radius: 8px;
     font-size: 12px;
     color: var(--ink-dim);
   }
 
   .dev input[type='date'] {
-    background: #241a14;
-    border: 1px solid #4a3520;
+    background: var(--surface);
+    border: 1px solid var(--edge);
     border-radius: 6px;
     color: var(--ink);
     font-family: inherit;
@@ -2383,15 +2373,15 @@
     font-family: inherit;
     font-size: 12px;
     color: var(--ink);
-    background: #241a14;
-    border: 1px solid #4a3520;
+    background: var(--surface);
+    border: 1px solid var(--edge);
     border-radius: 6px;
     cursor: pointer;
   }
 
   .dev button.active {
     border-color: var(--accent);
-    color: #f0e6d2;
+    color: var(--ink-bright);
   }
 
   .dev button:disabled {
@@ -2400,11 +2390,11 @@
   }
 
   .dev-theme {
-    color: #c9b891;
+    color: var(--ink-soft);
   }
 
   .dev-sep {
-    color: #4a3520;
+    color: var(--edge);
   }
 
   .build {
@@ -2420,32 +2410,49 @@
     margin-bottom: 10px;
   }
 
+  /* Wet metal on the panels (issue #167), same recipe as `.tile`: a light
+     catch along the top edge, a shadow along the bottom, `--sheen` instead
+     of a flat fill, and an off-square radius so the frame reads as a
+     stamped plate rather than a rounded rectangle. Each panel gets its OWN
+     radius rotation — three stacked panels with identical corners is the
+     laser-cut look this is trying to leave behind. */
+  .horde-panel,
+  .bench-panel,
+  .shop-panel,
+  .battle-panel,
+  .leaderboard {
+    background-image: var(--sheen);
+    box-shadow:
+      inset 0 1px 0 var(--inset-light),
+      inset 0 -1px 0 var(--inset-shadow);
+  }
+
   .horde-panel {
     padding: 10px 12px 12px;
-    border: 1.5px solid #6b4a2a;
-    border-radius: 10px;
-    background: #1c150f;
+    border: 1.5px solid var(--edge-warm);
+    border-radius: 12px 9px 11px 8px;
+    background-color: var(--surface-sunk);
   }
 
   .bench-panel {
     margin-top: 8px;
     padding: 8px 12px 10px;
-    border: 1px dashed #4a3520;
-    border-radius: 10px;
-    background: #191310;
+    border: 1px dashed var(--edge);
+    border-radius: 9px 12px 8px 11px;
+    background-color: var(--surface-sunk);
   }
 
   .shop-panel {
     margin-top: 14px;
     padding: 10px 12px 12px;
-    border: 1px solid #322820;
-    border-radius: 10px;
+    border: 1px solid var(--edge-dim);
+    border-radius: 11px 8px 12px 9px;
   }
 
   .arriving {
     margin-top: 10px;
     padding: 8px 12px;
-    border: 1px dashed #4a3520;
+    border: 1px dashed var(--edge);
     border-radius: 8px;
   }
 
@@ -2460,8 +2467,8 @@
     font-size: 12px;
     padding: 3px 10px;
     border-radius: 10px;
-    background: #2a2118;
-    color: #c9b891;
+    background: var(--surface-raised);
+    color: var(--ink-soft);
   }
 
   .phase-divider {
@@ -2481,21 +2488,27 @@
     content: '';
     flex: 1;
     height: 1px;
-    background: #4a3520;
+    background: var(--edge);
   }
 
   .battle-panel {
     max-width: 620px;
     margin: 0 auto;
     padding: 14px;
-    border: 1px solid #322820;
-    border-radius: 10px;
-    background: #100d0a;
+    border: 1px solid var(--edge-dim);
+    border-radius: 8px 11px 9px 12px;
+    background-color: var(--well);
   }
 
+  /* Tarnished brass (issue #167): every gold number in the app carries the
+     same 1px verdigris cast where it meets its own shadow. Brass in a wet
+     drain does not stay clean, and it is one text-shadow — see `--tarnish`.
+     Applied at each `color: var(--brass)` site rather than as one utility
+     rule, because the brass selectors have nothing else in common. */
   .scrap {
     font-size: 16px;
-    color: #d4af37;
+    color: var(--brass);
+    text-shadow: 0 1px 0 var(--tarnish);
   }
 
   .status-notice {
@@ -2506,16 +2519,17 @@
 
   .notice {
     font-size: 13px;
-    color: #d8452e;
+    color: var(--danger);
   }
 
   .cancel-pending {
     font-size: 12px;
     padding: 2px 8px;
-    border: 1px solid #6b4a2a;
+    border: 1px solid var(--edge-warm);
     border-radius: 6px;
     background: transparent;
-    color: #d4af37;
+    color: var(--brass);
+    text-shadow: 0 1px 0 var(--tarnish);
   }
 
   .row-label {
@@ -2587,6 +2601,24 @@
     opacity: 0.92;
   }
 
+  /* Keyword-family edge (issue #166): a full board used to be five identical
+     brown boxes — the sprite is 40px of an 86px tile and everything else was
+     10-12px text on the same ground, so nothing distinguished a poison rat
+     from an armor rat at a glance. The colour comes from the inline
+     `--family` each tile sets (see `familyStyle`), never from a per-surface
+     palette invented here — ADR-0005. Drawn as an absolute bar rather than a
+     `border-top` so it costs no layout height on an already-tight tile;
+     `transparent` for a plain body makes it a no-op instead of a rule that
+     has to be conditionally applied. */
+  .tile::before {
+    content: '';
+    position: absolute;
+    inset: 0 0 auto;
+    height: 3px;
+    background: var(--family, transparent);
+    pointer-events: none;
+  }
+
   .tile {
     position: relative;
     /* Grid items default to min-width: auto, which refuses to shrink below
@@ -2602,19 +2634,56 @@
     flex-direction: column;
     align-items: center;
     gap: 3px;
-    background: #241a14;
-    border: 1px solid #4a3520;
-    border-radius: 8px;
+    /* Wet metal, not a fill (issue #167). `background-color` + `--sheen` as
+       a separate background-IMAGE, deliberately not the `background`
+       shorthand: every state rule below (front/selected/frozen/arming) swaps
+       only the colour, and a shorthand there would silently wipe the sheen.
+       Same reason the inset light/shadow live here rather than per state. */
+    background-color: var(--surface);
+    background-image: var(--sheen);
+    box-shadow:
+      inset 0 1px 0 var(--inset-light),
+      inset 0 -1px 0 var(--inset-shadow);
+    border: 1px solid var(--edge);
+    /* Stamped, not laser-cut: four different radii read as a struck object,
+       a uniform 8px reads as a div. Varied per tile by position below. */
+    border-radius: 9px 6px 8px 7px;
     color: var(--ink);
     font-family: inherit;
     font-size: 12px;
     cursor: pointer;
   }
 
+  /* Three radius rotations across a row so no two neighbours are identical.
+     `.tile::before` (the family edge) has to track the TOP two corners of
+     whichever rotation applies, hence the paired rules — the bar sits inside
+     the 1px border, so each value is 1px tighter than the tile's. */
+  .board .tile:nth-child(3n + 1) {
+    border-radius: 7px 9px 6px 8px;
+  }
+
+  .board .tile:nth-child(3n + 2) {
+    border-radius: 8px 7px 9px 6px;
+  }
+
+  .tile::before {
+    border-radius: 8px 5px 0 0;
+  }
+
+  .board .tile:nth-child(3n + 1)::before {
+    border-radius: 6px 8px 0 0;
+  }
+
+  .board .tile:nth-child(3n + 2)::before {
+    border-radius: 7px 6px 0 0;
+  }
+
   .empty-tile {
-    background: transparent;
-    border: 1px dashed #322820;
-    color: #5f564a;
+    background-color: transparent;
+    background-image: none;
+    box-shadow: none;
+    border: 1px dashed var(--edge-dim);
+    color: var(--ink-faint);
     justify-content: center;
     cursor: default;
   }
@@ -2636,7 +2705,7 @@
   .tile-stats {
     font-size: 14px;
     font-weight: bold;
-    color: #f0e6d2;
+    color: var(--ink-bright);
   }
 
   .tile-sub {
@@ -2646,34 +2715,100 @@
     overflow-wrap: break-word;
   }
 
+  /* Only when `.tile-sub` is actually showing a keyword — a relic list (the
+     other thing that span renders) belongs to the relic's gold register, not
+     to the unit's family. */
+  .tile-sub.keyword {
+    color: var(--family, var(--ink-dim));
+  }
+
   .tile-cost {
     font-size: 11px;
-    color: #d4af37;
+    color: var(--brass);
+    text-shadow: 0 1px 0 var(--tarnish);
     overflow-wrap: break-word;
+  }
+
+  /* Tier as pips, not text (issue #166). `★2` was two characters of 11.5px
+     name suffix for what is the single biggest power spike in the game;
+     tier 1 shows nothing at all, so the marker only ever means "this one is
+     merged". The `aria-label` carries the tier for screen readers, and the
+     inspect sheet still spells out `★N` on tap. Shop tiles never render
+     these — everything on offer is tier 1 — which is also why they don't
+     collide with the ❄ freeze control in the same corner. */
+  .tier-pips {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    display: flex;
+    gap: 2px;
+    pointer-events: none;
+  }
+
+  .pip {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--brass);
+  }
+
+  /* Keeps the tile's own wet-metal insets and adds the merge glow on top —
+     a bare `box-shadow` here would replace them, flattening the ★3 tile back
+     to a fill at exactly the moment it should look struck. */
+  .unit-tile.maxed {
+    border-color: var(--brass);
+    box-shadow:
+      inset 0 1px 0 var(--inset-light),
+      inset 0 -1px 0 var(--inset-shadow),
+      inset 0 0 9px var(--brass-glow);
+  }
+
+  /* Only the frontmost unit ever clashes (see CONTEXT.md, "Clash"), and
+     nothing on the board said so. Horde-only — the `front` class is set at
+     board index 0 and nowhere else, since the bench never fights and the shop
+     has no ordering. Brighter ground plus a rust chevron pointing the way the
+     board reads, matching the `front → into the drains` label above it.
+     Deliberately kept at two-class specificity and placed ABOVE
+     `.unit-tile.selected`, so selecting the front rat still repaints its
+     ground rather than losing that feedback to this rule. */
+  .unit-tile.front {
+    background-color: var(--surface-lit);
+  }
+
+  .unit-tile.front::after {
+    content: '›';
+    position: absolute;
+    bottom: 1px;
+    right: 5px;
+    font-size: 13px;
+    line-height: 1;
+    color: var(--accent);
+    pointer-events: none;
   }
 
   .unit-tile.selected {
     border-color: var(--accent);
-    background: #2c1e15;
+    background-color: var(--surface-raised);
   }
 
   .unit-tile.pin-target {
-    border-color: #d4af37;
+    border-color: var(--brass);
   }
 
   .relic-tile .tile-name {
-    color: #d4af37;
+    color: var(--brass);
+    text-shadow: 0 1px 0 var(--tarnish);
   }
 
   .relic-tile.arming,
   .bench-tile.arming {
-    border-color: #d4af37;
-    background: #2c2415;
+    border-color: var(--brass);
+    background-color: var(--surface-brass);
   }
 
   .shop-tile.frozen {
-    background: #16202a;
-    border-color: #3d5a75;
+    background-color: var(--frost-surface);
+    border-color: var(--frost-edge);
   }
 
   .freeze {
@@ -2687,7 +2822,7 @@
     align-items: center;
     justify-content: center;
     font-size: 12px;
-    color: #7ba7cc;
+    color: var(--frost);
     opacity: 0.65;
   }
 
@@ -2707,8 +2842,8 @@
     font-family: inherit;
     font-size: 13px;
     color: var(--ink);
-    background: #241a14;
-    border: 1px solid #4a3520;
+    background: var(--surface);
+    border: 1px solid var(--edge);
     border-radius: 6px;
     cursor: pointer;
   }
@@ -2735,8 +2870,8 @@
   .sheet {
     width: 100%;
     max-width: 480px;
-    background: #1a140f;
-    border: 1px solid #4a3520;
+    background: var(--surface-sunk);
+    border: 1px solid var(--edge);
     border-bottom: none;
     border-radius: 14px 14px 0 0;
     padding: 18px 18px 26px;
@@ -2753,8 +2888,8 @@
     width: 72px;
     height: 72px;
     object-fit: contain;
-    background: #241a14;
-    border: 1px solid #4a3520;
+    background: var(--surface);
+    border: 1px solid var(--edge);
     border-radius: 10px;
   }
 
@@ -2765,9 +2900,10 @@
     align-items: center;
     justify-content: center;
     font-size: 34px;
-    color: #d4af37;
-    background: #241a14;
-    border: 1px solid #4a3520;
+    color: var(--brass);
+    text-shadow: 0 1px 0 var(--tarnish);
+    background: var(--surface);
+    border: 1px solid var(--edge);
     border-radius: 10px;
   }
 
@@ -2780,7 +2916,7 @@
     margin-top: 3px;
     font-size: 17px;
     font-weight: bold;
-    color: #f0e6d2;
+    color: var(--ink-bright);
   }
 
   .card-tier {
@@ -2800,13 +2936,14 @@
     margin: 14px 0 4px;
     font-size: 14px;
     line-height: 1.45;
-    color: #c9b891;
+    color: var(--ink-soft);
   }
 
   .card-relics {
     margin: 2px 0 0;
     font-size: 13px;
-    color: #d4af37;
+    color: var(--brass);
+    text-shadow: 0 1px 0 var(--tarnish);
   }
 
   .card-actions {
@@ -2821,8 +2958,8 @@
     font-family: inherit;
     font-size: 14px;
     color: var(--ink);
-    background: #241a14;
-    border: 1px solid #4a3520;
+    background: var(--surface);
+    border: 1px solid var(--edge);
     border-radius: 6px;
     cursor: pointer;
   }
@@ -2830,7 +2967,7 @@
   .card-actions button.primary {
     background: var(--accent);
     border-color: var(--accent);
-    color: #f7ede0;
+    color: var(--ink-bright);
   }
 
   .card-actions button:disabled {
@@ -2842,14 +2979,14 @@
      tap destroys this" state reads at a glance, without the filled-in weight
      of .primary — this is a warning, not the sheet's recommended action. */
   .card-actions button.armed {
-    color: #d8452e;
-    border-color: #d8452e;
+    color: var(--danger);
+    border-color: var(--danger);
   }
 
   .card-warn {
     margin-top: 8px;
     font-size: 12px;
-    color: #d8452e;
+    color: var(--danger);
   }
 
   .card-hint {
@@ -2861,7 +2998,8 @@
   .card-note {
     margin-top: 8px;
     font-size: 12px;
-    color: #d4af37;
+    color: var(--brass);
+    text-shadow: 0 1px 0 var(--tarnish);
   }
 
   .compendium-nav {
@@ -2876,8 +3014,8 @@
     font-family: inherit;
     font-size: 12px;
     color: var(--ink);
-    background: #241a14;
-    border: 1px solid #4a3520;
+    background: var(--surface);
+    border: 1px solid var(--edge);
     border-radius: 6px;
     cursor: pointer;
   }
@@ -2905,14 +3043,14 @@
     font-family: inherit;
     font-size: 13px;
     color: var(--ink-dim);
-    background: #241a14;
-    border: 1px solid #4a3520;
+    background: var(--surface);
+    border: 1px solid var(--edge);
     border-radius: 6px;
     cursor: pointer;
   }
 
   .compendium-tabs button.active {
-    color: #f0e6d2;
+    color: var(--ink-bright);
     border-color: var(--accent);
   }
 
@@ -2942,8 +3080,8 @@
     font-family: inherit;
     text-align: left;
     color: var(--ink);
-    background: #241a14;
-    border: 1px solid #4a3520;
+    background: var(--surface);
+    border: 1px solid var(--edge);
     border-radius: 8px;
     cursor: pointer;
   }
@@ -2952,8 +3090,8 @@
     width: 36px;
     height: 36px;
     object-fit: contain;
-    background: #1a140f;
-    border: 1px solid #4a3520;
+    background: var(--surface-sunk);
+    border: 1px solid var(--edge);
     border-radius: 6px;
     flex-shrink: 0;
   }
@@ -2965,9 +3103,10 @@
     align-items: center;
     justify-content: center;
     font-size: 16px;
-    color: #d4af37;
-    background: #1a140f;
-    border: 1px solid #4a3520;
+    color: var(--brass);
+    text-shadow: 0 1px 0 var(--tarnish);
+    background: var(--surface-sunk);
+    border: 1px solid var(--edge);
     border-radius: 6px;
     flex-shrink: 0;
   }
@@ -2986,14 +3125,14 @@
   .compendium-row-stats {
     font-size: 13px;
     font-weight: bold;
-    color: #f0e6d2;
+    color: var(--ink-bright);
     flex-shrink: 0;
   }
 
   .team-relics {
     margin-top: 8px;
     font-size: 12px;
-    color: #c9b891;
+    color: var(--ink-soft);
   }
 
   .ride-controls {
@@ -3014,20 +3153,20 @@
     font-family: inherit;
     font-size: 12px;
     color: var(--ink);
-    background: #241a14;
-    border: 1px solid #4a3520;
+    background: var(--surface);
+    border: 1px solid var(--edge);
     border-radius: 6px;
     cursor: pointer;
   }
 
   .ride-controls button.active {
     border-color: var(--accent);
-    color: #f0e6d2;
+    color: var(--ink-bright);
   }
 
   .stage :global(canvas) {
     max-width: 100%;
-    border: 1px solid #2a221a;
+    border: 1px solid var(--edge-faint);
     border-radius: 6px;
   }
 
@@ -3053,8 +3192,8 @@
   .duel-sheet {
     width: 100%;
     max-width: 620px;
-    background: #1a140f;
-    border: 1px solid #4a3520;
+    background: var(--surface-sunk);
+    border: 1px solid var(--edge);
     border-radius: 12px;
     padding: 14px;
   }
@@ -3074,8 +3213,8 @@
     font-family: inherit;
     font-size: 14px;
     color: var(--ink);
-    background: #241a14;
-    border: 1px solid #4a3520;
+    background: var(--surface);
+    border: 1px solid var(--edge);
     border-radius: 6px;
     cursor: pointer;
   }
@@ -3084,7 +3223,7 @@
     margin: 10px 0 0;
     font-size: 14px;
     text-align: center;
-    color: #f0e6d2;
+    color: var(--ink-bright);
   }
 
   .lg-replay {
@@ -3094,8 +3233,8 @@
     font-family: inherit;
     font-size: 12px;
     color: var(--ink);
-    background: #241a14;
-    border: 1px solid #4a3520;
+    background: var(--surface);
+    border: 1px solid var(--edge);
     border-radius: 6px;
     cursor: pointer;
   }
@@ -3123,8 +3262,8 @@
     flex-direction: column;
     min-width: 96px;
     padding: 10px 6px;
-    background: #1d1713;
-    border: 1px solid #322820;
+    background: var(--surface-sunk);
+    border: 1px solid var(--edge-dim);
     border-radius: 8px;
   }
 
@@ -3149,7 +3288,8 @@
   .season-best {
     margin: 12px 0 0;
     font-size: 14px;
-    color: #d4af37;
+    color: var(--brass);
+    text-shadow: 0 1px 0 var(--tarnish);
   }
 
   .season-kills {
@@ -3168,8 +3308,8 @@
     margin: 14px 0 0;
     padding: 8px 12px;
     border-radius: 6px;
-    background: #1d1713;
-    border: 1px solid #2a221a;
+    background: var(--surface-sunk);
+    border: 1px solid var(--edge-faint);
     font-size: 12px;
     color: var(--ink-dim);
     text-align: center;
@@ -3178,7 +3318,7 @@
   .ride-log {
     margin-top: 16px;
     padding-top: 10px;
-    border-top: 1px solid #2a221a;
+    border-top: 1px solid var(--edge-faint);
     text-align: left;
   }
 
@@ -3205,11 +3345,12 @@
   }
 
   .rl-row:nth-child(odd) {
-    background: #17110d;
+    background: var(--panel);
   }
 
   .rl-row.deepest {
-    color: #d4af37;
+    color: var(--brass);
+    text-shadow: 0 1px 0 var(--tarnish);
   }
 
   .rl-time {
@@ -3219,7 +3360,8 @@
   }
 
   .rl-row.deepest .rl-time {
-    color: #d4af37;
+    color: var(--brass);
+    text-shadow: 0 1px 0 var(--tarnish);
   }
 
   .rl-depth {
@@ -3236,21 +3378,22 @@
   .rl-scrap {
     min-width: 48px;
     white-space: nowrap;
-    color: #c9b891;
+    color: var(--ink-soft);
   }
 
   .rl-surv {
     flex: 1;
     text-align: right;
-    color: #d4af37;
+    color: var(--brass);
+    text-shadow: 0 1px 0 var(--tarnish);
   }
 
   .away {
     margin: 14px 0 0;
     padding-top: 12px;
-    border-top: 1px solid #2a221a;
+    border-top: 1px solid var(--edge-faint);
     font-size: 14px;
-    color: #c9b891;
+    color: var(--ink-soft);
   }
 
   .watch {
@@ -3314,9 +3457,9 @@
     max-width: 620px;
     margin: 18px auto 0;
     padding: 12px 14px 14px;
-    border: 1px solid #322820;
-    border-radius: 10px;
-    background: #14100c;
+    border: 1px solid var(--edge-dim);
+    border-radius: 12px 8px 11px 9px;
+    background-color: var(--well);
     text-align: left;
   }
 
@@ -3336,8 +3479,8 @@
     font-family: inherit;
     font-size: 13px;
     color: var(--ink);
-    background: #241a14;
-    border: 1px solid #4a3520;
+    background: var(--surface);
+    border: 1px solid var(--edge);
     border-radius: 6px;
     cursor: pointer;
   }
@@ -3362,16 +3505,16 @@
     text-transform: uppercase;
     letter-spacing: 0.04em;
     color: var(--ink-dim);
-    background: #1a140f;
-    border: 1px solid #322820;
+    background: var(--surface-sunk);
+    border: 1px solid var(--edge-dim);
     border-radius: 6px;
     cursor: pointer;
   }
 
   .lg-tab.active {
     color: var(--ink);
-    background: #241a14;
-    border-color: #4a3520;
+    background: var(--surface);
+    border-color: var(--edge);
   }
 
   .lg-round-picker {
@@ -3382,8 +3525,8 @@
     font-family: inherit;
     font-size: 13px;
     color: var(--ink);
-    background: #1a140f;
-    border: 1px solid #322820;
+    background: var(--surface-sunk);
+    border: 1px solid var(--edge-dim);
     border-radius: 6px;
   }
 
@@ -3409,12 +3552,12 @@
   }
 
   .lb-row:nth-child(odd) {
-    background: #1a140f;
+    background: var(--surface-sunk);
   }
 
   .lb-row.me {
-    background: #2c2415;
-    color: #f0e6d2;
+    background: var(--surface-brass);
+    color: var(--ink-bright);
   }
 
   .lb-rank {
@@ -3424,7 +3567,8 @@
   }
 
   .lb-row.me .lb-rank {
-    color: #d4af37;
+    color: var(--brass);
+    text-shadow: 0 1px 0 var(--tarnish);
   }
 
   .lb-name {
@@ -3451,11 +3595,12 @@
   .lg-consolation {
     margin: 8px 0 0;
     font-size: 12px;
-    color: #c9b891;
+    color: var(--ink-soft);
   }
 
   .lg-consolation strong {
-    color: #d4af37;
+    color: var(--brass);
+    text-shadow: 0 1px 0 var(--tarnish);
   }
 
   .lg-record {
@@ -3469,7 +3614,8 @@
   .lg-points {
     flex: 0 0 auto;
     white-space: nowrap;
-    color: #d4af37;
+    color: var(--brass);
+    text-shadow: 0 1px 0 var(--tarnish);
     font-variant-numeric: tabular-nums;
   }
 
@@ -3488,7 +3634,7 @@
   }
 
   .scout-item:nth-child(odd) {
-    background: #1a140f;
+    background: var(--surface-sunk);
   }
 
   .scout-row {
@@ -3537,9 +3683,9 @@
   .scout-chip {
     padding: 3px 8px;
     font-size: 12px;
-    color: #e7dcc4;
-    background: #241a14;
-    border: 1px solid #4a3520;
+    color: var(--ink-bright);
+    background: var(--surface);
+    border: 1px solid var(--edge);
     border-radius: 999px;
     white-space: nowrap;
   }
@@ -3556,8 +3702,8 @@
     font-family: inherit;
     font-size: 12px;
     color: var(--ink);
-    background: #241a14;
-    border: 1px solid #4a3520;
+    background: var(--surface);
+    border: 1px solid var(--edge);
     border-radius: 6px;
     cursor: pointer;
   }
@@ -3574,8 +3720,8 @@
     font-family: inherit;
     font-size: 16px;
     color: var(--ink);
-    background: #241a14;
-    border: 1px solid #4a3520;
+    background: var(--surface);
+    border: 1px solid var(--edge);
     border-radius: 8px;
   }
 

@@ -22,6 +22,17 @@ export {
   type LineupUnit,
   type TimeOfDay,
 } from './data/units';
+export {
+  KEYWORD_FAMILIES,
+  FAMILY_COLOR,
+  FAMILY_GLYPH,
+  EFFECT_FAMILY,
+  EFFECT_KEYWORD,
+  unitKeyword,
+  keywordFamily,
+  type KeywordFamily,
+  type UnitKeyword,
+} from './data/keyword-family';
 export { RELIC_DEFS, type RelicDef } from './data/relics';
 export { ENEMY_POOL } from './data/enemies';
 export type { Archetype } from './data/units';
