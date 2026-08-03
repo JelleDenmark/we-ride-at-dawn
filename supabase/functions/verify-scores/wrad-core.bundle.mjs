@@ -78,12 +78,29 @@ function blockHitsForTier(tier) {
   const table = [1, 2, 3];
   return table[tier - 1] ?? table[table.length - 1];
 }
+function wardArmorForTier(tier) {
+  const table = [2, 4, 6];
+  return table[tier - 1] ?? table[table.length - 1];
+}
 function poisonStacksForTier(tier) {
   const table = [1, 3, 5];
   return table[tier - 1] ?? table[table.length - 1];
 }
 function cellarCoilChargeCapForTier(tier) {
   const table = [6, 12, 18];
+  return table[tier - 1] ?? table[table.length - 1];
+}
+function backlineTargetsForTier(tier) {
+  const table = [1, 2, 3];
+  return table[tier - 1] ?? table[table.length - 1];
+}
+function poisonResistForTier(tier) {
+  const table = [1, 2, 3];
+  return table[tier - 1] ?? table[table.length - 1];
+}
+var POISON_RESIST_CAP = 3;
+function buffSummonedForTier(tier) {
+  const table = [1, 3, 5];
   return table[tier - 1] ?? table[table.length - 1];
 }
 var UNIT_DEFS = {
@@ -107,23 +124,74 @@ var UNIT_DEFS = {
     // sells for exactly what was spent, never a loss.
     retireDay: 1
   },
+  // Rat-Piper (issue #161 rework, replacing #105's `maintainSummons`):
+  // brought back into the season roster in place of Gnawer (see Gnawer's own
+  // note below). Summons exactly ONE pup, ONCE, at the start of the run —
+  // see `summonScaledPup`'s doc comment above for why `startOfBattle` (not
+  // `startOfWave`) and why tier scales the pup's body instead of the count.
+  // The pup also inherits a copy of whatever unit relic(s) Piper itself
+  // wears (issue #161 follow-up) — makes Piper's own relic pick do double
+  // duty, e.g. a Glass-Shard Piper fields TWO armor-breaking alpha strikers.
   "rat-piper": {
     id: "rat-piper",
     name: "Rat-Piper",
     attack: 1,
     health: 2,
     cost: 4,
-    ability: { trigger: "startOfWave", effect: { kind: "summon", unitId: "pup", count: 1 } },
+    ability: { trigger: "startOfBattle", effect: { kind: "summonScaledPup", unitId: "pup", count: 1 } },
     tribe: "swarm"
+    // Un-retired 2026-08-01 (issue #161) for the swap-in — see Gnawer's
+    // retirement note below for the season-roster rationale. The #105
+    // `maintainSummons` history (target 2/4/6 pups, self-bound litter) is
+    // now dead code path context only; this season's kit is the
+    // `summonScaledPup` fire-once summon above. CAVEAT carried forward from
+    // the #105 retirement: Squeak-Sensei's `allySummoned` payoff (#133) only
+    // sees ONE summon event from Piper per battle now (fire-once, not
+    // per-wave) — a much thinner feed than the repeating engine the issue's
+    // rationale envisioned. Brood-Mother remains Sensei's main summon
+    // source; Piper is a minor top-up, not a second real engine.
+    // `pvp:combos` checked (issue #161 open question #4): Piper+Sensei
+    // doesn't surface in the top-15-synergy, combo-unlocks-a-win, or
+    // bottom-5-anti-synergy lists at any tier — no red flag, but also no
+    // real payoff in the duel format (expected: a fire-once single pup is a
+    // PvE-swarm play, not a PvP one — see `pvp:matrix`'s Rat-Piper row, near
+    // the bottom of the panel at every tier, same as retired Gnawer was).
   },
+  // Brood-Mother (issue #105 rework): the babushka. On faint she spawns two
+  // Brood-Broodlings; each broodling, on ITS faint, spawns two Brood-Runts;
+  // runts are terminal. A matryoshka cascade that is finite BY CONSTRUCTION
+  // — the terminal def carries no faint-summon, so there is no depth counter
+  // to get wrong and nothing to cap (each generation is a distinct, smaller
+  // def, not a decrementing self-summon). `faint` fires once per instance, so
+  // this was never the compounding risk the old tiny combat cap policed; it
+  // was only ever starved by it. Count scales with the MOTHER's tier; the
+  // child generations stay tier-1 (fixed small bodies), so the cascade grows
+  // in width with her star level, not in unbounded depth.
   "brood-mother": {
     id: "brood-mother",
     name: "Brood-Mother",
     attack: 2,
     health: 3,
     cost: 5,
-    ability: { trigger: "faint", effect: { kind: "summon", unitId: "pup", count: 2 } },
+    ability: { trigger: "faint", effect: { kind: "summon", unitId: "brood-broodling", count: 2 } },
     tribe: "swarm"
+  },
+  "brood-broodling": {
+    id: "brood-broodling",
+    name: "Brood-Broodling",
+    attack: 1,
+    health: 2,
+    cost: 0,
+    ability: { trigger: "faint", effect: { kind: "summon", unitId: "brood-runt", count: 2 } },
+    tribe: "runt"
+  },
+  "brood-runt": {
+    id: "brood-runt",
+    name: "Brood-Runt",
+    attack: 1,
+    health: 1,
+    cost: 0,
+    tribe: "runt"
   },
   "plague-bearer": {
     id: "plague-bearer",
@@ -160,7 +228,11 @@ var UNIT_DEFS = {
     health: 3,
     cost: 8,
     ability: { trigger: "startOfWave", effect: { kind: "poisonAllEnemies" } },
-    tribe: "plague"
+    tribe: "plague",
+    // Day-2 gate added (Jesper, 2026-08-01) — a deliberate departure from the
+    // "day-1, matching Blight-Witch" precedent noted above; holds the
+    // poison-all prestige pick back one day this season.
+    unlockDay: 2
   },
   gnawer: {
     id: "gnawer",
@@ -173,7 +245,16 @@ var UNIT_DEFS = {
     // that effect kind's doc comment above for the full formula and the
     // compounding-law/Cellar-Coil reasoning behind the cap living here.
     ability: { trigger: "faint", effect: { kind: "bequeathAttack", waveBonusCapMultiplier: 2 } },
-    tribe: "runt"
+    tribe: "runt",
+    // Retired for the upcoming season (Jesper, 2026-08-01, issue #161), same
+    // mechanism/precedent as Gutter-Runt/Cellar-Coil above — out of the shop
+    // pool from day 1 on, carried-in copies still sell at par (`sellRefund`).
+    // Rationale: `pvp:matrix` measures Gnawer duel-dead at every tier —
+    // `bequeathAttack`'s wave-died-on bonus is near-zero in a duel's single
+    // wave, so it was tuned purely for the (now economy-only) depth ladder
+    // and contributes nothing to the scored PvP mode. Rat-Piper, reworked,
+    // takes its roster slot (see Rat-Piper's own note above).
+    retireDay: 1
   },
   "corpse-glutton": {
     id: "corpse-glutton",
@@ -192,9 +273,16 @@ var UNIT_DEFS = {
     ability: { trigger: "faint", effect: { kind: "revive" } }
   },
   "warren-warden": {
+    // #149 (Jesper: "feels underwhelming"): attack 2 -> 3. The `buffBehind`
+    // amount is deliberately left alone — it's already exponential via
+    // `tierAttackMultiplier`'s 3^(tier-1) (a flat +1/+1 is +9/+9 to the whole
+    // team behind it at T3, see all-unit-value's T2/T3 rank), so bumping the
+    // ability would compound into an outlier at high tier. A flat +1 own
+    // attack is linear, fixes the early-game "does nothing itself" feel
+    // without touching the part of the kit that already tops the tier list.
     id: "warren-warden",
     name: "Warren-Warden",
-    attack: 2,
+    attack: 3,
     health: 6,
     cost: 6,
     ability: { trigger: "startOfBattle", effect: { kind: "buffBehind", attack: 1, health: 1, all: true } },
@@ -207,25 +295,28 @@ var UNIT_DEFS = {
     health: 5,
     cost: 7,
     damageReduction: 2,
-    // Day-1 shop is deliberately kept plain (Jesper, 2026-07-11): the three
-    // strongest early picks — the armored tank, the Season-1 anchor, and the
-    // front-shield — hold back to day 2, so day 1 is a humble scramble and the
-    // shop gets visibly stronger as the expedition opens up (days 2-4 are the
-    // exciting stretch). Only gates the SHOP roll; a unit already owned/on the
-    // board is unaffected, and the balance scripts build lineups directly so
-    // they don't see this gate.
-    unlockDay: 2,
+    // Day-1 gate REMOVED (Jesper, 2026-08-01): was held back to day 2
+    // (2026-07-11) so day 1 read as a humble scramble before the shop opened
+    // up. Lifted for the upcoming season — day 1 now offers the full pool
+    // immediately, no ramp-in. `unlockDay` is a pure function of `day`, so
+    // this takes effect for any day rolled from this deploy forward, not just
+    // future seasons.
     tribe: "brute"
   },
   "md-rattyfock": {
+    // #149: mirrors Warren-Warden's attack 2 -> 3 buff so this dormant
+    // reskin (excluded from SHOP_UNIT_POOL, kept only for golden-log/replay
+    // compatibility — see shop.ts) stays numerically identical to its live
+    // twin. Not un-retired; do not add back to the shop pool here.
     id: "md-rattyfock",
     name: "MD Rattyfock",
-    attack: 2,
+    attack: 3,
     health: 6,
     cost: 6,
     ability: { trigger: "startOfBattle", effect: { kind: "buffBehind", attack: 1, health: 1, all: true } },
-    unlockDay: 2,
-    // day-1 shop kept plain — see Dire-Rat's note.
+    // unlockDay dropped (#149, 2026-07-25): MD Rattyfock is now the live twin
+    // of this reskin pair, taking over Warren-Warden's old day-1-available
+    // role — a straight swap, not a partial one.
     tribe: "brute"
   },
   "press-kin": {
@@ -236,24 +327,28 @@ var UNIT_DEFS = {
     cost: 5,
     ability: { trigger: "startOfBattle", effect: { kind: "buffAdjacent", attack: 2, health: 2 } }
   },
-  // COST 6 -> 5 -> 6 (2026-07-18, Jesper's call): PR #125's cost rebalance
-  // dropped this to 5. The Twilight-Runt wave-rework balance pass (PR #123)
-  // ran a real-board seat-swap probe (the isolated all-unit-value tier list
-  // doesn't reach deep enough waves to catch this — see that script's doc
-  // comment) and found Ward-Weaver the single best back-seat swap on a
-  // day-7 t2+relics board — +5.9 waves, clear of every alternative
-  // including Twilight-Runt's own +2.5. Bumped back to 6 to bring that
-  // outlier in line; not re-run through the full all-unit-value/
-  // realistic-player suite yet.
+  // ARMOR REWORK (2026-07-24, prototype pending balance pass): was a
+  // `startOfWave` `blockFrontHits` full-negate pool (1/2/3 hits cancelled per
+  // wave). That pool was a two-mode outlier — the single best depth back-seat
+  // swap (+5.9 waves, PR #123 probe) AND the enabler of a full-negate exploit
+  // (found via the since-removed Boss Trial: every season `2026-07-20` board
+  // that rode to its 60-phase cap ran a ★3 Ward-Weaver; the best board without
+  // one stalled at 13). Full hit-negation scales infinitely against any
+  // escalating attacker, so such a unit never dies. Reworked to a
+  // `startOfBattle` `grantArmor`: it now hardens the whole warren with flat
+  // armor (`wardArmorForTier`, 2/4/6) for the ride. Flat armor can't fully
+  // negate (MIN_ATTACK_DAMAGE floor), so an escalating attacker eventually
+  // pierces — while the ward keeps a coherent "hardens the line" identity.
+  // Cost/stats untouched pending the
+  // pass; the whole-warren reach may want a lower table or a cost bump.
   "ward-weaver": {
     id: "ward-weaver",
     name: "Ward-Weaver",
     attack: 1,
     health: 3,
     cost: 6,
-    ability: { trigger: "startOfWave", effect: { kind: "blockFrontHits" } },
-    unlockDay: 2
-    // day-1 shop kept plain — see Dire-Rat's note.
+    ability: { trigger: "startOfBattle", effect: { kind: "grantArmor", all: true } }
+    // Day-1 gate removed (Jesper, 2026-08-01) — see Dire-Rat's note above.
   },
   // Issue #12: a parallel "Runt" pair (Gutter-Runt precedent) tied to the
   // game's dawn/dusk duality rather than literal noon-splitting — the actual
@@ -321,6 +416,12 @@ var UNIT_DEFS = {
   // point, NOT final — flagged for Jesper's balance sign-off. 1 HP is
   // deliberate: worthless (dies to almost anything) if it ever reaches the
   // front, rewarding a durable front wall built to protect it.
+  //
+  // Retired from the purchasable pool (issue #159): MBP Rat below is its
+  // exact-kit prestige reskin, same replacement pattern as Draughtsman Moe
+  // (Blight-Witch, #115), MD Rattyfock (Warren-Warden, #149), and Gutter
+  // Gourmand (Twilight-Runt, #151). This def stays in UNIT_DEFS for golden
+  // logs/replays — only SHOP_UNIT_POOL (shop.ts) drops it.
   "slink-rat": {
     id: "slink-rat",
     name: "Slink-Rat",
@@ -329,9 +430,25 @@ var UNIT_DEFS = {
     cost: 6,
     // startOfWave, via `backlineDamage` (see that Effect's doc comment for
     // the full compounding-law note and the four resolved interaction
-    // decisions against Marrow-Snap/Ward-Weaver/Gore-Cleaver). Fixed
-    // per-wave damage equal to this unit's own (tier-scaled) attack — no
-    // accumulation; multiple Slink-Rats stack additively, bounded by board size.
+    // decisions against Marrow-Snap/Ward-Weaver/Gore-Cleaver). Merge scaling
+    // (issue #86 follow-up) grows the number of enemies hit — 1/2/3 by tier,
+    // see `backlineTargetsForTier` — not the per-hit damage, which stays this
+    // unit's flat base attack (3) regardless of tier. No accumulation across
+    // waves; multiple Slink-Rats stack additively, bounded by board/wave size.
+    ability: { trigger: "startOfWave", effect: { kind: "backlineDamage" } }
+  },
+  // Prestige reskin (issue #159): MBP Rat reskins Slink-Rat's exact
+  // kit/stats — same "prestige replaces the base" pattern as Draughtsman Moe/
+  // Gutter Gourmand above. Owner-specced flavor: glasses (the "professional"
+  // look — matches the pun on the name) and a glass of Nutella somewhere in
+  // the art (see mbp-rat.svg). Stats/ability are a byte-for-byte carryover,
+  // not a fresh tune — balance sign-off already covers Slink-Rat's numbers.
+  "mbp-rat": {
+    id: "mbp-rat",
+    name: "MBP Rat",
+    attack: 3,
+    health: 1,
+    cost: 6,
     ability: { trigger: "startOfWave", effect: { kind: "backlineDamage" } }
   },
   // Issue #110: single-unit fusion of the Dawn-Runt/Dusk-Runt pair above —
@@ -372,6 +489,37 @@ var UNIT_DEFS = {
     },
     unlockDay: 3
   },
+  // Season-3 prestige reskin (issue #151): Gutter Gourmand reskins
+  // Twilight-Runt's exact kit/stats/unlockDay — same reskin-replacement
+  // precedent as Draughtsman Moe (Blight-Witch) and MD Rattyfock
+  // (Warren-Warden). The "twilight" flavor (a strong dusk buff fading to a
+  // leaner late dose) reads cleanly as a camp cook's arc: a hearty first
+  // course while supplies are fresh, thinned rations once the campaign drags
+  // on. Numbers are unchanged from Twilight-Runt's PR #123 balance pass (see
+  // that unit's doc comment above and `teamBuffByWave`'s doc comment) —
+  // carried over as-is since this is a pure reflavor, not a fresh tune. The
+  // base `twilight-runt` def stays in UNIT_DEFS for golden logs/replays but
+  // is removed from the purchasable pool (SHOP_UNIT_POOL in shop.ts), so the
+  // wave-buff kit is only offered under the prestige name this season.
+  "gutter-gourmand": {
+    id: "gutter-gourmand",
+    name: "Gutter Gourmand",
+    attack: 1,
+    health: 2,
+    cost: 6,
+    ability: {
+      trigger: "startOfWave",
+      effect: {
+        kind: "teamBuffByWave",
+        early: { attack: 2, health: 1 },
+        late: { attack: 1, health: 1 },
+        switchWave: 15
+      }
+    }
+    // Day-3 gate removed (Jesper, 2026-08-01), same season-wide lift as
+    // Dire-Rat/Ward-Weaver's day-2 gate above — day 1 now offers the full
+    // pool immediately.
+  },
   // Issue #106: Cellar-Coil — "positional patience" (docs/design/future-minions.md
   // concept 2). Attack 2 / health 4 / cost 5 are the design doc's rough
   // starting point, NOT final — flagged for Jesper's balance sign-off.
@@ -397,7 +545,13 @@ var UNIT_DEFS = {
       trigger: "startOfWave",
       effect: { kind: "chargeWhileBenched", attackPerWave: 1 },
       condition: { notFront: true }
-    }
+    },
+    // Retired outright for the upcoming season (Jesper, 2026-08-01), same
+    // mechanism/precedent as Gutter-Runt/Rat-Piper above — out of the shop
+    // pool from day 1 on. Par-buyback severance (`sellRefund` in shop.ts)
+    // still applies, so any copy carried in from a prior season sells for
+    // exactly what was spent, never a loss.
+    retireDay: 1
   },
   // ---- Season 4 (issues #133-#135, #137) — every stat line below is a
   // placeholder pending Jesper's balance sign-off, same as every other new
@@ -444,6 +598,16 @@ var UNIT_DEFS = {
   // Warren-Warden incident shape) and the only one whose cost-efficiency
   // ROSE with tier. afterAttack repeats every clash (compounding law), so
   // the sustain number, not the body, is the lever that compounds.
+  // Gate changed from day-3 to day-2 (Jesper, 2026-08-01) — still a
+  // blast-radius limiter, NOT a fix, for a still-unaddressed interaction: a
+  // warded Grave-Leech (Ward-Weaver armor pushing incoming damage to the
+  // MIN_ATTACK_DAMAGE floor) runs a genuine zero-net-damage window in the
+  // earliest waves, verified by probe — flat health for the first 6 waves
+  // before enemy attack scaling starts to bite. Ward-Weaver itself has NO
+  // gate this season (day-1 available, see its own note above), so the combo
+  // is reachable from day 2 either way — day-2 buys one day less runway than
+  // the old day-3 gate did, not a full mitigation. Worth a real
+  // balance-script pass if it turns out to matter in practice.
   "grave-leech": {
     id: "grave-leech",
     name: "Grave-Leech",
@@ -451,22 +615,23 @@ var UNIT_DEFS = {
     health: 6,
     cost: 6,
     ability: { trigger: "afterAttack", effect: { kind: "healSelf", amount: 1 } },
-    tribe: "brute"
+    tribe: "brute",
+    unlockDay: 2
   },
-  // Issue #137: Gutter-Acolyte — anti-brute tech: the roster's first enemy
-  // attack-shred (armor blunts hits, poison races health; nothing lowered
-  // the incoming number itself before this). Whole-line targeting and the
-  // ≥1 floor are design calls documented on `weakenAllEnemies` above, both
-  // flagged for sign-off. Shipping AFTER the compendium (#136, already on
-  // dev) per the issue's readability dependency. Tagged plague for the
-  // Catacombs curse flavor — a soft read, like every tribe tag.
+  // Issue #155: Gutter-Acolyte remade from #137's dead-in-both attack shred
+  // into the roster's first poison counter (gutter apothecary -> antidote
+  // fits the theme). Partial by design, per owner sign-off — not a hard or
+  // 100% counter, see `poisonResist`'s doc comment above for the cap-not-sum
+  // budget that guarantees that no matter how many are stacked. Tagged
+  // plague still fits: an apothecary who works the plague wards, not just
+  // the ones who spread it.
   "gutter-acolyte": {
     id: "gutter-acolyte",
     name: "Gutter-Acolyte",
     attack: 2,
     health: 3,
     cost: 5,
-    ability: { trigger: "startOfWave", effect: { kind: "weakenAllEnemies", attack: 1 } },
+    ability: { trigger: "startOfWave", effect: { kind: "poisonResist" } },
     tribe: "plague"
   }
 };
@@ -481,29 +646,180 @@ var TEST_HORDE = {
   teamRelicIds: ["filth-totem"]
 };
 
+// packages/core/src/data/keyword-family.ts
+var KEYWORD_FAMILIES = [
+  "poison",
+  "defence",
+  "offence",
+  "summon",
+  "buff",
+  "sustain"
+];
+var FAMILY_COLOR = {
+  poison: "#6fae3a",
+  defence: "#5f7288",
+  offence: "#a34a3f",
+  summon: "#b9a78f",
+  buff: "#c9a24a",
+  sustain: "#9a5fb0"
+};
+var FAMILY_TEXT_COLOR = {
+  poison: "#6fae3a",
+  defence: "#758699",
+  offence: "#b77269",
+  summon: "#b9a78f",
+  buff: "#c9a24a",
+  sustain: "#a571b9"
+};
+var FAMILY_TEXT_ON = "#241a14";
+var FAMILY_TEXT_MIN_CONTRAST = 4.5;
+var FAMILY_GLYPH = {
+  poison: "\u2620",
+  defence: "\u26E8",
+  offence: "\u2694",
+  summon: "\u274B",
+  buff: "\u25B2",
+  sustain: "\u271A"
+};
+var EFFECT_FAMILY = {
+  summon: "summon",
+  maintainSummons: "summon",
+  summonScaledPup: "summon",
+  buffSummoned: "summon",
+  poisonFrontEnemy: "poison",
+  poisonLastEnemy: "poison",
+  poisonTarget: "poison",
+  poisonAllEnemies: "poison",
+  blockFrontHits: "defence",
+  grantArmor: "defence",
+  poisonResist: "defence",
+  backlineDamage: "offence",
+  reflectDamage: "offence",
+  buffBehind: "buff",
+  buffAdjacent: "buff",
+  gainStats: "buff",
+  bequeathAttack: "buff",
+  chargeWhileBenched: "buff",
+  teamBuff: "buff",
+  teamBuffByWave: "buff",
+  distributeStatsOnFaint: "buff",
+  revive: "sustain",
+  healSelf: "sustain"
+};
+var EFFECT_KEYWORD = {
+  summon: "summon",
+  maintainSummons: "summon",
+  summonScaledPup: "summon",
+  buffSummoned: "train",
+  poisonFrontEnemy: "poison",
+  poisonLastEnemy: "poison",
+  poisonTarget: "poison",
+  poisonAllEnemies: "poison",
+  blockFrontHits: "block",
+  grantArmor: "armor",
+  poisonResist: "ward",
+  backlineDamage: "snipe",
+  reflectDamage: "thorns",
+  buffBehind: "buff",
+  buffAdjacent: "buff",
+  gainStats: "buff",
+  bequeathAttack: "buff",
+  chargeWhileBenched: "buff",
+  teamBuff: "buff",
+  teamBuffByWave: "buff",
+  distributeStatsOnFaint: "buff",
+  revive: "revive",
+  healSelf: "drain"
+};
+var TIME_OF_DAY_GLYPH = { beforeNoon: "\u2600", afterNoon: "\u263E" };
+function unitKeyword(def) {
+  const ability = def.ability;
+  if (ability) {
+    const kind = ability.effect.kind;
+    const family = EFFECT_FAMILY[kind];
+    const glyph = kind === "teamBuff" && ability.condition?.timeOfDay ? TIME_OF_DAY_GLYPH[ability.condition.timeOfDay] ?? FAMILY_GLYPH[family] : FAMILY_GLYPH[family];
+    const label = EFFECT_KEYWORD[kind];
+    return {
+      family,
+      glyph,
+      label,
+      color: FAMILY_COLOR[family],
+      textColor: FAMILY_TEXT_COLOR[family],
+      text: `${glyph} ${label}`
+    };
+  }
+  if ((def.damageReduction ?? 0) > 0) {
+    return {
+      family: "defence",
+      glyph: FAMILY_GLYPH.defence,
+      label: EFFECT_KEYWORD.grantArmor,
+      color: FAMILY_COLOR.defence,
+      textColor: FAMILY_TEXT_COLOR.defence,
+      text: `${FAMILY_GLYPH.defence} ${EFFECT_KEYWORD.grantArmor}`
+    };
+  }
+  return null;
+}
+function keywordFamily(def) {
+  return unitKeyword(def)?.family ?? null;
+}
+function relicKeyword(relic) {
+  const glyph = FAMILY_GLYPH[relic.family];
+  return {
+    family: relic.family,
+    glyph,
+    label: relic.family,
+    color: FAMILY_COLOR[relic.family],
+    textColor: FAMILY_TEXT_COLOR[relic.family],
+    text: `${glyph} ${relic.family}`
+  };
+}
+
 // packages/core/src/data/relics.ts
 var RELIC_DEFS = {
+  // Retired from the shop pool (Jesper, 2026-08-01, issue #156): `pvp:relics`
+  // confirmed a flat +2 attack is duel-dead from T2 on (a permanent bonus
+  // spread across only 8 board slots barely moves one duel's outcome, and
+  // the reworked Glass Shard below now fills the "attack relic" niche more
+  // interestingly). Def stays here for golden logs/replays; see
+  // SHOP_RELIC_POOL in shop.ts for the pool exclusion.
   "rusted-nail": {
     id: "rusted-nail",
     name: "Rusted Nail",
     scope: "unit",
     cost: 4,
+    family: "offence",
     desc: "+2 attack",
     attack: 2
   },
+  // Reworked (Jesper, 2026-08-01, issue #156): was a first-hit bonus that
+  // scaled with the current wave number, UNCAPPED — both the PvP dud (a
+  // one-wave duel never gets past wave 1, so it read as a flat +1) and the
+  // last uncapped compounding-law liability in the roster (a deep PvE ride
+  // could eventually out-damage the rest of the build). Now a flat, capped
+  // "alpha strike": a fixed bonus on the first hit that ALSO ignores the
+  // target's armor outright — the deliberate counter to the Ward-Weaver
+  // armor meta, completing the RPS spine armor > swarm, armor-break > armor,
+  // swarm > poison (poison countered separately, see Gutter-Acolyte).
+  // Numbers are a first pass, not final — flagged for balance sign-off same
+  // as every other fresh magnitude in this file (see `pvp:relics`/
+  // `balance:relic-value` for how to re-check it).
   "glass-shard": {
     id: "glass-shard",
     name: "Glass Shard",
     scope: "unit",
     cost: 4,
-    desc: "+dmg = wave number, first hit each wave",
-    firstHitBonusScalesWithWave: true
+    family: "offence",
+    desc: "+4 dmg & ignores armor, first hit",
+    firstHitBonus: 4,
+    firstHitIgnoresArmor: true
   },
   "weeping-boil": {
     id: "weeping-boil",
     name: "Weeping Boil",
     scope: "unit",
     cost: 4,
+    family: "offence",
     desc: "faint: 2 dmg, all foes",
     onFaintDamageAll: 2
   },
@@ -519,6 +835,7 @@ var RELIC_DEFS = {
     name: "Fat Tick",
     scope: "unit",
     cost: 6,
+    family: "sustain",
     desc: "+1/+2, heal 1/clash",
     attack: 1,
     health: 2,
@@ -529,22 +846,32 @@ var RELIC_DEFS = {
     name: "Tail-Charm",
     scope: "unit",
     cost: 6,
+    family: "sustain",
     desc: "cheats death once",
     surviveLethal: true
   },
+  // Reworked (Jesper, 2026-08-01, issue #156): was a flat +0/+1 health, which
+  // just duplicated Forgotten Backpack's bulk on a smaller scale. Now team
+  // armor instead — differentiates from Backpack (raw HP) since armor runs
+  // through the net-damage floor and is bypassed by poison, so it reads as
+  // anti-chip/anti-swarm defense and stacks with Backpack rather than
+  // competing with it. Numbers are a first pass, not final — see
+  // `pvp:relics`/`balance:relic-value` for how to re-check it.
   "filth-totem": {
     id: "filth-totem",
     name: "Filth Totem",
     scope: "team",
     cost: 6,
-    desc: "all rats +0/+1",
-    health: 1
+    family: "defence",
+    desc: "all rats +1 armor",
+    damageReduction: 1
   },
   "gore-cleaver": {
     id: "gore-cleaver",
     name: "Gore-Cleaver",
     scope: "unit",
     cost: 5,
+    family: "offence",
     desc: "overkill spills to next foe",
     cleaveOverkill: true
   },
@@ -553,7 +880,8 @@ var RELIC_DEFS = {
     name: "Marrow-Snap",
     scope: "unit",
     cost: 5,
-    desc: "kills a foe its own hit drops below half health",
+    family: "offence",
+    desc: "kills a foe its own hit drops to half health or below",
     executeThreshold: 0.5
   },
   // Easter egg (issue #24): the name is the whole point — someone else's
@@ -570,6 +898,7 @@ var RELIC_DEFS = {
     name: "The Forgotten Backpack",
     scope: "team",
     cost: 12,
+    family: "buff",
     desc: "+2/+2, whole horde",
     attack: 2,
     health: 2
@@ -685,12 +1014,12 @@ var DEF_LOOKUP = {
   ...Object.fromEntries(ENEMY_POOL.map((e) => [e.id, e]))
 };
 var BOARD_CAP = 8;
-var COMBAT_CAP_BONUS = 2;
+var COMBAT_CAP_BONUS = 6;
 var SCORE_PER_WAVE = 100;
 var MAX_TICKS_PER_WAVE = 1e3;
-var ENEMY_HEALTH_SCALE_PER_WAVE = 0.2;
+var ENEMY_HEALTH_SCALE_PER_WAVE = 0.22;
 var ENEMY_HEALTH_SCALE_QUADRATIC = 4e-3;
-var ENEMY_ATTACK_SCALE_PER_WAVE = 0.05;
+var ENEMY_ATTACK_SCALE_PER_WAVE = 0.1;
 function enemyHealthScale(waveIndex) {
   return 1 + waveIndex * ENEMY_HEALTH_SCALE_PER_WAVE + waveIndex * waveIndex * ENEMY_HEALTH_SCALE_QUADRATIC;
 }
@@ -699,22 +1028,45 @@ function enemyAttackScale(waveIndex) {
 }
 var MIN_ATTACK_DAMAGE = 1;
 function simulate(lineup, gauntlet) {
+  const { events, result } = simulateCore(lineup, { kind: "gauntlet", gauntlet });
+  return { events, result };
+}
+function simulateCore(lineup, mode) {
   const events = [];
   let nextInstanceId = 1;
-  const teamRelics = (lineup.teamRelicIds ?? []).map((id) => RELIC_DEFS[id]).filter((r) => r !== void 0 && r.scope === "team");
-  const teamAttack = teamRelics.reduce((s, r) => s + (r.attack ?? 0), 0);
-  const teamHealth = teamRelics.reduce((s, r) => s + (r.health ?? 0), 0);
-  const teamHealPerTick = teamRelics.reduce((s, r) => s + (r.healPerTick ?? 0), 0);
-  const combatCap = lineup.combatCap ?? BOARD_CAP;
+  const teamPool = (ids) => {
+    const rs = (ids ?? []).map((id) => RELIC_DEFS[id]).filter((r) => r !== void 0 && r.scope === "team");
+    return {
+      attack: rs.reduce((s, r) => s + (r.attack ?? 0), 0),
+      health: rs.reduce((s, r) => s + (r.health ?? 0), 0),
+      // Whole-board per-tick regen (The Forgotten Backpack). Same shape as a
+      // unit's healPerTick (Fat Tick), just summed across team relics and
+      // applied to every unit on that side instead of only the carrier.
+      // Compounding-law check: bounded exactly like Fat Tick's regen below —
+      // every tick it's clamped to `maxHealth - health`, so it can never push
+      // a unit past its own health ceiling no matter how many of the 45 waves
+      // it runs across.
+      healPerTick: rs.reduce((s, r) => s + (r.healPerTick ?? 0), 0),
+      // Whole-board flat armor (Filth Totem, issue #156 rework). Same
+      // mechanism as Ward-Weaver's `damageReduction` grant, just summed
+      // across team relics instead of read off the unit def below.
+      damageReduction: rs.reduce((s, r) => s + (r.damageReduction ?? 0), 0)
+    };
+  };
+  const hordeTeam = teamPool(lineup.teamRelicIds);
+  const enemyTeam = mode.kind === "duel" ? teamPool(mode.opponent.teamRelicIds) : teamPool([]);
+  const teamOf = (side) => side === "horde" ? hordeTeam : enemyTeam;
+  const hordeCombatCap = lineup.combatCap ?? BOARD_CAP;
+  const enemyCombatCap = mode.kind === "duel" ? mode.opponent.combatCap ?? BOARD_CAP : hordeCombatCap;
+  const capOf = (side) => side === "horde" ? hordeCombatCap : enemyCombatCap;
   const timeOfDay = lineup.timeOfDay;
   const instantiate = (def, side, relicIds = [], tier = 1, attackScale = 1, healthScale = 1) => {
     const relics = relicIds.map((id) => RELIC_DEFS[id]).filter((r) => r !== void 0 && r.scope === "unit");
     let attack = Math.round(def.attack * tierAttackMultiplier(tier) * attackScale) + relics.reduce((s, r) => s + (r.attack ?? 0), 0);
     let health = Math.round(def.health * tierHealthMultiplier(tier) * healthScale) + relics.reduce((s, r) => s + (r.health ?? 0), 0);
-    if (side === "horde") {
-      attack += teamAttack;
-      health += teamHealth;
-    }
+    const team = teamOf(side);
+    attack += team.attack;
+    health += team.health;
     return {
       instanceId: nextInstanceId++,
       defId: def.id,
@@ -729,11 +1081,15 @@ function simulate(lineup, gauntlet) {
       poison: 0,
       firstAttackDone: false,
       tailCharmUsed: false,
-      damageReduction: (def.damageReduction ?? 0) * tier,
+      // Team armor (Filth Totem) is a flat grant like team attack/health
+      // above, not tier-scaled — the unit's own base armor (Ward-Weaver,
+      // Dire-Rat, Steel-Whisker) is the only tier-scaled term here.
+      damageReduction: (def.damageReduction ?? 0) * tier + team.damageReduction,
       startOfBattleFired: false,
       raised: false,
       chargeStacks: 0,
-      waveBuffPhase: "none"
+      waveBuffPhase: "none",
+      attackBuffs: 0
     };
   };
   const view = (u) => ({
@@ -751,8 +1107,8 @@ function simulate(lineup, gauntlet) {
   const boardOf = (side) => side === "horde" ? horde : enemies;
   const opposing = (side) => side === "horde" ? enemies : horde;
   events.push({ type: "battleStart", horde: horde.map(view) });
-  const applyDamage = (unit, amount, cause) => {
-    const dealt = cause === "attack" && unit.damageReduction > 0 ? Math.max(MIN_ATTACK_DAMAGE, amount - unit.damageReduction) : amount;
+  const applyDamage = (unit, amount, cause, ignoreArmor = false) => {
+    const dealt = cause === "attack" && unit.damageReduction > 0 && !ignoreArmor ? Math.max(MIN_ATTACK_DAMAGE, amount - unit.damageReduction) : amount;
     unit.health -= dealt;
     let charmProc = false;
     if (unit.health <= 0 && !unit.tailCharmUsed) {
@@ -784,6 +1140,7 @@ function simulate(lineup, gauntlet) {
   };
   const buff = (target, attack, health) => {
     target.attack += attack;
+    target.attackBuffs += attack;
     target.health += health;
     target.maxHealth += health;
     events.push({
@@ -796,13 +1153,22 @@ function simulate(lineup, gauntlet) {
     });
   };
   let currentWave = 0;
-  const applyTargetedEffect = (source, target) => {
+  const applyTargetedEffect = (source, target, buffSummonedBudget) => {
     if (!source.ability) return;
     const effect = source.ability.effect;
     const tier = source.tier;
     switch (effect.kind) {
       case "buffSummoned": {
-        buff(target, effect.attack * tier, effect.health * tier);
+        const scale = buffSummonedForTier(tier);
+        let grantAttack = effect.attack * scale;
+        let grantHealth = effect.health * scale;
+        if (buffSummonedBudget) {
+          grantAttack = Math.min(grantAttack, buffSummonedBudget.attack);
+          grantHealth = Math.min(grantHealth, buffSummonedBudget.health);
+          buffSummonedBudget.attack -= grantAttack;
+          buffSummonedBudget.health -= grantHealth;
+        }
+        if (grantAttack > 0 || grantHealth > 0) buff(target, grantAttack, grantHealth);
         break;
       }
       case "reflectDamage": {
@@ -812,10 +1178,23 @@ function simulate(lineup, gauntlet) {
     }
   };
   const fireAllySummoned = (summoned) => {
+    const buffSummonedBudget = { attack: buffSummonedForTier(3), health: buffSummonedForTier(3) };
     for (const witness of [...boardOf(summoned.side)]) {
       if (witness === summoned || witness.health <= 0) continue;
-      if (witness.ability?.trigger === "allySummoned") applyTargetedEffect(witness, summoned);
+      if (witness.ability?.trigger === "allySummoned") {
+        applyTargetedEffect(witness, summoned, buffSummonedBudget);
+      }
     }
+  };
+  const spawn = (def, index, side, owner, tier = 1, relicIds = []) => {
+    const board = boardOf(side);
+    if (board.length >= capOf(side)) return false;
+    const summoned = instantiate(def, side, relicIds, tier);
+    summoned.summonedBy = owner;
+    board.splice(index, 0, summoned);
+    events.push({ type: "summon", side, index, unit: view(summoned) });
+    fireAllySummoned(summoned);
+    return true;
   };
   const applyEffect = (source, index, removed) => {
     if (!source.ability) return;
@@ -826,11 +1205,26 @@ function simulate(lineup, gauntlet) {
       case "summon": {
         const def = DEF_LOOKUP[effect.unitId];
         for (let i = 0; i < effect.count * tier; i++) {
-          if (board.length >= combatCap) break;
-          const summoned = instantiate(def, source.side);
-          board.splice(index, 0, summoned);
-          events.push({ type: "summon", side: source.side, index, unit: view(summoned) });
-          fireAllySummoned(summoned);
+          if (!spawn(def, index, source.side)) break;
+        }
+        break;
+      }
+      case "summonScaledPup": {
+        const def = DEF_LOOKUP[effect.unitId];
+        const relicIds = source.relics.map((r) => r.id);
+        for (let i = 0; i < effect.count; i++) {
+          if (!spawn(def, index, source.side, void 0, tier, relicIds)) break;
+        }
+        break;
+      }
+      case "maintainSummons": {
+        const def = DEF_LOOKUP[effect.unitId];
+        const target = effect.count * tier;
+        const living = board.filter(
+          (u) => u.summonedBy === source.instanceId && u.health > 0
+        ).length;
+        for (let i = 0; i < target - living; i++) {
+          if (!spawn(def, index, source.side, source.instanceId)) break;
         }
         break;
       }
@@ -838,6 +1232,15 @@ function simulate(lineup, gauntlet) {
         const start = removed ? index : index + 1;
         const targets = effect.all ? board.slice(start) : board.slice(start, start + 1);
         for (const target of targets) buff(target, effect.attack * tierAttackMultiplier(tier), effect.health * tierHealthMultiplier(tier));
+        break;
+      }
+      case "grantArmor": {
+        const amount = wardArmorForTier(tier);
+        const targets = effect.all ? board : board.slice(index, index + 1);
+        for (const target of targets) {
+          target.damageReduction += amount;
+          events.push({ type: "shieldGranted", targetId: target.instanceId, sourceId: source.instanceId });
+        }
         break;
       }
       case "bequeathAttack": {
@@ -932,15 +1335,10 @@ function simulate(lineup, gauntlet) {
         }
         break;
       }
-      case "weakenAllEnemies": {
-        for (const target of opposing(source.side)) {
-          if (target.health <= 0) continue;
-          const reduced = Math.max(MIN_ATTACK_DAMAGE, target.attack - effect.attack * tier);
-          const delta = target.attack - reduced;
-          if (delta <= 0) continue;
-          target.attack = reduced;
-          events.push({ type: "weaken", targetId: target.instanceId, attack: delta, newAttack: target.attack });
-        }
+      case "poisonResist": {
+        const appliedSoFar = poisonResistApplied[source.side];
+        const amount = Math.min(poisonResistForTier(tier), Math.max(0, POISON_RESIST_CAP - appliedSoFar));
+        if (amount > 0) poisonResistApplied[source.side] = appliedSoFar + amount;
         break;
       }
       case "chargeWhileBenched": {
@@ -969,7 +1367,7 @@ function simulate(lineup, gauntlet) {
       }
       case "revive": {
         const corpseIdx = fallen[source.side].findIndex((c) => c !== source && !c.raised);
-        if (corpseIdx === -1 || board.length >= combatCap) break;
+        if (corpseIdx === -1 || board.length >= capOf(source.side)) break;
         const [corpse] = fallen[source.side].splice(corpseIdx, 1);
         corpse.raised = true;
         corpse.health = Math.min(reviveHpForTier(tier), corpse.maxHealth);
@@ -989,9 +1387,18 @@ function simulate(lineup, gauntlet) {
       }
       case "backlineDamage": {
         if (index === 0) break;
-        const target = opposing(source.side)[0];
-        if (!target || target.health <= 0) break;
-        applyDamage(target, source.attack, "attack");
+        const def = UNIT_DEFS[source.defId];
+        const perHitAttack = (def?.attack ?? 0) + source.relics.reduce((s, r) => s + (r.attack ?? 0), 0) + teamOf(source.side).attack + source.attackBuffs;
+        if (perHitAttack <= 0) break;
+        const firstHitBonus = source.firstAttackDone ? 0 : source.relics.reduce((s, r) => s + (r.firstHitBonus ?? 0), 0);
+        const ignoresArmor = !source.firstAttackDone && source.relics.some((r) => r.firstHitIgnoresArmor);
+        source.firstAttackDone = true;
+        const targets = opposing(source.side).slice(0, backlineTargetsForTier(source.tier));
+        targets.forEach((target, i) => {
+          if (!target || target.health <= 0) return;
+          const amount = perHitAttack + (i === 0 ? firstHitBonus : 0);
+          applyDamage(target, amount, "attack", i === 0 && ignoresArmor);
+        });
         break;
       }
     }
@@ -1046,31 +1453,42 @@ function simulate(lineup, gauntlet) {
   let blockCharges = { horde: 0, gauntlet: 0 };
   let poisonAllApplied = { horde: 0, gauntlet: 0 };
   let poisonLastApplied = { horde: 0, gauntlet: 0 };
+  let poisonResistApplied = { horde: 0, gauntlet: 0 };
   let distributeStatsOnFaintSpent = {
     horde: { attack: 0, health: 0 },
     gauntlet: { attack: 0, health: 0 }
   };
-  for (let w = 0; w < gauntlet.waves.length && horde.length > 0; w++) {
-    currentWave = w + 1;
-    enemies = gauntlet.waves[w].units.map(
+  const enemyWaves = mode.kind === "gauntlet" ? mode.gauntlet.waves.map(
+    (wave, w) => () => wave.units.map(
       (d) => instantiate(d, "gauntlet", [], 1, enemyAttackScale(w), enemyHealthScale(w))
-    );
+    )
+  ) : [
+    () => mode.opponent.units.slice(0, BOARD_CAP).map((u) => instantiate(UNIT_DEFS[u.defId], "gauntlet", u.relicIds, u.tier ?? 1))
+  ];
+  for (let w = 0; w < enemyWaves.length && horde.length > 0; w++) {
+    currentWave = w + 1;
+    enemies = enemyWaves[w]();
     events.push({ type: "waveStart", wave: w + 1, enemies: enemies.map(view) });
     damageThisWave = 0;
     for (const u of horde) u.firstAttackDone = false;
     blockCharges = { horde: 0, gauntlet: 0 };
     poisonAllApplied = { horde: 0, gauntlet: 0 };
     poisonLastApplied = { horde: 0, gauntlet: 0 };
+    poisonResistApplied = { horde: 0, gauntlet: 0 };
     fireEntryTriggers(horde);
     fireEntryTriggers(enemies);
     resolveDeaths();
     let ticks = 0;
     while (horde.length > 0 && enemies.length > 0 && ticks++ < MAX_TICKS_PER_WAVE) {
-      const teamHealPerUnit = horde.length > 0 ? teamHealPerTick / horde.length : 0;
+      const frontStartHealth = horde[0].health;
+      const foeStartHealth = enemies[0].health;
+      const teamHealPerUnit = (side, count) => count > 0 ? teamOf(side).healPerTick / count : 0;
+      const hordeHealPerUnit = teamHealPerUnit("horde", horde.length);
+      const enemyHealPerUnit = teamHealPerUnit("gauntlet", enemies.length);
       for (const board of [horde, enemies]) {
         for (const unit of board) {
           const unitHeal = unit.relics.reduce((s, r) => s + (r.healPerTick ?? 0), 0);
-          const totalRegen = unitHeal + (unit.side === "horde" ? teamHealPerUnit : 0);
+          const totalRegen = unitHeal + (unit.side === "horde" ? hordeHealPerUnit : enemyHealPerUnit);
           const amount = Math.min(totalRegen, unit.maxHealth - unit.health);
           if (amount > 0) {
             unit.health += amount;
@@ -1081,45 +1499,63 @@ function simulate(lineup, gauntlet) {
       const front = horde[0];
       const foe = enemies[0];
       events.push({ type: "clash", hordeId: front.instanceId, enemyId: foe.instanceId });
-      const bonusOf = (u) => u.firstAttackDone ? 0 : u.relics.reduce((s, r) => s + (r.firstHitBonusScalesWithWave ? currentWave : r.firstHitBonus ?? 0), 0);
+      const bonusOf = (u) => u.firstAttackDone ? 0 : u.relics.reduce((s, r) => s + (r.firstHitBonus ?? 0), 0);
+      const ignoresArmorOf = (u) => !u.firstAttackDone && u.relics.some((r) => r.firstHitIgnoresArmor);
       const damageOut = front.attack + bonusOf(front);
       const damageIn = foe.attack + bonusOf(foe);
+      const frontIgnoresArmor = ignoresArmorOf(front);
+      const foeIgnoresArmor = ignoresArmorOf(foe);
       front.firstAttackDone = true;
       foe.firstAttackDone = true;
       const foeHealthBeforeClash = foe.health;
+      const frontHealthBeforeClash = front.health;
       let foeTookBlow = false;
       let frontTookBlow = false;
       if (blockCharges[foe.side] > 0) {
         blockCharges[foe.side]--;
         events.push({ type: "shieldAbsorbed", targetId: foe.instanceId });
       } else {
-        applyDamage(foe, damageOut, "attack");
+        applyDamage(foe, damageOut, "attack", frontIgnoresArmor);
         foeTookBlow = true;
       }
       if (blockCharges[front.side] > 0) {
         blockCharges[front.side]--;
         events.push({ type: "shieldAbsorbed", targetId: front.instanceId });
       } else {
-        applyDamage(front, damageIn, "attack");
+        applyDamage(front, damageIn, "attack", foeIgnoresArmor);
         frontTookBlow = true;
       }
-      damageThisWave += damageOut;
-      const executeRelic = front.relics.find((r) => r.executeThreshold !== void 0);
-      const executeCutoff = executeRelic ? foe.maxHealth * executeRelic.executeThreshold : 0;
-      if (executeRelic && foe.health > 0 && foeHealthBeforeClash > executeCutoff && foe.health <= executeCutoff) {
-        events.push({ type: "relicProc", targetId: front.instanceId, relicId: executeRelic.id, name: executeRelic.name });
-        const finishing = foe.health;
-        foe.health = 0;
-        events.push({ type: "damage", targetId: foe.instanceId, amount: finishing, remainingHealth: 0 });
+      if (frontTookBlow && frontStartHealth > MIN_ATTACK_DAMAGE) {
+        front.health = Math.min(front.health, frontStartHealth - MIN_ATTACK_DAMAGE);
       }
-      if (front.relics.some((r) => r.cleaveOverkill) && foe.health <= 0) {
-        const overkill = -foe.health;
-        const next = enemies[1];
+      if (foeTookBlow && foeStartHealth > MIN_ATTACK_DAMAGE) {
+        foe.health = Math.min(foe.health, foeStartHealth - MIN_ATTACK_DAMAGE);
+      }
+      damageThisWave += damageOut;
+      const tryExecute = (attacker, defender, defenderHealthBeforeClash) => {
+        const relic = attacker.relics.find((r) => r.executeThreshold !== void 0);
+        if (!relic) return;
+        const cutoff = defender.maxHealth * relic.executeThreshold;
+        if (defender.health > 0 && defenderHealthBeforeClash > cutoff && defender.health <= cutoff) {
+          events.push({ type: "relicProc", targetId: attacker.instanceId, relicId: relic.id, name: relic.name });
+          const finishing = defender.health;
+          defender.health = 0;
+          events.push({ type: "damage", targetId: defender.instanceId, amount: finishing, remainingHealth: 0 });
+        }
+      };
+      const tryCleave = (attacker, defender) => {
+        if (!attacker.relics.some((r) => r.cleaveOverkill) || defender.health > 0) return;
+        const overkill = -defender.health;
+        const next = boardOf(defender.side)[1];
         if (overkill > 0 && next) {
-          events.push({ type: "relicProc", targetId: front.instanceId, relicId: "gore-cleaver", name: "Gore-Cleaver" });
+          events.push({ type: "relicProc", targetId: attacker.instanceId, relicId: "gore-cleaver", name: "Gore-Cleaver" });
           applyDamage(next, overkill, "attack");
         }
-      }
+      };
+      tryExecute(front, foe, foeHealthBeforeClash);
+      tryExecute(foe, front, frontHealthBeforeClash);
+      tryCleave(front, foe);
+      tryCleave(foe, front);
       if (front.ability?.trigger === "afterAttack") applyEffect(front, 0, false);
       if (foe.ability?.trigger === "afterAttack") applyEffect(foe, 0, false);
       if (frontTookBlow && front.ability?.trigger === "onHurt") applyTargetedEffect(front, foe);
@@ -1127,8 +1563,9 @@ function simulate(lineup, gauntlet) {
       for (const board of [horde, enemies]) {
         for (const unit of [...board]) {
           if (unit.poison > 0 && unit.health > 0) {
-            if (board === enemies) totalDamage += unit.poison;
-            applyDamage(unit, unit.poison, "poison");
+            const resisted = Math.max(0, unit.poison - poisonResistApplied[unit.side]);
+            if (board === enemies) totalDamage += resisted;
+            applyDamage(unit, resisted, "poison");
           }
         }
       }
@@ -1153,7 +1590,11 @@ function simulate(lineup, gauntlet) {
       survivors: horde.map(view),
       damageDealt: totalDamage,
       enemiesDefeated: fallen.gauntlet.length
-    }
+    },
+    // Whatever the enemy side has left standing when the battle ended. In a
+    // duel this is side B's surviving board (the winner signal); the PvE
+    // `simulate` wrapper drops it.
+    enemySurvivors: enemies.map(view)
   };
 }
 
@@ -1161,7 +1602,7 @@ function simulate(lineup, gauntlet) {
 var DAILY_SCRAP = 24;
 var REROLL_COST = 2;
 var SHOP_UNIT_SLOTS = 4;
-var SHOP_RELIC_SLOTS = 2;
+var SHOP_RELIC_SLOTS = 1;
 var MAX_TIER = 3;
 var SEASON_DAYS = 7;
 var BENCH_SIZE = 5;
@@ -1197,7 +1638,21 @@ function weekdayFor(date) {
   return d === 0 ? 7 : d;
 }
 var SEASON_REISSUES = {
-  "2026-07-13": "2026-07-13.2"
+  "2026-07-13": "2026-07-13.2",
+  // 2026-08-03: the mid-week dev->master merge rotated the asset hashes, and
+  // clients holding a stale index.html booted to a blank screen (issue #170).
+  // The cache-clear that fixes it also wipes `wrad-device-id`, so those players
+  // returned under a NEW identity — leaving their previously synced board
+  // orphaned in `pvp_boards` but still entered, because the nightly job takes
+  // every row for the season with no activity filter. One confirmed duplicate
+  // entrant (a player facing their own abandoned board) plus a stray test row.
+  // Re-issuing orphans both under the old id rather than deleting live rows,
+  // and as a bonus resets every client's persisted shop roll (issue #169), so
+  // the relic-slot cut and roster swap that shipped in that merge finally reach
+  // players who had already rolled today's shop under the old code.
+  // Done before 10:00 CET on day 1, i.e. before the first hourly haul pays out:
+  // nothing earned is destroyed, only ~2h of board-building.
+  "2026-08-03": "2026-08-03.2"
 };
 function seasonIdFor(date) {
   const monday = /* @__PURE__ */ new Date(`${date}T12:00:00Z`);
@@ -1206,9 +1661,15 @@ function seasonIdFor(date) {
   return SEASON_REISSUES[id] ?? id;
 }
 var SHOP_UNIT_POOL = Object.values(UNIT_DEFS).filter(
-  (u) => u.id !== "pup" && u.id !== "blight-witch" && u.id !== "md-rattyfock" && u.id !== "dawn-runt" && u.id !== "dusk-runt"
+  (u) => (
+    // Internal summon-only bodies (pup, and issue #105's brood-broodling /
+    // brood-runt cascade) are all cost-0 and must never be shop-rollable or
+    // browsable — excluding by cost covers every current and future one
+    // without an ever-growing id blocklist.
+    u.cost > 0 && u.id !== "blight-witch" && u.id !== "warren-warden" && u.id !== "twilight-runt" && u.id !== "dawn-runt" && u.id !== "dusk-runt" && u.id !== "slink-rat"
+  )
 );
-var SHOP_RELIC_POOL = Object.values(RELIC_DEFS);
+var SHOP_RELIC_POOL = Object.values(RELIC_DEFS).filter((r) => r.id !== "rusted-nail");
 function shopUnitPoolForDay(day) {
   return SHOP_UNIT_POOL.filter(
     (u) => (u.unlockDay === void 0 || day >= u.unlockDay) && (u.retireDay === void 0 || day < u.retireDay)
@@ -1226,6 +1687,9 @@ function seasonUnitPool() {
     }
   }
   return result;
+}
+function seasonRelicPool() {
+  return SHOP_RELIC_POOL;
 }
 function upcomingUnlocks(day) {
   return SHOP_UNIT_POOL.filter((u) => u.unlockDay !== void 0 && u.unlockDay > day).sort(
@@ -1508,18 +1972,21 @@ function weightedPick(rng, items, weight) {
 function difficultyForDay(_day) {
   return 1;
 }
-function generateGauntlet(date, day = 1, hour) {
+function generateGauntlet(date, day = 1, hour, anomaly) {
   const seasonSeed = dailySeed(seasonIdFor(date));
   const seed = seasonSeed;
   const themeRng = xorshift128(seasonSeed);
   const primary = ARCHETYPES[themeRng.int(ARCHETYPES.length)];
   const rest = ARCHETYPES.filter((a) => a !== primary);
   const secondary = rest[themeRng.int(rest.length)];
-  const pivotWave = 4 + themeRng.int(4);
+  const overrides = anomaly?.gauntlet;
+  const rolledPivot = 4 + themeRng.int(4);
+  const pivotWave = overrides?.pivotWave ?? rolledPivot;
   const theme = { primary, secondary, pivotWave };
   const rng = hour === void 0 ? xorshift128(fnv1a(`${seasonIdFor(date)}#waves`)) : xorshift128(fnv1a(`${date}#ride#${hour}`));
-  const PRIMARY_SHARE = 0.6;
-  const SECONDARY_SHARE = 0.25;
+  const PRIMARY_SHARE = overrides?.primaryShare ?? 0.6;
+  const SECONDARY_SHARE = overrides?.secondaryShare ?? 0.25;
+  const waveUnitCap = overrides?.waveUnitCap ?? WAVE_UNIT_CAP;
   const scale = difficultyForDay(day);
   const waves = [];
   for (let i = 0; i < WAVE_COUNT; i++) {
@@ -1530,7 +1997,7 @@ function generateGauntlet(date, day = 1, hour) {
     const units = [];
     const spendPhase = (archetype, quota) => {
       let spent = 0;
-      while (spent < quota && units.length < WAVE_UNIT_CAP) {
+      while (spent < quota && units.length < waveUnitCap) {
         const pool = ENEMY_POOL.filter((u) => {
           if (u.cost > budget) return false;
           if (u.minWave !== void 0 && i + 1 < u.minWave) return false;
@@ -1550,7 +2017,79 @@ function generateGauntlet(date, day = 1, hour) {
     spendPhase(null, budget);
     waves.push({ units: [...units.filter((u) => !u.rearguard), ...units.filter((u) => u.rearguard)] });
   }
-  return hour === void 0 ? { date, seed, theme, waves } : { date, seed, theme, hour, waves };
+  const base = hour === void 0 ? { date, seed, theme, waves } : { date, seed, theme, hour, waves };
+  return anomaly ? { ...base, anomalyId: anomaly.id } : base;
+}
+
+// packages/core/src/anomaly.ts
+var ANOMALY_DEFS = {
+  "one-warren": {
+    id: "one-warren",
+    name: "One Warren",
+    blurb: "One warren rides this week, and it has emptied itself into the dark.",
+    // Mono-theme week. A clean wave force-spends 60% of its budget on the
+    // primary and 25% on the secondary, with the remainder rolled free
+    // across all archetypes — so no season can ever be much more than 60%
+    // one thing. 0.9 is a shape the generator has never produced. WHICH
+    // archetype it commits to is still the season's own roll, per rule 2b,
+    // so this plays as a different puzzle each time it comes up.
+    // Measured neutral: Δavg +0.05..+0.24, ΔMAX 0..+1 across all three
+    // maxed comps (scripts/anomaly-guardrail.ts).
+    distorting: false,
+    gauntlet: { primaryShare: 0.9 }
+  },
+  "teeming-dark": {
+    id: "teeming-dark",
+    name: "Teeming Dark",
+    blurb: "The tunnels will not hold them all. They come anyway, one rank too deep.",
+    // WAVE_UNIT_CAP has been 5 for the whole life of the game, so this is
+    // the clearest "the rules moved" signal available without touching the
+    // sim. Front-clash means a 6th body is mostly queue depth rather than
+    // extra simultaneous damage, which is why one more rank costs a maxed
+    // board only about a wave and a half instead of collapsing it.
+    // Re-measured against the current roster (`balance:anomaly`, post
+    // unit-churn): Δavg -1.56..-1.65, ΔMAX -1 on two comps but -3 on
+    // press-kin-core — the worst comp decides, and -3 breaches the ±2
+    // threshold. Flipped from the original launch measurement (Δavg
+    // -1.2..-1.8, ΔMAX -1 flat, all inside threshold at the time). Still the
+    // only entry meaningfully HARDER than a clean week; held back with the
+    // other depth-distorting candidates until the season-6 board partition,
+    // per #165 Part 1 — not gated out of ANOMALY_DEFS today since nothing
+    // yet consumes this flag at runtime.
+    distorting: true,
+    gauntlet: { waveUnitCap: 6 }
+  },
+  "two-warrens": {
+    id: "two-warrens",
+    name: "Two Warrens",
+    blurb: "Two warrens ride together this week. Neither waits its turn.",
+    // The secondary normally musters from wave 4–7 at a 0.25 share against
+    // the primary's 0.6, so a clean week always opens single-archetype and
+    // never stops being primary-dominated. pivotWave 1 plus an even 0.45/0.45
+    // split makes the week genuinely two-headed from the first clash — the
+    // counter-building decision moves to wave 1, and neither archetype is the
+    // one you can afford to ignore.
+    //
+    // The even split is load-bearing, not flavour. The first cut kept the
+    // primary at 0.6 and merely raised the secondary to 0.4, which measured
+    // as a NO-OP on 62 of 200 seasons: the secondary phase is bounded by what
+    // its archetype can afford out of the wave budget, not by its quota, so
+    // raising the quota alone frequently changes nothing and the week would
+    // have announced an anomaly that wasn't there. Lowering the PRIMARY is
+    // what actually frees the budget. Now 0/200 no-ops, 33.5 of 45 waves
+    // changed per season.
+    // Measured neutral: Δavg -0.14, ΔMAX 0.
+    distorting: false,
+    gauntlet: { primaryShare: 0.45, secondaryShare: 0.45, pivotWave: 1 }
+  }
+};
+var ANOMALY_FIRST_SEASON = "2026-08-10";
+function anomalyFor(seasonId) {
+  if (seasonId < ANOMALY_FIRST_SEASON) return null;
+  const pool = Object.values(ANOMALY_DEFS);
+  if (pool.length === 0) return null;
+  const rng = xorshift128(fnv1a(`${seasonId}#anomaly`));
+  return pool[rng.int(pool.length)];
 }
 
 // packages/core/src/scout.ts
@@ -1596,65 +2135,164 @@ function scoutReport(gauntlet) {
   };
 }
 
-// packages/core/src/boss-trial.ts
-var BOSS_TRIAL_BASE_ATTACK = 6;
-var BOSS_TRIAL_ESCALATION = 1.5;
-var BOSS_TRIAL_HP_BASE = 100;
-var BOSS_TRIAL_HP_GROWTH_PER_PHASE = 8;
-var BOSS_TRIAL_MAX_PHASES = 60;
-function bossTrialPhaseAttack(phase) {
-  return BOSS_TRIAL_BASE_ATTACK * Math.pow(BOSS_TRIAL_ESCALATION, phase);
-}
-function bossTrialPhaseHP(phase) {
-  return BOSS_TRIAL_HP_BASE + BOSS_TRIAL_HP_GROWTH_PER_PHASE * phase;
-}
-function buildBossTrialGauntlet() {
-  const waves = Array.from({ length: BOSS_TRIAL_MAX_PHASES }, (_, phase) => {
-    const boss = {
-      id: "boss-trial",
-      name: "The Gauntlet Boss",
-      attack: Math.max(1, Math.round(bossTrialPhaseAttack(phase) / enemyAttackScale(phase))),
-      health: Math.max(1, Math.round(bossTrialPhaseHP(phase) / enemyHealthScale(phase))),
-      cost: 0
-    };
-    return { units: [boss] };
-  });
-  return { date: "boss-trial", seed: 0, waves };
-}
-function simulateBossTrial(lineup) {
-  const { events, result } = simulate(lineup, buildBossTrialGauntlet());
-  const bossIds = /* @__PURE__ */ new Set();
-  for (const e of events) {
-    if (e.type === "waveStart") for (const en of e.enemies) bossIds.add(en.instanceId);
-  }
-  let totalDamage = 0;
-  for (const e of events) {
-    if ((e.type === "damage" || e.type === "poisonTick") && bossIds.has(e.targetId)) {
-      totalDamage += e.amount;
+// packages/core/src/duel.ts
+function simulateDuel(a, b) {
+  const { events, result, enemySurvivors } = simulateCore(a, { kind: "duel", opponent: b });
+  const survivorsA = result.survivors;
+  const survivorsB = enemySurvivors;
+  const healthA = survivorsA.reduce((s, u) => s + u.health, 0);
+  const healthB = survivorsB.reduce((s, u) => s + u.health, 0);
+  const aAlive = survivorsA.length > 0;
+  const bAlive = survivorsB.length > 0;
+  let winner;
+  if (aAlive && !bAlive) winner = "a";
+  else if (bAlive && !aAlive) winner = "b";
+  else if (!aAlive && !bAlive) winner = "draw";
+  else {
+    if (healthA > healthB) winner = "a";
+    else if (healthB > healthA) winner = "b";
+    else {
+      const atkA = survivorsA.reduce((s, u) => s + u.attack, 0);
+      const atkB = survivorsB.reduce((s, u) => s + u.attack, 0);
+      winner = atkA > atkB ? "a" : atkB > atkA ? "b" : "draw";
     }
   }
-  return { totalDamage, phasesSurvived: result.wavesCleared };
+  return {
+    events,
+    result: {
+      winner,
+      survivorsA,
+      survivorsB,
+      healthA,
+      healthB,
+      damageA: result.damageDealt,
+      defeatedB: result.enemiesDefeated
+    }
+  };
 }
-function simulateBossTrialReplay(lineup) {
-  return simulate(lineup, buildBossTrialGauntlet()).events;
+
+// packages/core/src/pvp.ts
+var LOSS_CONSOLATION_DEFAULT = 6;
+function consolationScrap(losses, payoutPerLoss) {
+  const perLoss = Math.max(0, Math.floor(payoutPerLoss));
+  const n = Math.max(0, Math.floor(losses));
+  return perLoss * n;
+}
+function scoreRound(entrants) {
+  const n = entrants.length;
+  const points = new Array(n).fill(0);
+  const wins = new Array(n).fill(0);
+  const draws = new Array(n).fill(0);
+  const losses = new Array(n).fill(0);
+  const survivorDiff = new Array(n).fill(0);
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      const { result } = simulateDuel(entrants[i].board, entrants[j].board);
+      const diff = result.healthA - result.healthB;
+      survivorDiff[i] += diff;
+      survivorDiff[j] -= diff;
+      if (result.winner === "a") {
+        points[i] += 3;
+        wins[i]++;
+        losses[j]++;
+      } else if (result.winner === "b") {
+        points[j] += 3;
+        wins[j]++;
+        losses[i]++;
+      } else {
+        points[i] += 1;
+        points[j] += 1;
+        draws[i]++;
+        draws[j]++;
+      }
+    }
+  }
+  const order = entrants.map((_, i) => i);
+  order.sort((a, b) => {
+    if (points[b] !== points[a]) return points[b] - points[a];
+    if (survivorDiff[b] !== survivorDiff[a]) return survivorDiff[b] - survivorDiff[a];
+    const idA = entrants[a].id;
+    const idB = entrants[b].id;
+    return idA < idB ? -1 : idA > idB ? 1 : 0;
+  });
+  return order.map((i) => ({
+    id: entrants[i].id,
+    points: points[i],
+    wins: wins[i],
+    draws: draws[i],
+    losses: losses[i],
+    survivorDiff: survivorDiff[i]
+  }));
+}
+function validateBoard(board) {
+  const units = board.units ?? [];
+  if (units.length > BOARD_CAP) {
+    return { ok: false, reason: `too many units (${units.length} > ${BOARD_CAP})` };
+  }
+  for (const u of units) {
+    const def = UNIT_DEFS[u.defId];
+    if (!def) return { ok: false, reason: `unknown unit "${u.defId}"` };
+    if (!(def.cost > 0)) {
+      return { ok: false, reason: `unit "${u.defId}" is summon-only (cost 0), not a legal board entry` };
+    }
+    const tier = u.tier ?? 1;
+    if (!Number.isInteger(tier) || tier < 1 || tier > MAX_TIER) {
+      return { ok: false, reason: `unit "${u.defId}" has invalid tier ${tier}` };
+    }
+    const relicIds = u.relicIds ?? [];
+    const seenUnitRelics = /* @__PURE__ */ new Set();
+    for (const relicId of relicIds) {
+      const relic = RELIC_DEFS[relicId];
+      if (!relic) return { ok: false, reason: `unknown relic "${relicId}" on unit "${u.defId}"` };
+      if (relic.scope !== "unit") {
+        return { ok: false, reason: `relic "${relicId}" is not a unit relic (equipped on "${u.defId}")` };
+      }
+      if (seenUnitRelics.has(relicId)) {
+        return { ok: false, reason: `unit "${u.defId}" carries relic "${relicId}" more than once` };
+      }
+      seenUnitRelics.add(relicId);
+    }
+  }
+  const teamRelicIds = board.teamRelicIds ?? [];
+  const seenTeamRelics = /* @__PURE__ */ new Set();
+  for (const relicId of teamRelicIds) {
+    const relic = RELIC_DEFS[relicId];
+    if (!relic) return { ok: false, reason: `unknown team relic "${relicId}"` };
+    if (relic.scope !== "team") return { ok: false, reason: `relic "${relicId}" is not a team relic` };
+    if (seenTeamRelics.has(relicId)) {
+      return { ok: false, reason: `duplicate team relic "${relicId}"` };
+    }
+    seenTeamRelics.add(relicId);
+  }
+  return { ok: true };
+}
+function legalEntrants(entrants) {
+  return entrants.filter((e) => validateBoard(e.board).ok);
 }
 export {
+  ANOMALY_DEFS,
+  ANOMALY_FIRST_SEASON,
   ARCHETYPE_LABEL,
   BENCH_SIZE,
   BOARD_CAP,
-  BOSS_TRIAL_BASE_ATTACK,
-  BOSS_TRIAL_ESCALATION,
-  BOSS_TRIAL_HP_BASE,
-  BOSS_TRIAL_HP_GROWTH_PER_PHASE,
-  BOSS_TRIAL_MAX_PHASES,
   COMBAT_CAP_BONUS,
   DAILY_SCRAP,
+  EFFECT_FAMILY,
+  EFFECT_KEYWORD,
   ENEMY_ATTACK_SCALE_PER_WAVE,
   ENEMY_HEALTH_SCALE_PER_WAVE,
   ENEMY_HEALTH_SCALE_QUADRATIC,
   ENEMY_POOL,
+  FAMILY_COLOR,
+  FAMILY_GLYPH,
+  FAMILY_TEXT_COLOR,
+  FAMILY_TEXT_MIN_CONTRAST,
+  FAMILY_TEXT_ON,
+  KEYWORD_FAMILIES,
+  LOSS_CONSOLATION_DEFAULT,
   MAX_TIER,
   MIN_ATTACK_DAMAGE,
+  POISON_RESIST_CAP,
   RELIC_DEFS,
   REROLL_COST,
   SCORE_PER_WAVE,
@@ -1665,19 +2303,20 @@ export {
   UNIT_DEFS,
   WAVE_COUNT,
   advanceAfterDawn,
+  anomalyFor,
   autoRerollShop,
+  backlineTargetsForTier,
   benchUnit,
   blockHitsForTier,
   boardCapForDay,
-  bossTrialPhaseAttack,
-  bossTrialPhaseHP,
-  buildBossTrialGauntlet,
+  buffSummonedForTier,
   buyBoardSlot,
   buyRelic,
   buyUnit,
   canRecruit,
   cellarCoilChargeCapForTier,
   combatCapForBuild,
+  consolationScrap,
   currentRideDate,
   dailySeed,
   deployUnit,
@@ -1689,32 +2328,41 @@ export {
   generateGauntlet,
   hasValidRelicTarget,
   isShopDead,
+  keywordFamily,
+  legalEntrants,
   lineupFromBuild,
   moveUnit,
   newBuild,
   nextSlotPrice,
+  poisonResistForTier,
   poisonStacksForTier,
+  relicKeyword,
   rerollShop,
   reviveHpForTier,
   rollOfferings,
+  scoreRound,
   scoutReport,
   scrapForDepth,
   seasonIdFor,
+  seasonRelicPool,
   seasonUnitPool,
   sellBenchUnit,
   sellRefund,
   sellUnit,
   shopUnitPoolForDay,
   simulate,
-  simulateBossTrial,
-  simulateBossTrialReplay,
+  simulateCore,
+  simulateDuel,
   swapWithBench,
   tierAttackMultiplier,
   tierHealthMultiplier,
   toggleFreeze,
+  unitKeyword,
   unitStats,
   upcomingRetirements,
   upcomingUnlocks,
+  validateBoard,
+  wardArmorForTier,
   weekdayFor,
   xorshift128
 };

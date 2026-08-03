@@ -80,8 +80,23 @@ import {
 } from '../src/shop';
 import { simulate, BOARD_CAP } from '../src/sim';
 import { generateGauntlet, type Gauntlet } from '../src/gauntlet';
+import { ANOMALY_DEFS } from '../src/anomaly';
 import { UNIT_DEFS, type TimeOfDay } from '../src/data/units';
 import { RELIC_DEFS } from '../src/data/relics';
+
+// Optional weekly-anomaly A/B (issue #141):
+//   ANOMALY=one-warren npx tsx scripts/realistic-player.ts
+// runs the whole 16-season sim with that anomaly applied to every week. The
+// maxed-board guardrail answers "does this break the ceiling"; this answers
+// the question that actually decides whether an anomaly is worth shipping —
+// does a REAL board, built by the lookahead policy out of a real shop, come
+// out anywhere different? Unset = clean, so every baseline this script has
+// ever printed still reproduces byte-for-byte.
+const ANOMALY_ID = process.env.ANOMALY;
+const ANOMALY = ANOMALY_ID ? ANOMALY_DEFS[ANOMALY_ID] : null;
+if (ANOMALY_ID && !ANOMALY) {
+  throw new Error(`unknown ANOMALY '${ANOMALY_ID}' (have: ${Object.keys(ANOMALY_DEFS).join(', ')})`);
+}
 
 const HOURS_PER_DAY = 24;
 const TOTAL_HOURS = SEASON_DAYS * HOURS_PER_DAY; // 168
@@ -119,10 +134,10 @@ const gauntletCache = new Map<string, Gauntlet>();
 function gauntletFor(build: BuildState): Gauntlet {
   // Keyed by season AND day for future-proofing, though difficultyForDay is
   // currently a constant 1 so all seven entries of a week are identical.
-  const key = `${seasonIdFor(build.date)}#${build.day}`;
+  const key = `${seasonIdFor(build.date)}#${build.day}#${ANOMALY?.id ?? ''}`;
   let g = gauntletCache.get(key);
   if (!g) {
-    g = generateGauntlet(build.date, build.day);
+    g = generateGauntlet(build.date, build.day, undefined, ANOMALY);
     gauntletCache.set(key, g);
   }
   return g;

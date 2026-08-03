@@ -20,6 +20,7 @@
     "balance:dire-rat-armor": "tsx scripts/dire-rat-armor.ts",
     "balance:economy": "tsx scripts/economy.ts",
     "balance:maxed-board-guardrail": "tsx scripts/maxed-board-guardrail.ts",
+    "balance:anomaly": "tsx scripts/anomaly-guardrail.ts",
     "balance:slot-value": "tsx scripts/slot-value.ts",
     "balance:realistic": "tsx scripts/realistic-player.ts",
     "balance:combos": "tsx scripts/combo-matrix.ts",

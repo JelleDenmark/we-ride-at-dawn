@@ -14,7 +14,13 @@
 //   POST { "season": "dev-2026-07-20" }  (the exact season_id value, prefix included)
 // Guarded by a shared secret (VERIFY_SCORES_SECRET env) so anon clients
 // can't burn CPU or probe flags; deploy with --no-verify-jwt.
-import { generateGauntlet, simulate, WAVE_COUNT } from './wrad-core.bundle.mjs';
+import {
+  generateGauntlet,
+  simulate,
+  WAVE_COUNT,
+  anomalyFor,
+  seasonIdFor,
+} from './wrad-core.bundle.mjs';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
@@ -85,7 +91,15 @@ function verifyRow(row: ScoreRow): Outcome {
   }
 
   const lineup = { ...lineupRest, timeOfDay: timeOfDayAt(rideHour * HOUR_MS) };
-  const { result } = simulate(lineup, generateGauntlet(rideDate, row.day));
+  // The week's anomaly (issue #141) is part of the fight that was scored, so
+  // the re-sim has to reproduce it or every honest score on an anomaly week
+  // gets flagged. Derived from `rideDate` via `seasonIdFor` — the exact
+  // computation the client uses — rather than from `row.season_id`, which
+  // carries a `dev-` prefix on the dev channel and would hash to a different
+  // anomaly than the one actually played. Nothing is read from the payload:
+  // a fabricated row cannot choose an easier week for itself.
+  const anomaly = anomalyFor(seasonIdFor(rideDate));
+  const { result } = simulate(lineup, generateGauntlet(rideDate, row.day, undefined, anomaly));
   // >= not ===: underselling your own ride is not cheating, and it keeps a
   // benign claimed-less-than-achieved edge from ever flagging a legit player.
   return result.wavesCleared >= row.depth ? 'verified' : 'flagged';

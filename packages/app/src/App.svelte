@@ -22,6 +22,7 @@
     currentRideDate,
     dailySeed,
     generateGauntlet,
+    anomalyFor,
     simulate,
     WAVE_COUNT,
     UNIT_DEFS,
@@ -241,9 +242,35 @@
   let nowTick = $state(Date.now());
   let speed = $state(1);
 
+  /**
+   * The ONLY way this app builds a gauntlet (issue #141).
+   *
+   * The weekly anomaly is an explicit parameter in core — deliberately, so
+   * golden fixtures and balance baselines stay clean — which means any call
+   * site that forgets to pass it silently simulates a DIFFERENT fight than
+   * the one the player is being scored on. Funnelling every call through one
+   * helper is what makes that impossible: there are no bare
+   * `generateGauntlet` calls anywhere else in the app, and the server's
+   * re-sim derives the anomaly the same way, from the ride date.
+   */
+  const gauntletFor = (date: string, day: number) =>
+    generateGauntlet(date, day, undefined, anomalyFor(seasonIdFor(date)));
+
   // The ride shows the daily gauntlet: the same waves all day, every day.
-  const currentGauntlet = $derived(generateGauntlet(build.date, build.day));
+  const currentGauntlet = $derived(gauntletFor(build.date, build.day));
   const theme = $derived(currentGauntlet.theme);
+  /** This week's anomaly, or null on a clean week. */
+  const anomaly = $derived(anomalyFor(seasonIdFor(build.date)));
+  /**
+   * Next week's anomaly, revealed on the last day of the season — the return
+   * hook that exists before push notifications do (season 6). Computed the
+   * same way as everything else: a pure function of a date, no fetch.
+   */
+  const nextAnomaly = $derived.by(() => {
+    const d = new Date(`${build.date}T12:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + (8 - build.day)); // next Monday
+    return anomalyFor(seasonIdFor(d.toISOString().slice(0, 10)));
+  });
   // Live outcome of the current horde on the next ride — updates as you
   // build (and as the hour flips, and as the noon boundary flips — Dawn-Runt/
   // Dusk-Runt care about it), so you see your depth change in real time.
@@ -1044,7 +1071,7 @@
         const lineup = lineupFromBuild(build);
         if (lineup.units.length > 0) {
           const timedLineup = { ...lineup, timeOfDay: timeOfDayAt(now) };
-          const outcome = simulate(timedLineup, generateGauntlet(build.date, build.day));
+          const outcome = simulate(timedLineup, gauntletFor(build.date, build.day));
           const ride: LastRide = { date: build.date, day: build.day, lineup, result: outcome.result };
           saveLastRide(ride);
           lastRide = ride;
@@ -1071,7 +1098,7 @@
           // anyone (see isFrozenHour) — skip it rather than credit a ride.
           if (isFrozenHour(h, build.seasonId)) continue;
           const timedLineup = { ...lineup, timeOfDay: timeOfDayAt(new Date(h * HOUR_MS)) };
-          const { result } = simulate(timedLineup, generateGauntlet(build.date, build.day));
+          const { result } = simulate(timedLineup, gauntletFor(build.date, build.day));
           const scrap = scrapForDepth(result.wavesCleared);
           earned += scrap;
           rides.push({
@@ -1205,7 +1232,7 @@
     const lineup = lineupFromBuild(build);
     if (lineup.units.length > 0) {
       const timedLineup = { ...lineup, timeOfDay: timeOfDayAt(new Date()) };
-      const outcome = simulate(timedLineup, generateGauntlet(build.date, build.day));
+      const outcome = simulate(timedLineup, gauntletFor(build.date, build.day));
       const ride: LastRide = { date: build.date, day: build.day, lineup, result: outcome.result };
       saveLastRide(ride);
       lastRide = ride;
@@ -1241,7 +1268,7 @@
       const hourBucket = nowHour + i;
       if (isFrozenHour(hourBucket, build.seasonId)) continue;
       const timedLineup = { ...lineup, timeOfDay: timeOfDayAt(new Date(hourBucket * HOUR_MS)) };
-      const { result } = simulate(timedLineup, generateGauntlet(build.date, build.day));
+      const { result } = simulate(timedLineup, gauntletFor(build.date, build.day));
       const scrap = scrapForDepth(result.wavesCleared);
       earned += scrap;
       rides.push({
@@ -1515,6 +1542,20 @@
       ? ' · dev build'
       : ''}
   </p>
+
+  {#if anomaly}
+    <p class="anomaly">
+      <span class="anomaly-name">{anomaly.name}</span>
+      <span class="anomaly-blurb">{anomaly.blurb}</span>
+    </p>
+  {/if}
+
+  {#if build.day === SEASON_DAYS && nextAnomaly}
+    <p class="anomaly anomaly-next">
+      <span class="anomaly-name">Next week</span>
+      <span class="anomaly-blurb">{nextAnomaly.name} — {nextAnomaly.blurb}</span>
+    </p>
+  {/if}
 
   <div class="compendium-nav">
     <button onclick={() => (compendium = { tab: 'units', selected: null })}>📖 Rats</button>
@@ -2364,6 +2405,41 @@
     margin: 4px 0 16px;
     color: var(--ink-dim);
     font-size: 13px;
+  }
+
+  /* Weekly anomaly banner (issue #141). Phone-first: it has to read at a
+     glance above the fold without stealing a tap, so it's a static two-part
+     line — name, then the flavor — not a card or a dismissible notice. */
+  .anomaly {
+    margin: -8px 0 16px;
+    padding: 8px 10px;
+    border-left: 3px solid var(--accent);
+    background: rgba(255, 255, 255, 0.03);
+    font-size: 13px;
+    line-height: 1.35;
+  }
+
+  .anomaly-name {
+    display: block;
+    color: var(--accent);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    font-size: 12px;
+  }
+
+  .anomaly-blurb {
+    color: var(--ink-dim);
+  }
+
+  /* Sunday's look-ahead reads as a quieter echo of this week's banner —
+     it's a teaser, not the rule you're playing under right now. */
+  .anomaly-next {
+    border-left-color: var(--ink-dim);
+  }
+
+  .anomaly-next .anomaly-name {
+    color: var(--ink-dim);
   }
 
   .panel-label {
