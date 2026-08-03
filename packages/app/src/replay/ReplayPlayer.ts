@@ -116,6 +116,13 @@ export class ReplayPlayer {
   /** While currentIndex < skipUntilIndex, d(ms) fast-forwards to 0. */
   private skipUntilIndex = -1;
 
+  /** True for the PvP duel overlay (`App.svelte`'s `duelReplayPlayer`), which
+   * shares this engine with the solo-run stage. A duel is always exactly one
+   * `battleEnd` with no waves, so `wavesCleared`/`score` — meaningful depth-run
+   * progress numbers — are noise here; the caller already shows a plain
+   * win/loss line (`duelResultText`) once playback finishes. */
+  constructor(private readonly isDuel = false) {}
+
   async init(el: HTMLElement): Promise<void> {
     this.app = new Application();
     await this.app.init({ width: W, height: H, background: 0x120f0c, antialias: true });
@@ -288,7 +295,7 @@ export class ReplayPlayer {
       }
       case 'battleEnd': {
         this.showBanner(
-          `THE RIDE ENDS — DEPTH ${event.wavesCleared} · SCORE ${event.score}`,
+          this.isDuel ? 'THE DUEL ENDS' : `THE RIDE ENDS — DEPTH ${event.wavesCleared} · SCORE ${event.score}`,
           true
         );
         await wait(this.d(400));

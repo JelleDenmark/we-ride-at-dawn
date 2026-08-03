@@ -457,7 +457,7 @@
     if (!mine || !opponent.board) return;
     duelReplay = { opponentName: opponent.name, playing: true, result: null };
     if (!duelReplayPlayer) {
-      duelReplayPlayer = new ReplayPlayer();
+      duelReplayPlayer = new ReplayPlayer(true);
       await duelReplayPlayer.init(duelStageEl);
     }
     duelReplayPlayer.speed = duelSpeed;
