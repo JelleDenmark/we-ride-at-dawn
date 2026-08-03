@@ -185,6 +185,20 @@ export function weekdayFor(date: string): number {
 // rolls over normally.
 const SEASON_REISSUES: Record<string, string> = {
   '2026-07-13': '2026-07-13.2',
+  // 2026-08-03: the mid-week dev->master merge rotated the asset hashes, and
+  // clients holding a stale index.html booted to a blank screen (issue #170).
+  // The cache-clear that fixes it also wipes `wrad-device-id`, so those players
+  // returned under a NEW identity — leaving their previously synced board
+  // orphaned in `pvp_boards` but still entered, because the nightly job takes
+  // every row for the season with no activity filter. One confirmed duplicate
+  // entrant (a player facing their own abandoned board) plus a stray test row.
+  // Re-issuing orphans both under the old id rather than deleting live rows,
+  // and as a bonus resets every client's persisted shop roll (issue #169), so
+  // the relic-slot cut and roster swap that shipped in that merge finally reach
+  // players who had already rolled today's shop under the old code.
+  // Done before 10:00 CET on day 1, i.e. before the first hourly haul pays out:
+  // nothing earned is destroyed, only ~2h of board-building.
+  '2026-08-03': '2026-08-03.2',
 };
 
 export function seasonIdFor(date: string): string {
