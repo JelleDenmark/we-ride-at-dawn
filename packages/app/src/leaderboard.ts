@@ -141,9 +141,64 @@ export async function submitScore(args: {
   }
 }
 
-// NOTE: depth is no longer a ranked, in-app leaderboard — the nightly PvP
-// league (pvp-board.ts) is the season score now. `scores` still stores each
-// device's deepest ride for the personal "deepest ride this week" stat, the
-// anti-cheat re-simulation plumbing (issue #81), and the nightly Discord
-// "deepest ride" flex, so submitScore stays; the fetchTop/fetchRank ranked
-// read path was deleted with the Boss Trial removal.
+// The depth board (issue #171): restored as a secondary "Depth" tab
+// alongside the PvP league standings, so the game has a live-updating social
+// signal between nightly duels. Reads go through `scores_public` (see
+// supabase/migrations/2026-08-03-add-scores-public.sql), NOT `scores`
+// directly — same player_id-over-device_id posture as pvp-board.ts.
+const DEPTH_ORDER = 'depth.desc,kills.desc,updated_at.asc';
+
+export interface BoardRow {
+  player_id: string;
+  name: string;
+  depth: number;
+  day: number;
+  /** Cumulative season enemies-defeated total — the depth tiebreak. */
+  kills: number;
+}
+
+/** Top-N of a season by depth, kills breaking depth ties. Empty array on any failure. */
+export async function fetchTop(seasonId: string, limit = 20): Promise<BoardRow[]> {
+  try {
+    const url =
+      `${SUPABASE_URL}/rest/v1/scores_public?season_id=eq.${encodeURIComponent(boardSeason(seasonId))}` +
+      `&order=${DEPTH_ORDER}&limit=${limit}` +
+      `&select=player_id,name,depth,day,kills`;
+    const res = await fetch(url, { headers: HEADERS });
+    if (!res.ok) return [];
+    const rows = (await res.json()) as BoardRow[];
+    // Warm the digest before handing rows to callers that use `isMe`.
+    await playerId();
+    return rows;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * This device's rank on the depth board (1-based). A rider outranks you if
+ * they're strictly deeper, OR tied on depth with more kills — mirrors
+ * DEPTH_ORDER's two levels. Returns null if unranked or on failure.
+ */
+export async function fetchRank(
+  seasonId: string,
+  depth: number,
+  kills: number
+): Promise<number | null> {
+  if (depth <= 0) return null;
+  try {
+    const outrank = `or=(depth.gt.${depth},and(depth.eq.${depth},kills.gt.${kills}))`;
+    const url =
+      `${SUPABASE_URL}/rest/v1/scores_public?season_id=eq.${encodeURIComponent(boardSeason(seasonId))}` +
+      `&${outrank}&select=player_id`;
+    const res = await fetch(url, {
+      headers: { ...HEADERS, Prefer: 'count=exact' },
+    });
+    if (!res.ok) return null;
+    const range = res.headers.get('content-range'); // e.g. "0-24/25"
+    const total = range ? Number(range.split('/')[1]) : NaN;
+    return Number.isFinite(total) ? total + 1 : null;
+  } catch {
+    return null;
+  }
+}

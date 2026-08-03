@@ -118,7 +118,7 @@
     telemetryEnabled,
     setTelemetryEnabled,
   } from './telemetry';
-  import { submitScore, defaultName, isMe } from './leaderboard';
+  import { submitScore, fetchTop, fetchRank, defaultName, isMe, type BoardRow } from './leaderboard';
   import {
     submitPvpBoard,
     fetchLatestStandings,
@@ -373,14 +373,20 @@
   let standings = $state<StandingRow[]>([]);
   let ghosts = $state<GhostRow[]>([]);
   let leagueBusy = $state(false);
+  // The depth board (issue #171): a live-updating ranked read of `scores`,
+  // restored as a third tab so the game has a social signal between nightly
+  // duels — the PvP standings only change once a day at 20:00.
+  let board = $state<BoardRow[]>([]);
+  let myRank = $state<number | null>(null);
   // Which rival's board the scout panel is expanded to, by player_id (null =
   // collapsed). One at a time keeps the panel phone-sized.
   let scoutedGhost = $state<string | null>(null);
 
-  // Season-long totals (issue #157) alongside the existing single-night view,
-  // shown as two tabs so the panel's footprint doesn't grow — see App CSS
-  // `.lg-tabs`. "Season" is the default: it's the number that persists.
-  let leagueTab = $state<'season' | 'nights'>('season');
+  // Season-long totals (issue #157) alongside the existing single-night view
+  // and the restored depth board (issue #171), shown as tabs so the panel's
+  // footprint doesn't grow — see App CSS `.lg-tabs`. "Season" is the default:
+  // it's the number that persists.
+  let leagueTab = $state<'season' | 'nights' | 'depth'>('season');
   let seasonStandings = $state<SeasonStandingRow[]>([]);
   let rounds = $state<RoundInfo[]>([]);
   // Which past round the "Nights" tab is browsing. null = follow the latest
@@ -489,18 +495,22 @@
   async function refreshLeague() {
     leagueBusy = true;
     try {
-      const [rows, season, roundList, gh, cfg] = await Promise.all([
+      const [rows, season, roundList, gh, cfg, depthBoard, rank] = await Promise.all([
         fetchLatestStandings(build.seasonId),
         fetchSeasonStandings(build.seasonId),
         fetchRounds(build.seasonId),
         fetchGhosts(build.seasonId),
         fetchLeagueConfig(),
+        fetchTop(build.seasonId, 20),
+        fetchRank(build.seasonId, seasonBest, seasonKills),
       ]);
       standings = rows;
       seasonStandings = season;
       rounds = roundList;
       ghosts = gh;
       leagueConfig = cfg;
+      board = depthBoard;
+      myRank = rank;
       creditConsolationIfDue(rows, cfg.lossConsolation);
     } finally {
       leagueBusy = false;
@@ -1905,6 +1915,15 @@
       >
         Nights
       </button>
+      <button
+        class="lg-tab"
+        class:active={leagueTab === 'depth'}
+        role="tab"
+        aria-selected={leagueTab === 'depth'}
+        onclick={() => (leagueTab = 'depth')}
+      >
+        Depth
+      </button>
     </div>
 
     {#if leagueTab === 'season'}
@@ -1923,7 +1942,7 @@
           {/each}
         </ol>
       {/if}
-    {:else}
+    {:else if leagueTab === 'nights'}
       {#if rounds.length > 1}
         <select
           class="lg-round-picker"
@@ -1965,6 +1984,24 @@
             {myStanding.losses === 1 ? 'loss' : 'losses'} paid
             <strong>+{myConsolation} scrap</strong> consolation
           </p>
+        {/if}
+      {/if}
+    {:else}
+      {#if board.length === 0}
+        <p class="lb-empty">{leagueBusy ? 'reading the war-drums…' : 'no riders yet this week — be the first'}</p>
+      {:else}
+        <p class="lg-caption">deepest riders · week of {build.seasonId.slice(0, 10)}</p>
+        <ol class="lb-rows">
+          {#each board as row, i}
+            <li class="lb-row" class:me={isMe(row)}>
+              <span class="lb-rank">{i + 1}</span>
+              <span class="lb-name">{row.name}{isMe(row) ? ' · you' : ''}</span>
+              <span class="lb-depth">depth {row.depth}</span>
+            </li>
+          {/each}
+        </ol>
+        {#if myRank !== null && myRank > board.length}
+          <p class="lb-myrank">your rank: <strong>#{myRank}</strong> · depth {seasonBest}</p>
         {/if}
       {/if}
     {/if}
@@ -3785,6 +3822,22 @@
     color: var(--brass);
     text-shadow: 0 1px 0 var(--tarnish);
     font-variant-numeric: tabular-nums;
+  }
+
+  .lb-depth {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    color: var(--brass);
+    text-shadow: 0 1px 0 var(--tarnish);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .lb-myrank {
+    margin: 8px 0 0;
+    padding-top: 8px;
+    border-top: 1px solid #2a221a;
+    font-size: 13px;
+    color: #c9b891;
   }
 
   .scout {
