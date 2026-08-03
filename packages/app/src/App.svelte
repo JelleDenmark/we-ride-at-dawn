@@ -3835,9 +3835,9 @@
   .lb-myrank {
     margin: 8px 0 0;
     padding-top: 8px;
-    border-top: 1px solid #2a221a;
+    border-top: 1px solid var(--edge-faint);
     font-size: 13px;
-    color: #c9b891;
+    color: var(--ink-soft);
   }
 
   .scout {
