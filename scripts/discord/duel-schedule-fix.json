@@ -1,0 +1,10 @@
+{
+  "embeds": [
+    {
+      "title": "🕰️ incident report — the duel clock was wrong",
+      "description": "**Heads up: tonight's duel time moves earlier.** The first two nightly rounds fired ~66 minutes late (19:06/19:07 UTC instead of the planned 18:00) and missed the evening window entirely — no standings posted until we forced one through by hand tonight.\n\n**what happened**\nThe round was scheduled for the top of the hour, 18:00 UTC exactly — which, as an internal review lasting exactly as long as it took to read GitHub's own scheduling docs revealed, is the single most congested minute on all of GitHub Actions. Blame lands on **Nigel Batchley**, scheduling clerk, who set it there because \"round numbers look tidier on the form\" and refused to consider any minute that wasn't a multiple of ten. Shown the incident graph, he remains unconvinced.\n\n**what changed**\n• the round now scores at **17:53 UTC** (≈ 19:53 CEST / 18:53 CET) — *before* the advertised 20:00/19:00 slot, not after\n• scoring early rather than late is deliberate, not just a congestion dodge: locking the board ahead of the advertised hour means there's no grace window to camp and dump fresh scrap into your board right before the snapshot — this is an idle game, not a reflex check\n• the off-the-hour minute also dodges the queueing delay that ate the first two nights\n\nNigel's form has been amended to permit minutes ending in 3. He is furious about it.",
+      "color": 5793266,
+      "footer": { "text": "we ride at dawn · nightly PvP league" }
+    }
+  ]
+}
