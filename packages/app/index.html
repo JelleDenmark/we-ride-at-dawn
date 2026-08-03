@@ -12,6 +12,156 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="WRAD" />
     <title>We Ride at Dawn</title>
+    <!--
+      Blank-screen self-heal (incident 2026-08-03). MUST stay inline and
+      MUST stay ahead of the entry <script> below — it is the one piece of
+      code that still runs when the bundle itself is what failed to load.
+
+      The failure it recovers from: a client holding a stale `index.html`
+      (HTTP-cached, with the service worker evicted or never installed —
+      Brave on Android evicts aggressively) asks for the hashed entry chunk
+      that stale HTML names. A deploy replaced that hash, GitHub Pages keeps
+      only the current build's assets, so the request 404s, the module never
+      executes, `#app` is never mounted, and the player gets an unrecoverable
+      black screen. Verified directly against prod, not inferred: a
+      known-old asset path returns 404 while the current one returns 200.
+
+      Note `vite:preloadError` does NOT cover this. That event fires for
+      dynamic-import preloads; the entry module is a plain
+      `<script type="module">`, whose failure surfaces only as a resource
+      `error` event. Both paths are handled below.
+
+      Recovery is deliberately conservative: at most ONE automatic attempt
+      per tab session (sessionStorage guard), scoped to this channel's own
+      service worker and caches so the sibling channel on the shared origin
+      is never touched, and falling back to a readable message rather than
+      looping if it doesn't take.
+    -->
+    <script>
+      (function () {
+        var GUARD = 'wrad:selfheal';
+        // prod is served at <base>/, dev at <base>/dev/ on the SAME origin.
+        // Everything below is scoped by these two values so a recovery on
+        // one channel can never evict the other's worker or precache.
+        var isDev = /\/dev\/?$/.test(location.pathname.replace(/[^/]*$/, ''));
+        var cacheId = isDev ? 'wrad-dev' : 'wrad-prod';
+        var baseDir = location.pathname.replace(/[^/]*$/, '');
+        var healed = false;
+
+        function fallbackUI() {
+          var el = document.getElementById('app');
+          if (!el) return;
+          el.innerHTML =
+            '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;' +
+            'padding:24px;font-family:system-ui,sans-serif;color:#e8ded0;background:#0d0b09;text-align:center">' +
+            '<div style="max-width:32ch">' +
+            '<p style="font-size:1.1rem;margin:0 0 12px">The drains are jammed.</p>' +
+            '<p style="opacity:.75;line-height:1.5;margin:0 0 20px">This ride couldn\'t load its gear. ' +
+            'Your horde is safe — nothing was lost.</p>' +
+            // min-height 44px: this is a phone-first game, and the retry tap
+            // is the only way out of this screen.
+            '<button id="wrad-retry" style="font:inherit;color:#0d0b09;background:#c9a227;border:0;' +
+            'border-radius:6px;padding:12px 20px;min-height:44px;cursor:pointer">dig it out</button>' +
+            '</div></div>';
+          var b = document.getElementById('wrad-retry');
+          if (b) b.addEventListener('click', function () { recover(true); });
+        }
+
+        function reloadFresh() {
+          // A plain reload can be answered from the HTTP cache with the same
+          // stale HTML that caused this. A one-off query string guarantees a
+          // URL the cache has never seen, so index.html comes from network.
+          // main.ts strips it again once the app is actually running.
+          location.replace(baseDir + '?_fresh=' + Date.now());
+        }
+
+        function recover(forced) {
+          // `healed` stops the automatic listeners from firing twice for one
+          // broken load (a dead entry chunk raises several error events). It
+          // must NOT block the player's own retry tap, which is an explicit
+          // request to try again after we have already given up once.
+          if (healed && !forced) return;
+          healed = true;
+          try {
+            if (!forced && sessionStorage.getItem(GUARD)) { fallbackUI(); return; }
+            sessionStorage.setItem(GUARD, '1');
+          } catch (e) {
+            // Private mode / storage disabled: allow exactly this one pass.
+            if (!forced && window.__wradHealed) { fallbackUI(); return; }
+            window.__wradHealed = true;
+          }
+          var jobs = [];
+          try {
+            if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+              jobs.push(
+                navigator.serviceWorker.getRegistrations().then(function (rs) {
+                  return Promise.all(
+                    rs.filter(function (r) {
+                      // Same-channel only — see the scoping note above.
+                      try { return new URL(r.scope).pathname === baseDir; } catch (e) { return false; }
+                    }).map(function (r) { return r.unregister(); })
+                  );
+                })['catch'](function () {})
+              );
+            }
+            if (window.caches && caches.keys) {
+              jobs.push(
+                caches.keys().then(function (keys) {
+                  return Promise.all(
+                    keys.filter(function (k) { return k.indexOf(cacheId) === 0; })
+                        .map(function (k) { return caches['delete'](k); })
+                  );
+                })['catch'](function () {})
+              );
+            }
+          } catch (e) { /* fall through to the reload regardless */ }
+
+          if (jobs.length) {
+            Promise.all(jobs).then(reloadFresh, reloadFresh);
+            // Never let a hung storage API strand the player on a blank page.
+            setTimeout(reloadFresh, 4000);
+          } else {
+            reloadFresh();
+          }
+        }
+
+        // 1. The real signal: the entry module (or a stylesheet) 404s.
+        window.addEventListener(
+          'error',
+          function (e) {
+            var t = e && e.target;
+            if (!t || t === window) return;
+            var tag = t.tagName;
+            if (tag === 'SCRIPT' || tag === 'LINK') recover(false);
+          },
+          true // capture — resource errors do not bubble
+        );
+
+        // 2. Dynamic-import chunk that vanished under the same conditions.
+        window.addEventListener('vite:preloadError', function () { recover(false); });
+
+        // 3. Backstop for any silent failure the two listeners miss: if the
+        //    app never signals a mount, treat it as the same broken-shell
+        //    case. Generous enough not to trip a slow phone connection, and
+        //    it only runs while the tab is actually visible (a backgrounded
+        //    tab may legitimately stall its own loading).
+        var WATCHDOG_MS = 15000;
+        function armWatchdog() {
+          setTimeout(function () {
+            if (window.__WRAD_MOUNTED__ || healed) return;
+            if (document.visibilityState !== 'visible') {
+              document.addEventListener('visibilitychange', function once() {
+                document.removeEventListener('visibilitychange', once);
+                armWatchdog();
+              });
+              return;
+            }
+            recover(false);
+          }, WATCHDOG_MS);
+        }
+        armWatchdog();
+      })();
+    </script>
   </head>
   <body>
     <div id="app"></div>
