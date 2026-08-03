@@ -1,5 +1,5 @@
 import type { Side, UnitDef, Ability, Lineup } from './data/units';
-import { UNIT_DEFS, tierAttackMultiplier, tierHealthMultiplier, reviveHpForTier, blockHitsForTier, poisonStacksForTier, cellarCoilChargeCapForTier, backlineTargetsForTier, wardArmorForTier, buffSummonedForTier, weakenPercentForTier } from './data/units';
+import { UNIT_DEFS, tierAttackMultiplier, tierHealthMultiplier, reviveHpForTier, blockHitsForTier, poisonStacksForTier, cellarCoilChargeCapForTier, backlineTargetsForTier, wardArmorForTier, buffSummonedForTier, poisonResistForTier, POISON_RESIST_CAP } from './data/units';
 import { ENEMY_POOL } from './data/enemies';
 import { RELIC_DEFS, type RelicDef } from './data/relics';
 import type { Gauntlet } from './gauntlet';
@@ -68,10 +68,7 @@ export const ENEMY_HEALTH_SCALE_QUADRATIC = 0.004;
 // sustain fronts. NOTE this is only a supporting knob — the armor+heal
 // immortality it was first reached for is fixed structurally by the net-damage
 // floor in the tick loop (raising this alone couldn't break that threshold
-// without cratering the whole depth ladder; see the balance-pass notes). The
-// Boss Trial is INVARIANT to this constant — `buildBossTrialGauntlet` divides
-// each boss's attack by `enemyAttackScale` and the sim multiplies it back, so
-// the two cancel; only the depth gauntlet is affected.
+// without cratering the whole depth ladder; see the balance-pass notes).
 // 0.08 -> 0.09 (2026-07-25, issue #150): layered on top as part of the same
 // general difficulty pass described above the health constant; same
 // balance-script evidence, same rejected 0.10 candidate.
@@ -114,12 +111,6 @@ export type BattleEvent =
   | { type: 'summon'; side: Side; index: number; unit: UnitView }
   | { type: 'revive'; side: Side; index: number; unit: UnitView }
   | { type: 'buff'; targetId: number; attack: number; health: number; newAttack: number; newHealth: number }
-  /** Gutter-Acolyte's attack shred (issue #137): `attack` is the amount
-   * actually removed (post-floor, so it may be less than the caster's full
-   * shred). A separate event from 'buff' on purpose — the replay renders
-   * buffs as green "+N" floats, and a debuff wearing that costume would
-   * read as a gift. */
-  | { type: 'weaken'; targetId: number; attack: number; newAttack: number }
   | { type: 'relicProc'; targetId: number; relicId: string; name: string }
   | { type: 'shieldGranted'; targetId: number; sourceId: number }
   | { type: 'shieldAbsorbed'; targetId: number }
@@ -210,6 +201,29 @@ interface BattleUnit {
 export const MIN_ATTACK_DAMAGE = 1;
 
 /**
+ * How the enemy side is sourced for a battle:
+ * - `gauntlet`: the PvE wave sequence — tier-1, relic-less, wave-scaled foes,
+ *   a fresh wave instantiated for each of `gauntlet.waves`.
+ * - `duel`: a second player Lineup fought as ONE symmetric wave, with full
+ *   tiers, per-unit relics and team relics, and no wave scaling. See
+ *   `simulateDuel` in duel.ts.
+ */
+export type BattleMode =
+  | { kind: 'gauntlet'; gauntlet: Gauntlet }
+  | { kind: 'duel'; opponent: Lineup };
+
+export interface CoreOutput {
+  events: BattleEvent[];
+  result: BattleResult;
+  /**
+   * Enemy-side survivors when the battle ended. In a duel this is side B's
+   * surviving board, which is how `simulateDuel` picks a winner. The PvE
+   * `simulate` wrapper drops it.
+   */
+  enemySurvivors: UnitView[];
+}
+
+/**
  * Pure and deterministic: same (lineup, gauntlet) always yields a
  * byte-identical event log. No unseeded randomness, no wall-clock,
  * no iteration over unordered collections.
@@ -222,24 +236,69 @@ export function simulate(
   lineup: Lineup,
   gauntlet: Gauntlet
 ): { events: BattleEvent[]; result: BattleResult } {
+  const { events, result } = simulateCore(lineup, { kind: 'gauntlet', gauntlet });
+  return { events, result };
+}
+
+/**
+ * Shared battle core for both PvE (`simulate`) and PvP (`simulateDuel`).
+ *
+ * In `gauntlet` mode this reproduces the original `simulate` behaviour
+ * exactly. The generalizations the duel needs — per-SIDE team relics, and a
+ * wave list that can be a single opposing board — are all strict no-ops for
+ * PvE: gauntlet enemies carry no team relics, so the enemy side's pools are
+ * all-zero, and the wave list is still just `gauntlet.waves`.
+ *
+ * Tick order: heals -> simultaneous clash -> afterAttack triggers ->
+ * poison ticks -> death resolution (faint ability, faint relics,
+ * allyFaint listeners — horde before gauntlet, front to back).
+ */
+export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
   const events: BattleEvent[] = [];
   let nextInstanceId = 1;
 
-  const teamRelics = (lineup.teamRelicIds ?? [])
-    .map((id) => RELIC_DEFS[id])
-    .filter((r): r is RelicDef => r !== undefined && r.scope === 'team');
-  const teamAttack = teamRelics.reduce((s, r) => s + (r.attack ?? 0), 0);
-  const teamHealth = teamRelics.reduce((s, r) => s + (r.health ?? 0), 0);
-  // Whole-horde per-tick regen (The Forgotten Backpack). Same shape as a
-  // unit's healPerTick (Fat Tick), just summed across team relics and applied
-  // to every horde unit instead of only the carrier. Compounding-law check:
-  // this is bounded exactly like Fat Tick's regen below — every tick it's
-  // clamped to `maxHealth - health`, so it can never push a unit past its own
-  // health ceiling no matter how many of the 45 waves it runs across.
-  const teamHealPerTick = teamRelics.reduce((s, r) => s + (r.healPerTick ?? 0), 0);
-  // Both sides share one in-combat ceiling. Absent (golden logs, tests,
-  // gauntlet-only callers) it's BOARD_CAP, exactly as before.
-  const combatCap = lineup.combatCap ?? BOARD_CAP;
+  /**
+   * Team-relic stat pools, resolved PER SIDE (was horde-only). A duel has a
+   * real board on both sides, each bringing its own team relics; in gauntlet
+   * mode the enemy side has none, so its pool is all-zero and every number
+   * below is byte-identical to the pre-duel engine.
+   */
+  const teamPool = (ids?: string[]) => {
+    const rs = (ids ?? [])
+      .map((id) => RELIC_DEFS[id])
+      .filter((r): r is RelicDef => r !== undefined && r.scope === 'team');
+    return {
+      attack: rs.reduce((s, r) => s + (r.attack ?? 0), 0),
+      health: rs.reduce((s, r) => s + (r.health ?? 0), 0),
+      // Whole-board per-tick regen (The Forgotten Backpack). Same shape as a
+      // unit's healPerTick (Fat Tick), just summed across team relics and
+      // applied to every unit on that side instead of only the carrier.
+      // Compounding-law check: bounded exactly like Fat Tick's regen below —
+      // every tick it's clamped to `maxHealth - health`, so it can never push
+      // a unit past its own health ceiling no matter how many of the 45 waves
+      // it runs across.
+      healPerTick: rs.reduce((s, r) => s + (r.healPerTick ?? 0), 0),
+      // Whole-board flat armor (Filth Totem, issue #156 rework). Same
+      // mechanism as Ward-Weaver's `damageReduction` grant, just summed
+      // across team relics instead of read off the unit def below.
+      damageReduction: rs.reduce((s, r) => s + (r.damageReduction ?? 0), 0),
+    };
+  };
+  const hordeTeam = teamPool(lineup.teamRelicIds);
+  const enemyTeam = mode.kind === 'duel' ? teamPool(mode.opponent.teamRelicIds) : teamPool([]);
+  const teamOf = (side: Side) => (side === 'horde' ? hordeTeam : enemyTeam);
+  // In-combat body ceiling, resolved PER SIDE. In gauntlet mode both sides
+  // share the horde-derived cap — the deliberate enemy-cap coupling from #148
+  // (a bigger player board also loosens enemy summoner waves), preserved here
+  // byte-identical: `enemyCombatCap === hordeCombatCap`, so `capOf` returns
+  // the same single value the old shared `combatCap` did. In a duel each board
+  // brings its own cap, so side B's summoners are bounded by B's board, not by
+  // whichever seat it was assigned — the seat-fairness the mirror relies on.
+  // Absent (golden logs, tests, gauntlet-only callers) it's BOARD_CAP.
+  const hordeCombatCap = lineup.combatCap ?? BOARD_CAP;
+  const enemyCombatCap =
+    mode.kind === 'duel' ? (mode.opponent.combatCap ?? BOARD_CAP) : hordeCombatCap;
+  const capOf = (side: Side): number => (side === 'horde' ? hordeCombatCap : enemyCombatCap);
   // Real-world half-day this ride belongs to (issue #12: Dawn-Runt/Dusk-Runt).
   // Never read from the clock here — the app layer resolves it and passes it
   // in via Lineup.timeOfDay. Omitted = matches neither ability condition, so
@@ -263,10 +322,9 @@ export function simulate(
     let health =
       Math.round(def.health * tierHealthMultiplier(tier) * healthScale) +
       relics.reduce((s, r) => s + (r.health ?? 0), 0);
-    if (side === 'horde') {
-      attack += teamAttack;
-      health += teamHealth;
-    }
+    const team = teamOf(side);
+    attack += team.attack;
+    health += team.health;
     return {
       instanceId: nextInstanceId++,
       defId: def.id,
@@ -281,7 +339,10 @@ export function simulate(
       poison: 0,
       firstAttackDone: false,
       tailCharmUsed: false,
-      damageReduction: (def.damageReduction ?? 0) * tier,
+      // Team armor (Filth Totem) is a flat grant like team attack/health
+      // above, not tier-scaled — the unit's own base armor (Ward-Weaver,
+      // Dire-Rat, Steel-Whisker) is the only tier-scaled term here.
+      damageReduction: (def.damageReduction ?? 0) * tier + team.damageReduction,
       startOfBattleFired: false,
       raised: false,
       chargeStacks: 0,
@@ -311,11 +372,21 @@ export function simulate(
 
   events.push({ type: 'battleStart', horde: horde.map(view) });
 
-  const applyDamage = (unit: BattleUnit, amount: number, cause: 'attack' | 'poison'): void => {
+  const applyDamage = (
+    unit: BattleUnit,
+    amount: number,
+    cause: 'attack' | 'poison',
+    ignoreArmor = false
+  ): void => {
     // Armor blunts attacks only — poison is rot, it goes around the hide. The
     // floor keeps armor from ever producing an unkillable front rat.
+    // `ignoreArmor` (Glass Shard's rework, issue #156) punches straight
+    // through even that floor — it's an alpha strike landing before the
+    // target's hide has a chance to matter, not a reduced-but-still-blunted
+    // hit, so this branch skips MIN_ATTACK_DAMAGE too, not just the
+    // reduction subtraction.
     const dealt =
-      cause === 'attack' && unit.damageReduction > 0
+      cause === 'attack' && unit.damageReduction > 0 && !ignoreArmor
         ? Math.max(MIN_ATTACK_DAMAGE, amount - unit.damageReduction)
         : amount;
     unit.health -= dealt;
@@ -465,12 +536,30 @@ export function simulate(
    * Returns false (and does nothing) when the side is already at the cap, so
    * callers can stop their litter loop. `owner` tags the body's `summonedBy`
    * for `maintainSummons` accounting (Rat-Piper); omit it for one-shot summons
-   * (Brood-Mother's cascade). Fires `allySummoned` (Squeak-Sensei) per body.
+   * (Brood-Mother's cascade). `tier` defaults to 1 (Brood-Mother's cascade
+   * children are always tier-1 by design); Rat-Piper's `summonScaledPup`
+   * (issue #161) passes the CASTER's own tier so the summoned pup gets the
+   * normal exponential `tierAttackMultiplier`/`tierHealthMultiplier` scaling
+   * every recruited unit gets — see that effect's doc comment in
+   * data/units.ts for why tier belongs on the body, not the count, here.
+   * `relicIds` defaults to `[]` (Brood-Mother's cascade children, and every
+   * OTHER summon shape, are always relic-less by design — a summoned body is
+   * not a purchase); `summonScaledPup` is the sole exception, passing the
+   * CASTER's own equipped unit relic ids through so Rat-Piper's pup fights
+   * with a copy of whatever Piper itself is wearing (issue #161 follow-up).
+   * Fires `allySummoned` (Squeak-Sensei) per body.
    */
-  const spawn = (def: UnitDef, index: number, side: Side, owner?: number): boolean => {
+  const spawn = (
+    def: UnitDef,
+    index: number,
+    side: Side,
+    owner?: number,
+    tier = 1,
+    relicIds: string[] = []
+  ): boolean => {
     const board = boardOf(side);
-    if (board.length >= combatCap) return false;
-    const summoned = instantiate(def, side);
+    if (board.length >= capOf(side)) return false;
+    const summoned = instantiate(def, side, relicIds, tier);
     summoned.summonedBy = owner;
     board.splice(index, 0, summoned);
     events.push({ type: 'summon', side, index, unit: view(summoned) });
@@ -495,6 +584,26 @@ export function simulate(
         const def = DEF_LOOKUP[effect.unitId];
         for (let i = 0; i < effect.count * tier; i++) {
           if (!spawn(def, index, source.side)) break;
+        }
+        break;
+      }
+      case 'summonScaledPup': {
+        // Rat-Piper rework (issue #161). `startOfBattle`-fired (see
+        // `fireEntryTriggers`), so this runs exactly once per Piper
+        // instance across the whole run — `count` fixed bodies, each
+        // instantiated at the CASTER's own tier so it gets the standard
+        // exponential tier curve instead of a bespoke magnitude table (see
+        // the effect's doc comment in data/units.ts). Also inherits a COPY
+        // of the caster's own equipped unit relics (issue #161 follow-up):
+        // `source.relics` is already pre-filtered to `scope === 'unit'` by
+        // `instantiate`, so passing their ids straight through is safe — no
+        // re-filtering needed. Fire-once means this is a fixed one-time
+        // relic duplication, not a repeating one, so it cannot compound
+        // across waves any more than the pup itself does.
+        const def = DEF_LOOKUP[effect.unitId];
+        const relicIds = source.relics.map((r) => r.id);
+        for (let i = 0; i < effect.count; i++) {
+          if (!spawn(def, index, source.side, undefined, tier, relicIds)) break;
         }
         break;
       }
@@ -661,10 +770,10 @@ export function simulate(
         // Multi-caster stack cap (issue #131, same shape as #116's
         // `poisonAllEnemies` cap): multiple Plague-Bearers used to stack
         // additively onto the same single last-enemy target with no ceiling
-        // — against a single fixed target (e.g. Boss Trial's one boss per
-        // phase) this let 2-5x Plague-Bearer push well past the trial's
-        // intended "a few dozen phases" ceiling, all the way to its 60-phase
-        // hard cap. Capped at `poisonStacksForTier(3)` via its own budget
+        // — against a single fixed target (a lone high-HP enemy; originally
+        // reproduced on the since-removed Boss Trial's one escalating boss)
+        // this let 2-5x Plague-Bearer push runaway stacks well past the
+        // intended ceiling. Capped at `poisonStacksForTier(3)` via its own budget
         // (`poisonLastApplied`, separate from `poisonAllApplied`) — same
         // cap-not-sum precedent as `blockCharges`/`poisonAllEnemies`: one ★3
         // fills it, extra Plague-Bearers clip rather than add. Kept
@@ -757,39 +866,20 @@ export function simulate(
         }
         break;
       }
-      case 'weakenAllEnemies': {
-        // Gutter-Acolyte (issue #137, converted to percentage 2026-07-25).
-        // `startOfWave`-fired, so this runs for every live Acolyte in board
-        // order at the top of the wave, same firing point as
-        // `poisonAllEnemies` — and same compounding bound: enemies are
-        // re-instantiated fresh every wave, so the shred can never carry
-        // across waves. Percentage is taken off the target's ORIGINAL
-        // wave-start attack (`weakenOriginalAttack`, snapshotted before any
-        // Acolyte fires), not whatever it's already been shredded down to —
-        // see `weakenPercentForTier`'s doc comment for why. That makes
-        // multi-caster stacking a simple ADDITIVE cap-not-sum budget
-        // (`weakenAppliedPercent`, capped at `weakenPercentForTier(3)` total
-        // per enemy per wave), same precedent as `poisonAllEnemies`. The
-        // MIN_ATTACK_DAMAGE floor still applies on top (enemies always hit
-        // for at least 1). `attack` on the event is the amount actually
-        // removed post-floor, so replays never show a bigger shred than what
-        // happened.
-        const capPct = weakenPercentForTier(3);
-        const ownPct = effect.percent * weakenPercentForTier(tier);
-        for (const target of opposing(source.side)) {
-          if (target.health <= 0) continue;
-          const original = weakenOriginalAttack.get(target.instanceId) ?? target.attack;
-          const appliedSoFar = weakenAppliedPercent.get(target.instanceId) ?? 0;
-          const pct = Math.min(ownPct, Math.max(0, capPct - appliedSoFar));
-          if (pct <= 0) continue;
-          const shred = Math.round(original * pct);
-          const reduced = Math.max(MIN_ATTACK_DAMAGE, target.attack - shred);
-          const delta = target.attack - reduced;
-          if (delta <= 0) continue;
-          target.attack = reduced;
-          weakenAppliedPercent.set(target.instanceId, appliedSoFar + pct);
-          events.push({ type: 'weaken', targetId: target.instanceId, attack: delta, newAttack: target.attack });
-        }
+      case 'poisonResist': {
+        // Gutter-Acolyte (issue #155 remake). `startOfWave`-fired, same
+        // firing point `weakenAllEnemies` used — runs for every live Acolyte
+        // in board order at the top of the wave. Protects the CASTER'S OWN
+        // side (not a target loop over enemies, unlike this unit's old
+        // effect): adds `poisonResistForTier(tier)` (`[1, 2, 3]`) to a
+        // shared per-side cap-not-sum budget (`poisonResistApplied`, capped
+        // at `POISON_RESIST_CAP` — exactly one ★3's own value), same
+        // precedent as `poisonAllEnemies`'s stack cap. The actual reduction
+        // is applied where poison ticks resolve, in the tick loop below —
+        // this case only banks the flat amount for the wave.
+        const appliedSoFar = poisonResistApplied[source.side];
+        const amount = Math.min(poisonResistForTier(tier), Math.max(0, POISON_RESIST_CAP - appliedSoFar));
+        if (amount > 0) poisonResistApplied[source.side] = appliedSoFar + amount;
         break;
       }
       case 'chargeWhileBenched': {
@@ -877,7 +967,7 @@ export function simulate(
         // single unit instance can be revived more than once no matter how
         // steep the HP table gets or how long the battle (up to 45 waves) runs.
         const corpseIdx = fallen[source.side].findIndex((c) => c !== source && !c.raised);
-        if (corpseIdx === -1 || board.length >= combatCap) break;
+        if (corpseIdx === -1 || board.length >= capOf(source.side)) break;
         const [corpse] = fallen[source.side].splice(corpseIdx, 1);
         corpse.raised = true;
         corpse.health = Math.min(reviveHpForTier(tier), corpse.maxHealth);
@@ -930,7 +1020,7 @@ export function simulate(
         const perHitAttack =
           (def?.attack ?? 0) +
           source.relics.reduce((s, r) => s + (r.attack ?? 0), 0) +
-          (source.side === 'horde' ? teamAttack : 0) +
+          teamOf(source.side).attack +
           source.attackBuffs;
         if (perHitAttack <= 0) break;
         // First-hit relics (Glass Shard) — same `firstAttackDone`-gated bonus
@@ -939,19 +1029,21 @@ export function simulate(
         // loop even starts and previously bypassed the bonus entirely (a
         // Slink-Rat wearing Glass Shard got no bonus, ever — reported bug).
         // Applied to only the FIRST target, not every target this hits at
-        // ★2/★3: Glass Shard's wave-scaling bonus is deliberately uncapped
-        // (accepted risk, see its declaration in units.ts), so letting merge
-        // tier multiply it too would stack two unbounded axes (wave number
-        // AND target count) — exactly the compounding-law risk
-        // `backlineTargetsForTier`'s doc comment already rejected once for
-        // per-hit damage itself. "First hit each wave" reads as one bonus
-        // per unit per wave, not one per enemy struck.
+        // ★2/★3: even now that Glass Shard's bonus is a flat, capped number
+        // (issue #156 rework — the old wave-scaling version was uncapped and
+        // is why this comment used to warn about it), letting merge tier
+        // multiply it too would still stack two scaling axes (a per-hit flat
+        // bonus AND a growing target count) — same reasoning
+        // `backlineTargetsForTier`'s doc comment already applied to per-hit
+        // damage itself. "First hit each wave" reads as one bonus per unit
+        // per wave, not one per enemy struck.
         const firstHitBonus = source.firstAttackDone
           ? 0
-          : source.relics.reduce(
-              (s, r) => s + (r.firstHitBonusScalesWithWave ? currentWave : (r.firstHitBonus ?? 0)),
-              0
-            );
+          : source.relics.reduce((s, r) => s + (r.firstHitBonus ?? 0), 0);
+        // Armor-breaker half of Glass Shard's rework: the SAME first hit that
+        // carries the bonus above also ignores the target's armor — see
+        // `applyDamage`'s `ignoreArmor` param.
+        const ignoresArmor = !source.firstAttackDone && source.relics.some((r) => r.firstHitIgnoresArmor);
         source.firstAttackDone = true;
         const targets = opposing(source.side).slice(0, backlineTargetsForTier(source.tier));
         targets.forEach((target, i) => {
@@ -984,7 +1076,7 @@ export function simulate(
           // ticks inside the tick loop, after the clash) — so backline damage
           // always lands first, same relative order as Plague-Bearer's
           // `poisonFrontEnemy` already establishes for its own startOfWave hit.
-          applyDamage(target, amount, 'attack');
+          applyDamage(target, amount, 'attack', i === 0 && ignoresArmor);
         });
         break;
       }
@@ -1114,22 +1206,18 @@ export function simulate(
   let poisonLastApplied: Record<Side, number> = { horde: 0, gauntlet: 0 };
 
   /**
-   * Each living enemy's attack AT WAVE START, keyed by instanceId — the
-   * denominator `weakenAllEnemies` (Gutter-Acolyte, issue #137) percentages
-   * are taken against, snapshotted fresh every wave right after enemies are
-   * instantiated, before any Acolyte fires. See `weakenPercentForTier`'s doc
-   * comment in data/units.ts for why "original", not "current", is the base.
+   * Total flat `poisonResist` amount already banked for each SIDE this wave
+   * (Gutter-Acolyte, issue #155), keyed by side rather than per-target —
+   * unlike the `weakenAllEnemies` budget this replaces, resist protects the
+   * caster's own whole side uniformly, not individual enemy instances. Reset
+   * every wave alongside `poisonAllApplied`; each Acolyte's own flat
+   * `poisonResistForTier(tier)` is clipped to whatever's left of
+   * `POISON_RESIST_CAP` for that side, so multiple Acolytes stack additively
+   * up to the cap, never past it — see the `poisonResist` case's doc comment
+   * for the exact accounting and where the banked amount actually reduces
+   * poison damage.
    */
-  let weakenOriginalAttack: Map<number, number> = new Map();
-  /**
-   * Total fraction of `weakenOriginalAttack` already granted to each enemy
-   * this wave (issue #137), keyed by instanceId. Reset every wave alongside
-   * `poisonAllApplied`, same cap-not-sum shape: each `weakenAllEnemies`
-   * caster's own percent is clipped to whatever's left of
-   * `weakenPercentForTier(3)` for that specific enemy, so multiple Acolytes
-   * stack additively up to one ★3's worth, not without bound.
-   */
-  let weakenAppliedPercent: Map<number, number> = new Map();
+  let poisonResistApplied: Record<Side, number> = { horde: 0, gauntlet: 0 };
 
   /**
    * Total attack/health every `distributeStatsOnFaint` caster (Pack-Caller)
@@ -1168,15 +1256,34 @@ export function simulate(
     gauntlet: { attack: 0, health: 0 },
   };
 
-  for (let w = 0; w < gauntlet.waves.length && horde.length > 0; w++) {
+  // The enemy side as a list of wave builders. In `gauntlet` mode this is the
+  // PvE wave sequence exactly as before — one builder per wave, each
+  // instantiating tier-1 relic-less foes with that wave's depth scaling. A
+  // `duel` is a single wave: the opponent's real board, full tiers and relics,
+  // NO wave scaling (attack/health scale default to 1). Both go through the
+  // same `instantiate(... 'gauntlet' ...)` path, so the opponent is the enemy
+  // side of one symmetric fight.
+  const enemyWaves: Array<() => BattleUnit[]> =
+    mode.kind === 'gauntlet'
+      ? mode.gauntlet.waves.map((wave, w) => () =>
+          wave.units.map((d) =>
+            instantiate(d, 'gauntlet', [], 1, enemyAttackScale(w), enemyHealthScale(w))
+          )
+        )
+      : [
+          () =>
+            mode.opponent.units
+              .slice(0, BOARD_CAP)
+              .map((u) => instantiate(UNIT_DEFS[u.defId], 'gauntlet', u.relicIds, u.tier ?? 1)),
+        ];
+
+  for (let w = 0; w < enemyWaves.length && horde.length > 0; w++) {
     // 1-based wave number, matching the `waveStart`/`waveClear` events below
     // (`wave: w + 1`) — see `currentWave`'s declaration above `applyEffect`
     // for why this is a mutable closure variable rather than threaded as a
     // parameter through every call site.
     currentWave = w + 1;
-    enemies = gauntlet.waves[w].units.map((d) =>
-      instantiate(d, 'gauntlet', [], 1, enemyAttackScale(w), enemyHealthScale(w))
-    );
+    enemies = enemyWaves[w]();
     events.push({ type: 'waveStart', wave: w + 1, enemies: enemies.map(view) });
     damageThisWave = 0;
     // First-hit relics (Glass Shard) fire anew each wave — clear the horde's
@@ -1194,11 +1301,9 @@ export function simulate(
     // Plague-Bearer's own separate per-wave budget (issue #131) — see
     // `poisonLastApplied` above. Independent of `poisonAllApplied`.
     poisonLastApplied = { horde: 0, gauntlet: 0 };
-    // weakenAllEnemies (Gutter-Acolyte, issue #137): snapshot each enemy's
-    // fresh attack as the percentage denominator, and reset the per-enemy
-    // cap-not-sum budget — see both maps' doc comments above.
-    weakenOriginalAttack = new Map(enemies.map((e) => [e.instanceId, e.attack]));
-    weakenAppliedPercent = new Map();
+    // poisonResist (Gutter-Acolyte, issue #155): reset the per-side
+    // cap-not-sum budget — see the map's doc comment above.
+    poisonResistApplied = { horde: 0, gauntlet: 0 };
 
     fireEntryTriggers(horde);
     fireEntryTriggers(enemies);
@@ -1217,16 +1322,21 @@ export function simulate(
       // against any real (>1) hit; it just can't manufacture immortality.
       const frontStartHealth = horde[0].health;
       const foeStartHealth = enemies[0].health;
-      // Distribute team heal pool across all horde units to cap unbounded scaling
-      // with board size (issue #75: Forgotten Backpack). Instead of each unit
-      // getting full teamHealPerTick, divide it evenly: total team heal per tick
-      // = teamHealPerTick (e.g., 1), split among all horde units.
-      const teamHealPerUnit = horde.length > 0 ? teamHealPerTick / horde.length : 0;
+      // Distribute each side's team heal pool across that side's units to cap
+      // unbounded scaling with board size (issue #75: Forgotten Backpack).
+      // Instead of each unit getting the full pool, divide it evenly. In
+      // gauntlet mode only the horde carries a pool (enemyTeam is all-zero),
+      // so the enemy line stays byte-identical to before; a duel gives each
+      // board its own pool split across its own survivors.
+      const teamHealPerUnit = (side: Side, count: number) =>
+        count > 0 ? teamOf(side).healPerTick / count : 0;
+      const hordeHealPerUnit = teamHealPerUnit('horde', horde.length);
+      const enemyHealPerUnit = teamHealPerUnit('gauntlet', enemies.length);
       for (const board of [horde, enemies]) {
         for (const unit of board) {
           const unitHeal = unit.relics.reduce((s, r) => s + (r.healPerTick ?? 0), 0);
           const totalRegen =
-            unitHeal + (unit.side === 'horde' ? teamHealPerUnit : 0);
+            unitHeal + (unit.side === 'horde' ? hordeHealPerUnit : enemyHealPerUnit);
           const amount = Math.min(totalRegen, unit.maxHealth - unit.health);
           if (amount > 0) {
             unit.health += amount;
@@ -1240,9 +1350,17 @@ export function simulate(
       events.push({ type: 'clash', hordeId: front.instanceId, enemyId: foe.instanceId });
 
       const bonusOf = (u: BattleUnit): number =>
-        u.firstAttackDone ? 0 : u.relics.reduce((s, r) => s + (r.firstHitBonusScalesWithWave ? currentWave : (r.firstHitBonus ?? 0)), 0);
+        u.firstAttackDone ? 0 : u.relics.reduce((s, r) => s + (r.firstHitBonus ?? 0), 0);
+      // Armor-breaker half of Glass Shard's rework (issue #156): the same
+      // first hit that carries `bonusOf`'s bonus also ignores the target's
+      // armor — see `applyDamage`'s `ignoreArmor` param. Read BEFORE
+      // `firstAttackDone` flips below, same as `bonusOf` already does.
+      const ignoresArmorOf = (u: BattleUnit): boolean =>
+        !u.firstAttackDone && u.relics.some((r) => r.firstHitIgnoresArmor);
       const damageOut = front.attack + bonusOf(front);
       const damageIn = foe.attack + bonusOf(foe);
+      const frontIgnoresArmor = ignoresArmorOf(front);
+      const foeIgnoresArmor = ignoresArmorOf(foe);
       front.firstAttackDone = true;
       foe.firstAttackDone = true;
 
@@ -1257,8 +1375,13 @@ export function simulate(
       // otherwise land, until the wave's pool (set at `startOfWave`, sized
       // by `Math.max` across that side's Ward-Weavers) is exhausted.
       // Captured for Marrow-Snap's crossing check below: the execute must
-      // compare against the foe's health as it stood BEFORE this clash hit.
+      // compare against each unit's health as it stood BEFORE this clash hit.
+      // Both sides are snapshotted so the execute (and cleave) can resolve
+      // symmetrically in a duel, where the enemy front can also carry relics;
+      // in gauntlet mode `front`'s snapshot is simply never consulted (enemy
+      // foes hold no relics), so this is byte-identical for PvE.
       const foeHealthBeforeClash = foe.health;
+      const frontHealthBeforeClash = front.health;
       // Whether each side's clash blow actually LANDED this tick — a
       // Ward-Weaver-absorbed hit never touched the body, so it must not
       // fire `onHurt` (issue #134) below.
@@ -1268,14 +1391,14 @@ export function simulate(
         blockCharges[foe.side]--;
         events.push({ type: 'shieldAbsorbed', targetId: foe.instanceId });
       } else {
-        applyDamage(foe, damageOut, 'attack');
+        applyDamage(foe, damageOut, 'attack', frontIgnoresArmor);
         foeTookBlow = true;
       }
       if (blockCharges[front.side] > 0) {
         blockCharges[front.side]--;
         events.push({ type: 'shieldAbsorbed', targetId: front.instanceId });
       } else {
-        applyDamage(front, damageIn, 'attack');
+        applyDamage(front, damageIn, 'attack', foeIgnoresArmor);
         frontTookBlow = true;
       }
       // Net-damage floor: a unit whose clash blow landed must end the tick at
@@ -1311,34 +1434,58 @@ export function simulate(
       // data/relics.ts). Only fires if the foe actually survived this clash
       // (a kill is a kill, not an execute) and skips a foe a surviveLethal
       // relic just rescued to 1 health.
-      const executeRelic = front.relics.find((r) => r.executeThreshold !== undefined);
-      const executeCutoff = executeRelic ? foe.maxHealth * executeRelic.executeThreshold! : 0;
-      if (executeRelic && foe.health > 0 && foeHealthBeforeClash > executeCutoff && foe.health <= executeCutoff) {
-        events.push({ type: 'relicProc', targetId: front.instanceId, relicId: executeRelic.id, name: executeRelic.name });
-        // Finish the foe directly rather than routing through applyDamage:
-        // this is a kill-condition check, not a fresh attack, so it must not
-        // be blunted by the foe's own armor (damageReduction) the way a
-        // normal hit would be.
-        const finishing = foe.health;
-        foe.health = 0;
-        events.push({ type: 'damage', targetId: foe.instanceId, amount: finishing, remainingHealth: 0 });
-      }
-
-      // Gore-Cleaver: overkill damage that actually fells the front foe
-      // carries to the next enemy in line, once, no chaining. Guard against
-      // Tail-Charm (or any future surviveLethal) actually saving the foe —
-      // check post-applyDamage health, not just the raw overkill math.
-      if (front.relics.some((r) => r.cleaveOverkill) && foe.health <= 0) {
-        // Carry what actually spilled past the kill, i.e. how far the foe's
-        // health went negative — not the raw swing, which armor may have
-        // blunted before it landed.
-        const overkill = -foe.health;
-        const next = enemies[1];
+      // Marrow-Snap execute and Gore-Cleaver cleave, both factored into
+      // direction-agnostic helpers and fired in BOTH directions. Originally
+      // both only ever checked the horde front's relics against the enemy —
+      // safe in PvE because gauntlet enemies never carry relics, but in a
+      // duel the enemy front is a real player board that can carry either
+      // relic, so an unmirrored version would resolve differently by seat
+      // (a Gore-Cleaver in seat A cleaving while the identical board in seat
+      // B does not — a mirror match would not draw). The enemy-direction call
+      // is a strict no-op in gauntlet mode (no relics to match), so PvE stays
+      // byte-identical; the pair is symmetric, so a true mirror always draws.
+      const tryExecute = (
+        attacker: BattleUnit,
+        defender: BattleUnit,
+        defenderHealthBeforeClash: number
+      ): void => {
+        const relic = attacker.relics.find((r) => r.executeThreshold !== undefined);
+        if (!relic) return;
+        const cutoff = defender.maxHealth * relic.executeThreshold!;
+        // CROSSING semantics: this clash blow must have driven the defender
+        // from above the line to at or below it. A defender already under the
+        // line (poison chip, an earlier clash) is NOT tap-executable.
+        if (defender.health > 0 && defenderHealthBeforeClash > cutoff && defender.health <= cutoff) {
+          events.push({ type: 'relicProc', targetId: attacker.instanceId, relicId: relic.id, name: relic.name });
+          // Finish directly rather than through applyDamage: a kill-condition
+          // check, not a fresh attack, so armor (damageReduction) must not
+          // blunt it.
+          const finishing = defender.health;
+          defender.health = 0;
+          events.push({ type: 'damage', targetId: defender.instanceId, amount: finishing, remainingHealth: 0 });
+        }
+      };
+      const tryCleave = (attacker: BattleUnit, defender: BattleUnit): void => {
+        // Overkill that actually fells the front defender carries to the next
+        // unit in the defender's OWN line, once, no chaining. Guard against a
+        // surviveLethal (Tail-Charm) rescue by checking post-damage health.
+        if (!attacker.relics.some((r) => r.cleaveOverkill) || defender.health > 0) return;
+        // Carry what actually spilled past the kill — how far health went
+        // negative — not the raw swing, which armor may have blunted.
+        const overkill = -defender.health;
+        const next = boardOf(defender.side)[1];
         if (overkill > 0 && next) {
-          events.push({ type: 'relicProc', targetId: front.instanceId, relicId: 'gore-cleaver', name: 'Gore-Cleaver' });
+          events.push({ type: 'relicProc', targetId: attacker.instanceId, relicId: 'gore-cleaver', name: 'Gore-Cleaver' });
           applyDamage(next, overkill, 'attack');
         }
-      }
+      };
+      // Execute before cleave (an execute can feed the cleave), each side's
+      // own before-clash snapshot. Front direction first keeps PvE event order
+      // identical; the foe-direction calls insert nothing in gauntlet mode.
+      tryExecute(front, foe, foeHealthBeforeClash);
+      tryExecute(foe, front, frontHealthBeforeClash);
+      tryCleave(front, foe);
+      tryCleave(foe, front);
 
       if (front.ability?.trigger === 'afterAttack') applyEffect(front, 0, false);
       if (foe.ability?.trigger === 'afterAttack') applyEffect(foe, 0, false);
@@ -1360,13 +1507,23 @@ export function simulate(
       for (const board of [horde, enemies]) {
         for (const unit of [...board]) {
           if (unit.poison > 0 && unit.health > 0) {
+            // Gutter-Acolyte's poisonResist (issue #155) subtracts a flat
+            // amount from this side's incoming poison tick — banked once per
+            // wave above, applied here at the point every tick's damage is
+            // actually resolved. Floored at 0 (a small enough stack can be
+            // fully negated this tick), but the shared `POISON_RESIST_CAP`
+            // budget means it can never negate MORE than that flat ceiling
+            // per tick, so a strong enough poison source always gets some
+            // damage through.
+            const resisted = Math.max(0, unit.poison - poisonResistApplied[unit.side]);
             // Only poison landed on the gauntlet side counts as damage dealt
             // (issue #126) — the horde's own poison intake is upkeep, not
-            // output. Poison bypasses armor (see applyDamage), so the amount
-            // dealt always equals unit.poison exactly; no need to read a
-            // return value back out of applyDamage for the true dealt amount.
-            if (board === enemies) totalDamage += unit.poison;
-            applyDamage(unit, unit.poison, 'poison');
+            // output. Poison bypasses armor (see applyDamage); resist is
+            // applied above, before the amount reaches applyDamage, so no
+            // need to read a return value back out of it for the true dealt
+            // amount.
+            if (board === enemies) totalDamage += resisted;
+            applyDamage(unit, resisted, 'poison');
           }
         }
       }
@@ -1406,5 +1563,9 @@ export function simulate(
       damageDealt: totalDamage,
       enemiesDefeated: fallen.gauntlet.length,
     },
+    // Whatever the enemy side has left standing when the battle ended. In a
+    // duel this is side B's surviving board (the winner signal); the PvE
+    // `simulate` wrapper drops it.
+    enemySurvivors: enemies.map(view),
   };
 }

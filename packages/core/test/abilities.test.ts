@@ -339,39 +339,78 @@ describe('unit abilities', () => {
     expect(buffs.every((b) => b.attack === 1 && b.health === 1)).toBe(true);
   });
 
-  it('Rat-Piper maintains a litter: summons up to target, then nothing while it is full (issue #105)', () => {
-    // Harmless dummies (0 attack) — the pups never die, so after the wave-1
-    // fill the litter is always full and the maintenance summon is a no-op.
-    // Target at ★1 is count(2)*tier(1) = 2 pups.
+  it('Rat-Piper summons exactly one pup, once, at battle start (issue #161 rework)', () => {
+    // `startOfBattle`-fired: even across several waves (each with a fresh
+    // harmless dummy so nothing dies to trigger a revive/second death), the
+    // pup only ever comes in on wave 1 — no per-wave re-piping.
     const { events } = simulate(
       lineup({ defId: 'rat-piper' }),
       gauntletOf([dummy(0, 1)], [dummy(0, 1)], [dummy(0, 1)])
     );
     const summons = ofType(events, 'summon');
-    expect(summons.length).toBe(2); // two pups, ONCE — NOT two per wave
-    expect(summons.every((s) => s.unit.defId === 'pup')).toBe(true);
+    expect(summons.length).toBe(1);
+    expect(summons[0].unit.defId).toBe('pup');
     expect(summons[0].index).toBe(0);
   });
 
-  it('Rat-Piper tops the litter back up when a pup falls', () => {
-    // A 1-attack dummy kills the front summoned pup (health 1) each wave; the
-    // piper itself (health 2) survives, so it re-summons the shortfall.
+  it('Rat-Piper does not re-summon on a later wave even if the pup already died', () => {
+    // A 1-attack dummy kills the summoned pup (health 1) on wave 1; Rat-Piper
+    // itself (health 2) survives. Unlike the old #105 `maintainSummons`
+    // top-up, `startOfBattle` has already fired once for this instance and
+    // never fires again — the litter is not maintained across waves.
     const { events } = simulate(
       lineup({ defId: 'rat-piper' }),
       gauntletOf([dummy(1, 1)], [dummy(1, 1)], [dummy(1, 1)])
     );
     const summons = ofType(events, 'summon');
-    expect(summons.length).toBeGreaterThan(2); // wave-1 fill (2) plus refills as pups die
-    expect(summons.every((s) => s.unit.defId === 'pup')).toBe(true);
+    expect(summons.length).toBe(1);
   });
 
-  it('Rat-Piper maintains count*tier pups (2/4/6 by tier)', () => {
+  it("Rat-Piper's summoned pup scales with tier via the standard exponential curve, not the count", () => {
+    // The pup is instantiated at the CASTER's own tier (issue #161): a t2
+    // Piper's pup gets tierAttackMultiplier/tierHealthMultiplier(2) = 3x on
+    // its base 1/1 stats, i.e. 3/3 — count stays fixed at 1 regardless of
+    // tier.
     const { events } = simulate(
       lineup({ defId: 'rat-piper', tier: 2 }),
       gauntletOf([dummy(0, 1)])
     );
     const summons = ofType(events, 'summon');
-    expect(summons.length).toBe(4); // target 2*2 = 4 pups on the opening wave
+    expect(summons.length).toBe(1);
+    expect(summons[0].unit.attack).toBe(3);
+    expect(summons[0].unit.health).toBe(3);
+  });
+
+  it("Rat-Piper's summoned pup inherits a copy of Piper's own equipped relic (issue #161 follow-up)", () => {
+    // Rusted Nail (+2 attack) on Piper: Piper's own attack is 1+2=3, and the
+    // pup — base 1/1, tier 1, no tier scaling difference here — should ALSO
+    // read 1+2=3 attack, not the bare 1 a relic-less summon would carry.
+    const { events } = simulate(
+      lineup({ defId: 'rat-piper', relicIds: ['rusted-nail'] }),
+      gauntletOf([dummy(0, 100)])
+    );
+    const start = ofType(events, 'battleStart')[0];
+    expect(start.horde[0].attack).toBe(3); // Piper itself
+    const summons = ofType(events, 'summon');
+    expect(summons.length).toBe(1);
+    expect(summons[0].unit.attack).toBe(3); // the pup, inherited
+  });
+
+  it("a relic-less Rat-Piper's pup carries no relic bonus", () => {
+    const { events } = simulate(lineup({ defId: 'rat-piper' }), gauntletOf([dummy(0, 100)]));
+    const summons = ofType(events, 'summon');
+    expect(summons[0].unit.attack).toBe(1);
+  });
+
+  it("the inherited relic actually FUNCTIONS on the pup, not just a display stat: Weeping Boil procs on the pup's own faint", () => {
+    // The pup (health 1) dies to a 1-attack dummy; Weeping Boil should fire
+    // ITS OWN faint nova, independent of Piper (who never dies here).
+    const { events } = simulate(
+      lineup({ defId: 'rat-piper', relicIds: ['weeping-boil'] }),
+      gauntletOf([dummy(1, 1)])
+    );
+    const procs = ofType(events, 'relicProc').filter((p) => p.relicId === 'weeping-boil');
+    expect(procs.length).toBe(1);
   });
 });
 
@@ -385,19 +424,40 @@ describe('relics', () => {
     expect(start.horde[0].attack).toBe(3);
   });
 
-  it('Glass Shard adds damage equal to the current wave number to the first hit of each wave', () => {
+  it('Glass Shard adds a flat +4 damage bonus to the first hit of each wave (issue #156 rework)', () => {
     const { events } = simulate(
       lineup({ defId: 'gutter-runt', relicIds: ['glass-shard'] }),
       gauntletOf([dummy(0, 10)], [dummy(0, 10)])
     );
     const hits = ofType(events, 'damage').filter((d) => d.amount > 0);
-    // First hit of wave 1 is boosted by the wave number (1 + 1 = 2), the rest are 1...
-    expect(hits[0].amount).toBe(2);
+    // First hit of wave 1 is boosted (base 1 + 4 = 5), the rest are 1...
+    expect(hits[0].amount).toBe(5);
     expect(hits[1].amount).toBe(1);
-    // ...and it fires anew on the first hit of wave 2, boosted by wave 2 (1 + 2 = 3).
+    // ...and it fires anew on the first hit of wave 2, same flat bonus — NOT
+    // growing with the wave number (that was the pre-#156 behavior, cut for
+    // being both duel-dead and an uncapped compounding-law liability).
     const boosted = hits.filter((h) => h.amount > 1);
     expect(boosted).toHaveLength(2);
-    expect(boosted[1].amount).toBe(3);
+    expect(boosted[1].amount).toBe(5);
+  });
+
+  it('Glass Shard\'s first hit each wave also ignores the target\'s armor outright (issue #156)', () => {
+    // health 3 dies outright to the boosted, armor-ignored hit (base 1 +
+    // bonus 4 = 5) in exactly one clash — a normal clash against 5 armor
+    // would floor to MIN_ATTACK_DAMAGE (1) instead and take several clashes
+    // to whittle down. One armored dummy per wave keeps each wave's damage
+    // log to exactly its first (and only) hit, so `hits[w]` unambiguously
+    // means "wave w+1's first hit."
+    const armored: UnitDef = { id: 'armored-dummy', name: 'Armored Dummy', attack: 0, health: 3, cost: 0, damageReduction: 5 };
+    const { events } = simulate(
+      lineup({ defId: 'gutter-runt', relicIds: ['glass-shard'] }),
+      gauntletOf([armored], [armored])
+    );
+    const hits = ofType(events, 'damage').filter((d) => d.amount > 0);
+    expect(hits).toHaveLength(2);
+    expect(hits[0].amount).toBe(5);
+    // Wave 2's first hit ignores armor again too (fires anew each wave).
+    expect(hits[1].amount).toBe(5);
   });
 
   it('Weeping Boil damages all enemies when the bearer faints', () => {
@@ -546,15 +606,30 @@ describe('relics', () => {
     expect(ofType(events, 'relicProc').some((p) => p.relicId === 'gore-cleaver')).toBe(false);
   });
 
-  it('Filth Totem grants the whole horde +1 health, including summons', () => {
+  it('Filth Totem grants the whole horde +1 armor, stacking on top of a unit\'s own', () => {
+    // Dire-Rat already blunts 2 (its own damageReduction); the totem adds 1
+    // more team-wide, so a 5-attack foe should now land 2, not the 3 a lone
+    // Dire-Rat's own armor alone would leave (issue #156 rework).
+    const { events } = simulate(
+      { units: [{ defId: 'dire-rat' }], teamRelicIds: ['filth-totem'] },
+      gauntletOf([dummy(5, 100)])
+    );
+    const onRat = ofType(events, 'damage').filter((e) => e.targetId === 1);
+    expect(onRat.length).toBeGreaterThan(0);
+    expect(onRat.every((e) => e.amount === 2)).toBe(true);
+  });
+
+  it('Filth Totem armor also reaches summons', () => {
+    // Rat-Piper's pup lands in front of its own caster (spawn splices at the
+    // caster's own index), so it's the pup that eats the foe's hits here.
     const { events } = simulate(
       { units: [{ defId: 'rat-piper' }], teamRelicIds: ['filth-totem'] },
-      gauntletOf([dummy(0, 1)])
+      gauntletOf([dummy(3, 100)])
     );
-    const start = ofType(events, 'battleStart')[0];
-    expect(start.horde[0].health).toBe(3);
-    const summons = ofType(events, 'summon');
-    expect(summons[0].unit.health).toBe(2);
+    const pupId = ofType(events, 'summon')[0].unit.instanceId;
+    const onPup = ofType(events, 'damage').filter((e) => e.targetId === pupId);
+    expect(onPup.length).toBeGreaterThan(0);
+    expect(onPup.every((e) => e.amount === 2)).toBe(true);
   });
 
   it('The Forgotten Backpack grants the whole horde +2/+2, including summons', () => {
@@ -739,14 +814,14 @@ describe('startOfBattle fires once per unit, startOfWave every wave', () => {
     expect(ofType(events, 'buff')).toHaveLength(1);
   });
 
-  it('Rat-Piper re-pipes every wave when its pups keep dying (startOfWave still fires; #105 maintenance)', () => {
-    // Lethal grinder (1 attack kills the health-1 pup each wave), so the
-    // maintenance summon has a shortfall to refill every wave — proving the
-    // startOfWave trigger still fires each wave, it just no-ops when the
-    // litter is already full (covered separately in the Rat-Piper suite).
+  it('Rat-Piper does not re-pipe even when its pup keeps dying (startOfBattle, issue #161)', () => {
+    // Lethal grinder (1 attack kills the health-1 pup each wave). Under the
+    // pre-#161 `maintainSummons` this refilled every wave; the `startOfBattle`
+    // rework fires exactly once for this Piper instance regardless of how
+    // many waves follow or whether the pup survives them.
     const lethal = gauntletOf(...Array.from({ length: 5 }, () => [dummy(1, 1)]));
     const { events } = simulate(lineup({ defId: 'rat-piper' }), lethal);
-    expect(ofType(events, 'summon').length).toBeGreaterThan(1);
+    expect(ofType(events, 'summon').length).toBe(1);
   });
 
   it('Plague-Bearer still re-poisons each wave (poison clears at waveClear)', () => {
@@ -829,17 +904,17 @@ describe('combat cap headroom for summons', () => {
     expect(ofType(events, 'summon')).toHaveLength(0);
   });
 
-  it('combatCap gives the pups somewhere to land', () => {
-    // Board 8, cap 10 → 2 slots of headroom, and Rat-Piper's ★1 target is 2
-    // pups (count 2 * tier 1), so both land.
+  it('combatCap gives the pup somewhere to land', () => {
+    // Board 8, cap 10 → 2 slots of headroom; Rat-Piper's fixed count (1,
+    // issue #161) only needs one, so it lands.
     const { events } = simulate({ units: fullBoard(), combatCap: 10 }, gauntletOf([dummy(0, 100)]));
-    expect(ofType(events, 'summon')).toHaveLength(2);
+    expect(ofType(events, 'summon')).toHaveLength(1);
   });
 });
 
 describe('golden log regression', () => {
   it('the full showcase battle produces the pinned event-log hash', () => {
     const { events } = simulate(TEST_HORDE, generateGauntlet('2026-01-01'));
-    expect(fnv1a(JSON.stringify(events))).toMatchInlineSnapshot(`16328822`);
+    expect(fnv1a(JSON.stringify(events))).toMatchInlineSnapshot(`3491901326`);
   });
 });

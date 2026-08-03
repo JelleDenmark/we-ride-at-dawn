@@ -12,7 +12,8 @@ export {
   cellarCoilChargeCapForTier,
   backlineTargetsForTier,
   buffSummonedForTier,
-  weakenPercentForTier,
+  poisonResistForTier,
+  POISON_RESIST_CAP,
   type UnitDef,
   type Ability,
   type Effect,
@@ -21,6 +22,21 @@ export {
   type LineupUnit,
   type TimeOfDay,
 } from './data/units';
+export {
+  KEYWORD_FAMILIES,
+  FAMILY_COLOR,
+  FAMILY_TEXT_COLOR,
+  FAMILY_TEXT_ON,
+  FAMILY_TEXT_MIN_CONTRAST,
+  FAMILY_GLYPH,
+  EFFECT_FAMILY,
+  EFFECT_KEYWORD,
+  unitKeyword,
+  relicKeyword,
+  keywordFamily,
+  type KeywordFamily,
+  type UnitKeyword,
+} from './data/keyword-family';
 export { RELIC_DEFS, type RelicDef } from './data/relics';
 export { ENEMY_POOL } from './data/enemies';
 export type { Archetype } from './data/units';
@@ -52,6 +68,7 @@ export {
   upcomingRetirements,
   shopUnitPoolForDay,
   seasonUnitPool,
+  seasonRelicPool,
   buyUnit,
   canRecruit,
   buyRelic,
@@ -80,6 +97,7 @@ export {
 } from './shop';
 export {
   simulate,
+  simulateCore,
   BOARD_CAP,
   COMBAT_CAP_BONUS,
   MIN_ATTACK_DAMAGE,
@@ -91,18 +109,17 @@ export {
   enemyAttackScale,
   type BattleEvent,
   type BattleResult,
+  type BattleMode,
+  type CoreOutput,
   type UnitView,
 } from './sim';
+export { simulateDuel, type DuelResult } from './duel';
 export {
-  simulateBossTrial,
-  simulateBossTrialReplay,
-  buildBossTrialGauntlet,
-  bossTrialPhaseAttack,
-  bossTrialPhaseHP,
-  BOSS_TRIAL_BASE_ATTACK,
-  BOSS_TRIAL_HP_BASE,
-  BOSS_TRIAL_HP_GROWTH_PER_PHASE,
-  BOSS_TRIAL_ESCALATION,
-  BOSS_TRIAL_MAX_PHASES,
-  type BossTrialResult,
-} from './boss-trial';
+  scoreRound,
+  validateBoard,
+  legalEntrants,
+  consolationScrap,
+  LOSS_CONSOLATION_DEFAULT,
+  type LeagueEntrant,
+  type RoundStanding,
+} from './pvp';

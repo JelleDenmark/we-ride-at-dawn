@@ -8,6 +8,7 @@
   },
   "scripts": {
     "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
     "balance": "tsx scripts/balance.ts",
     "balance:depth": "tsx scripts/depth-scaling.ts",
     "snowball": "tsx scripts/snowball.ts",
@@ -20,10 +21,14 @@
     "balance:economy": "tsx scripts/economy.ts",
     "balance:maxed-board-guardrail": "tsx scripts/maxed-board-guardrail.ts",
     "balance:slot-value": "tsx scripts/slot-value.ts",
-    "balance:boss-trial": "tsx scripts/boss-trial-probe.ts",
     "balance:realistic": "tsx scripts/realistic-player.ts",
     "balance:combos": "tsx scripts/combo-matrix.ts",
-    "balance:t2-percentiles": "tsx scripts/t2-percentiles.ts"
+    "balance:t2-percentiles": "tsx scripts/t2-percentiles.ts",
+    "pvp:round": "tsx scripts/run-league-round.ts",
+    "pvp:dry-run": "tsx scripts/pvp-dry-run-leaderboard.ts",
+    "pvp:matrix": "tsx scripts/pvp-unit-matrix.ts",
+    "pvp:combos": "tsx scripts/pvp-combo-matrix.ts",
+    "pvp:relics": "tsx scripts/pvp-relic-matrix.ts"
   },
   "devDependencies": {
     "tsx": "^4.19.0",

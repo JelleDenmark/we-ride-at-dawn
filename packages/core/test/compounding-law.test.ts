@@ -129,9 +129,13 @@ describe('compounding-law: allyFaint stat-farming stays capped by the combat hea
     // RECRUITABLE feeders only (cost > 0): the issue #105 babushka added
     // cost-0 internal cascade bodies (brood-broodling summons brood-runts) —
     // those are never on a real board, so a canary that recruited one
-    // standalone would be measuring a fiction. Both summon shapes feed
-    // allyFaint: `summon` (Brood-Mother's cascade) and `maintainSummons`
-    // (Rat-Piper's litter, which keeps re-feeding dead pups).
+    // standalone would be measuring a fiction. `maintainSummons` matches no
+    // current def (Rat-Piper's issue #161 rework replaced it with
+    // `summonScaledPup`, a `startOfBattle` fire-once summon deliberately
+    // excluded here — it cannot re-feed `allyFaint` wave after wave the way
+    // this canary is built to stress, so Brood-Mother's `summon` cascade is
+    // the sole feeder now). Kept in the filter for any FUTURE per-wave
+    // maintenance summoner that reuses the kind.
     const feeders = Object.values(UNIT_DEFS).filter(
       (u) =>
         u.cost > 0 &&

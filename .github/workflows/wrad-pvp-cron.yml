@@ -39,4 +39,8 @@ jobs:
           # anon write policy). Add it as a repo secret. Without it the run
           # falls back to a read-only preview.
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # RatKing's bot token (issue #162) — posts the round's standings to
+          # #wrad. Same secret the discord-feedback edge function uses. Without
+          # it the round still scores and writes; only the Discord post is skipped.
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
         run: npm run pvp:round -- ${{ (github.event_name == 'workflow_dispatch' && inputs.dry) && '--dry' || '' }}

@@ -1,0 +1,88 @@
+import { describe, expect, it } from 'vitest';
+import { roundResultsFor, type BoardRow } from '../scripts/lib/pvp-league';
+import type { Lineup } from '../src/data/units';
+
+const b = (device_id: string, name: string, units: Lineup['units']): BoardRow => ({
+  device_id,
+  name,
+  board: { units },
+});
+
+const soloRat: Lineup['units'] = [{ defId: 'dire-rat' }];
+const triRat: Lineup['units'] = [{ defId: 'dire-rat' }, { defId: 'dire-rat' }, { defId: 'dire-rat' }];
+
+describe('roundResultsFor (pure nightly transform)', () => {
+  it('produces one result row per legal board, in standings order', () => {
+    const boards = [
+      b('dev-titan', 'Titan', triRat),
+      b('dev-weak-1', 'Weakling One', soloRat),
+      b('dev-weak-2', 'Weakling Two', soloRat),
+    ];
+    const { resultRows, scored, skipped } = roundResultsFor(boards, '2026-08-03', '2026-08-03#2026-08-05');
+    expect(skipped).toBe(false);
+    expect(scored).toBe(3);
+    expect(resultRows).toHaveLength(3);
+
+    // Ordered by standings: the triRat titan tops it.
+    expect(resultRows[0].device_id).toBe('dev-titan');
+    expect(resultRows[0].points).toBe(6); // 2 wins
+    // Names are carried from the board rows, not lost.
+    expect(resultRows[0].name).toBe('Titan');
+    // Every row is stamped with the round + season for the DB.
+    for (const r of resultRows) {
+      expect(r.round_id).toBe('2026-08-03#2026-08-05');
+      expect(r.season_id).toBe('2026-08-03');
+    }
+  });
+
+  it('maps survivorDiff -> survivor_diff (camel to snake) intact', () => {
+    const boards = [b('a', 'A', triRat), b('c', 'C', soloRat)];
+    const { resultRows } = roundResultsFor(boards, 's', 'r');
+    const titan = resultRows.find((r) => r.device_id === 'a')!;
+    // triRat beats soloRat with survivors to spare, so its margin is positive.
+    expect(titan.survivor_diff).toBeGreaterThan(0);
+    // Zero-sum: the two boards' margins cancel.
+    const sum = resultRows.reduce((s, r) => s + r.survivor_diff, 0);
+    expect(sum).toBe(0);
+  });
+
+  it('drops an illegal board and scores the rest', () => {
+    const boards = [
+      b('good-1', 'Good One', soloRat),
+      b('bad', 'Cheater', [{ defId: 'not-a-real-unit' }]),
+      b('good-2', 'Good Two', triRat),
+    ];
+    const { resultRows, scored, dropped } = roundResultsFor(boards, 's', 'r');
+    expect(dropped.map((d) => d.device_id)).toEqual(['bad']);
+    expect(scored).toBe(2);
+    expect(resultRows.map((r) => r.device_id).sort()).toEqual(['good-1', 'good-2']);
+  });
+
+  it('skips (writes nothing) when fewer than 2 legal boards exist', () => {
+    const lone = roundResultsFor([b('only', 'Lonely', soloRat)], 's', 'r');
+    expect(lone.skipped).toBe(true);
+    expect(lone.resultRows).toEqual([]);
+
+    const oneLegal = roundResultsFor(
+      [b('ok', 'OK', soloRat), b('bad', 'Bad', [{ defId: 'nope' }])],
+      's',
+      'r'
+    );
+    expect(oneLegal.skipped).toBe(true);
+    expect(oneLegal.scored).toBe(1);
+  });
+
+  it('is deterministic — same boards, identical rows twice', () => {
+    const boards = [b('a', 'A', triRat), b('b2', 'B', soloRat), b('c', 'C', soloRat)];
+    expect(roundResultsFor(boards, 's', 'r')).toEqual(roundResultsFor(boards, 's', 'r'));
+  });
+
+  it('snapshots each device\'s exact fielded board onto its result row (issue #158)', () => {
+    const boards = [b('a', 'A', triRat), b('c', 'C', soloRat)];
+    const { resultRows } = roundResultsFor(boards, 's', 'r');
+    const titan = resultRows.find((r) => r.device_id === 'a')!;
+    const weakling = resultRows.find((r) => r.device_id === 'c')!;
+    expect(titan.board).toEqual({ units: triRat });
+    expect(weakling.board).toEqual({ units: soloRat });
+  });
+});

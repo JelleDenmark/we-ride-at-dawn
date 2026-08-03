@@ -5,7 +5,7 @@ import { CHANNEL } from './env';
 // Dev builds ride a parallel, prefixed season so testing (and dev-toolbar
 // inflated depths) never touch the public prod board. The UI still shows the
 // real week date; only the stored/queried key differs.
-// Exported so other boards (e.g. boss-trial-board.ts) share the exact same
+// Exported so other boards (e.g. pvp-board.ts) share the exact same
 // dev-prefix isolation instead of re-deriving it.
 export function boardSeason(seasonId: string): string {
   return CHANNEL === 'dev' ? `dev-${seasonId}` : seasonId;
@@ -33,29 +33,66 @@ export function defaultName(): string {
   return `${a}-${n}`;
 }
 
-export interface BoardRow {
-  name: string;
-  depth: number;
-  day: number;
-  device_id: string;
-  /** Cumulative season enemies-defeated total — now the THIRD tiebreak,
-   * below boss_damage (issue #132). */
-  kills: number;
-  /** Best Boss Trial damage this season (0 if never attempted) — the second
-   * sort key, so it breaks depth ties on the saturated top band (#132). */
-  boss_damage: number;
-  /** False when the player has a depth score but never ran a Boss Trial —
-   * the UI shows "—" rather than a shaming 0. */
-  boss_attempted: boolean;
+// The board tables no longer publish `device_id` (see
+// supabase/migrations/2026-08-01-hide-device-id.sql). Reads go through the
+// `*_public` views, which serve an opaque `player_id` instead:
+//
+//     player_id = sha256('wrad:' || device_id)
+//
+// The device id is still what WRITES are keyed on — it just isn't handed to
+// every other client any more, because the write RPCs accept it as a parameter
+// without proving ownership.
+//
+// This digest MUST stay byte-identical to the view's. If they drift, `isMe()`
+// silently stops matching and every player sees themselves as a stranger — no
+// error, just a board with no "· you" on it.
+const PLAYER_ID_SALT = 'wrad:';
+
+let cachedPlayerId: string | null = null;
+let playerIdInFlight: Promise<string> | null = null;
+
+/**
+ * This device's opaque public id, memoised. Async because WebCrypto is; the
+ * fetch paths in pvp-board.ts await it before mapping rows, which is what lets
+ * `isMe` stay synchronous for template use.
+ *
+ * Never throws. `crypto.subtle` needs a secure context — always true for the
+ * deployed site and for localhost, but if it is ever missing this resolves to
+ * an empty string, which cannot collide with a 64-char hex digest. The failure
+ * mode is "nothing is highlighted as yours", not a crash.
+ */
+export function playerId(): Promise<string> {
+  if (playerIdInFlight) return playerIdInFlight;
+  playerIdInFlight = (async () => {
+    try {
+      const bytes = new TextEncoder().encode(`${PLAYER_ID_SALT}${deviceId().toLowerCase()}`);
+      const digest = await crypto.subtle.digest('SHA-256', bytes);
+      cachedPlayerId = [...new Uint8Array(digest)]
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('');
+    } catch {
+      cachedPlayerId = '';
+    }
+    return cachedPlayerId;
+  })();
+  return playerIdInFlight;
 }
 
 /** True if this row belongs to the player on this device. Typed structurally
- * (just the device_id column) rather than `BoardRow` so other boards with
- * different score columns — e.g. boss-trial-board.ts's `BossTrialRow` — can
- * reuse this instead of redefining the same one-liner. */
-export function isMe(row: { device_id: string }): boolean {
-  return row.device_id === deviceId();
+ * (just the player_id column) so the various board row shapes — e.g.
+ * pvp-board.ts's `GhostRow`/`StandingRow` — can reuse this instead of
+ * redefining the same one-liner.
+ *
+ * Synchronous, so it works in templates and `Array.find`. Returns false until
+ * `playerId()` has resolved; every caller reaches it via a fetch that already
+ * awaited that, so in practice the cache is always warm by then. */
+export function isMe(row: { player_id: string }): boolean {
+  return cachedPlayerId !== null && cachedPlayerId !== '' && row.player_id === cachedPlayerId;
 }
+
+// Warm the digest at module load so the cache is populated well before the
+// first network read resolves.
+void playerId();
 
 const HEADERS = {
   apikey: SUPABASE_ANON_KEY,
@@ -104,57 +141,9 @@ export async function submitScore(args: {
   }
 }
 
-// The combined board (issue #132): the depth `scores` table left-joined to
-// Boss Trial damage, ordered depth → boss_damage → kills. Reads come from
-// the `combined_board` view (RLS-respecting via security_invoker); writes
-// still go to the two underlying tables through their own RPCs, unchanged.
-const COMBINED_ORDER = 'depth.desc,boss_damage.desc,kills.desc,updated_at.asc';
-
-/** Top-N of a season on the combined board: depth first, best Boss Trial
- * damage breaks depth ties, kills breaks damage ties. Empty array on any failure. */
-export async function fetchTop(seasonId: string, limit = 20): Promise<BoardRow[]> {
-  try {
-    const url =
-      `${SUPABASE_URL}/rest/v1/combined_board?season_id=eq.${encodeURIComponent(boardSeason(seasonId))}` +
-      `&order=${COMBINED_ORDER}&limit=${limit}` +
-      `&select=name,depth,day,device_id,kills,boss_damage,boss_attempted`;
-    const res = await fetch(url, { headers: HEADERS });
-    if (!res.ok) return [];
-    return (await res.json()) as BoardRow[];
-  } catch {
-    return [];
-  }
-}
-
-/**
- * This device's rank on the combined board (1-based). A rider outranks you if
- * they're strictly deeper, OR tied on depth with more boss damage, OR tied on
- * both with more kills — mirrors COMBINED_ORDER's three levels exactly.
- * Returns null if unranked or on failure.
- */
-export async function fetchRank(
-  seasonId: string,
-  depth: number,
-  bossDamage: number,
-  kills: number
-): Promise<number | null> {
-  if (depth <= 0) return null;
-  try {
-    const outrank =
-      `or=(depth.gt.${depth},` +
-      `and(depth.eq.${depth},boss_damage.gt.${bossDamage}),` +
-      `and(depth.eq.${depth},boss_damage.eq.${bossDamage},kills.gt.${kills}))`;
-    const url =
-      `${SUPABASE_URL}/rest/v1/combined_board?season_id=eq.${encodeURIComponent(boardSeason(seasonId))}` +
-      `&${outrank}&select=device_id`;
-    const res = await fetch(url, {
-      headers: { ...HEADERS, Prefer: 'count=exact' },
-    });
-    if (!res.ok) return null;
-    const range = res.headers.get('content-range'); // e.g. "0-24/25"
-    const total = range ? Number(range.split('/')[1]) : NaN;
-    return Number.isFinite(total) ? total + 1 : null;
-  } catch {
-    return null;
-  }
-}
+// NOTE: depth is no longer a ranked, in-app leaderboard — the nightly PvP
+// league (pvp-board.ts) is the season score now. `scores` still stores each
+// device's deepest ride for the personal "deepest ride this week" stat, the
+// anti-cheat re-simulation plumbing (issue #81), and the nightly Discord
+// "deepest ride" flex, so submitScore stays; the fetchTop/fetchRank ranked
+// read path was deleted with the Boss Trial removal.

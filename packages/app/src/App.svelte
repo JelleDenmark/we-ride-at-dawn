@@ -13,7 +13,8 @@
   //   - `clickShopSlot` and nearby — shop purchase/reroll/freeze actions,
   //     thin wrappers around the pure functions imported from `core`'s
   //     `shop.ts` (this file never mutates game rules itself).
-  //   - `fetchTop` / `fetchRank` — leaderboard panel data, from `leaderboard.ts`.
+  //   - `refreshLeague` / `fetchLatestStandings` / `fetchGhosts` — nightly
+  //     league panel data (standings + scout ghosts), from `pvp-board.ts`.
   //   - the closing script tag below this block — the markup/template
   //     starts right after it; component state above is what drives it.
   import { onMount } from 'svelte';
@@ -57,6 +58,7 @@
     upcomingUnlocks,
     shopUnitPoolForDay,
     seasonUnitPool,
+    seasonRelicPool,
     tierAttackMultiplier,
     tierHealthMultiplier,
     reviveHpForTier,
@@ -64,17 +66,21 @@
     cellarCoilChargeCapForTier,
     backlineTargetsForTier,
     wardArmorForTier,
+    blockHitsForTier,
     buffSummonedForTier,
-    weakenPercentForTier,
-    simulateBossTrial,
-    simulateBossTrialReplay,
-    bossTrialPhaseAttack,
-    bossTrialPhaseHP,
-    BOSS_TRIAL_ESCALATION,
-    BOSS_TRIAL_HP_GROWTH_PER_PHASE,
+    poisonResistForTier,
+    POISON_RESIST_CAP,
+    consolationScrap,
+    LOSS_CONSOLATION_DEFAULT,
+    simulateDuel,
+    unitKeyword,
+    relicKeyword,
+    MAX_TIER,
+    type KeywordFamily,
     type ActionResult,
     type BattleResult,
     type BuildState,
+    type DuelResult,
     type TimeOfDay,
     type UnitDef,
   } from '@wrad/core';
@@ -100,11 +106,10 @@
     RIDE_LOG_MAX,
     loadInstallNudgeDismissed,
     saveInstallNudgeDismissed,
-    saveBossTrialToday,
-    loadBossTrialToday,
+    saveConsolationCredited,
+    loadConsolationCredited,
     type RideLogEntry,
     type LastRide,
-    type BossTrialToday,
   } from './persistence';
   import {
     submitRun,
@@ -112,20 +117,21 @@
     telemetryEnabled,
     setTelemetryEnabled,
   } from './telemetry';
+  import { submitScore, defaultName, isMe } from './leaderboard';
   import {
-    submitScore,
-    fetchTop,
-    fetchRank,
-    defaultName,
-    isMe,
-    type BoardRow,
-  } from './leaderboard';
-  import {
-    submitBossTrialScore,
-    fetchBossTrialTop,
-    fetchBossTrialRank,
-    type BossTrialRow,
-  } from './boss-trial-board';
+    submitPvpBoard,
+    fetchLatestStandings,
+    fetchStandingsForRound,
+    fetchSeasonStandings,
+    fetchRounds,
+    fetchGhosts,
+    fetchLeagueConfig,
+    type StandingRow,
+    type SeasonStandingRow,
+    type RoundInfo,
+    type GhostRow,
+    type LeagueConfig,
+  } from './pvp-board';
   import { startUpdateCheck } from './updateCheck';
   import { startPwaUpdate } from './pwaUpdate';
   import { startInstallPromptCapture, promptInstall, isIOS, isStandalone } from './pwaInstall';
@@ -271,190 +277,11 @@
   );
   let telemetry = $state(telemetryEnabled());
 
-  // Leaderboard identity: a themed default until the player names their
-  // warlord (keyed by the anonymous device id, renameable).
+  // League identity: a themed default until the player names their warlord
+  // (keyed by the anonymous device id, renameable).
   let playerName = $state(loadPlayerName() ?? '');
   let nameEntryOpen = $state(loadPlayerName() === null);
   let nameDraft = $state(playerName || defaultName());
-  let board = $state<BoardRow[]>([]);
-  let myRank = $state<number | null>(null);
-  let boardBusy = $state(false);
-
-  async function refreshBoard() {
-    boardBusy = true;
-    try {
-      const [rows, rank] = await Promise.all([
-        fetchTop(build.seasonId, 20),
-        fetchRank(build.seasonId, seasonBest, myBossDamage(), seasonKills),
-      ]);
-      board = rows;
-      myRank = rank;
-    } finally {
-      boardBusy = false;
-    }
-  }
-
-  // Daily Boss Trial (issue #107, Phase 1 — a leaderboard number only, no
-  // rewards; issue #120 — fixed hour, no player trigger). `bossTrial` is the
-  // MOST RECENT stored result (persistence.ts, keyed by seasonId — the exact
-  // day it belongs to travels on `bossTrial.day`, compared against
-  // `build.day` at each use site) rather than "today's" result specifically —
-  // this is what keeps a resolved fight (and its replay) watchable across a
-  // dawn rollover as "the previous fight" instead of vanishing the moment the
-  // calendar day turns over (see the resolve effect and template below). Only
-  // a NEW resolution (next BOSS_TRIAL_HOUR) or a season rollover replaces it.
-  let bossTrial = $state<BossTrialToday | null>(loadBossTrialToday(build.seasonId));
-  let bossTrialBoard = $state<BossTrialRow[]>([]);
-  let bossTrialRank = $state<number | null>(null);
-  let bossTrialBoardBusy = $state(false);
-  // The Crown (issue #132): whoever tops the season's Boss Trial board wears a
-  // 👑 next to their name on BOTH boards — visible prestige on the board
-  // everyone reads, and it moves the instant someone out-damages them. Derived
-  // client-side from the already-fetched boss board (ordered damage desc), so
-  // no new state or query; the reigning champion needs a real score (>0) so an
-  // all-empty board crowns nobody.
-  const crownDeviceId = $derived(
-    bossTrialBoard.length > 0 && bossTrialBoard[0].damage > 0 ? bossTrialBoard[0].device_id : null
-  );
-  // This device's season-best boss damage, for the combined-board rank query
-  // (#132). Read from the fetched boss board (the authoritative season best),
-  // falling back to 0 when we're unranked/off the fetched page — a slightly
-  // stale rank self-corrects on the next refresh, same as every other board
-  // number here.
-  function myBossDamage(): number {
-    return bossTrialBoard.find((r) => isMe(r))?.damage ?? 0;
-  }
-
-  // Fixed fight hour (issue #120): 20:00 CET, matching the established
-  // 06:00 CET dawn/season-boundary convention (`copenhagenSeconds`/
-  // `timeOfDayAt` above). Named rather than a literal per the issue.
-  const BOSS_TRIAL_HOUR = 20;
-  // BOSS_TRIAL_HOUR is always >= noon, so `timeOfDayAt`'s own cutoff
-  // (`copenhagenSeconds(now) < 12 * 3600 ? 'beforeNoon' : 'afterNoon'`)
-  // would resolve to 'afterNoon' for literally any date at that hour —
-  // derived from the constant (rather than hardcoding the string) so a
-  // future re-tune of the hour can't silently desync the two. This is what
-  // "the timeOfDay as of 20:00" means; no reverse-timezone Date needs to be
-  // constructed to get it (this codebase has no such helper, and hand-
-  // rolling one just to feed it back through the same branch is pointless).
-  const BOSS_TRIAL_TIME_OF_DAY: TimeOfDay = BOSS_TRIAL_HOUR >= 12 ? 'afterNoon' : 'beforeNoon';
-
-  /** Has BOSS_TRIAL_HOUR CET passed for ride-date `date`, as of `now`? Either
-   * the ride-day has already rolled past `date` (the dawn boundary is 06:00,
-   * well after 20:00, so any later ride-date guarantees the hour already
-   * passed), or we're still on `date` and the Copenhagen clock has reached
-   * it. String-compares ride dates (`YYYY-MM-DD`, lexicographic = chronological)
-   * so a build that's ahead of real time (dev fast-forward) is correctly
-   * left alone, mirroring the day-advance effect's own comment on that. */
-  function bossTrialDue(now: Date, date: string): boolean {
-    const today = currentRideDate(now);
-    return today > date || (today === date && copenhagenSeconds(now) >= BOSS_TRIAL_HOUR * 3600);
-  }
-
-  // Reload the stored fight when the season changes (week rollover, dev
-  // fast-forward) — matches seasonBest/seasonKills' own season-only reset.
-  // Deliberately does NOT reload on every day change: unlike those two, a
-  // resolved Boss Trial should stay visible (as "the previous fight", see
-  // the template below) across a dawn rollover, not disappear until a new
-  // one actually resolves.
-  $effect(() => {
-    bossTrial = loadBossTrialToday(build.seasonId);
-  });
-
-  async function refreshBossTrialBoard() {
-    bossTrialBoardBusy = true;
-    try {
-      const [rows, rank] = await Promise.all([
-        fetchBossTrialTop(build.seasonId, 20),
-        bossTrial ? fetchBossTrialRank(build.seasonId, bossTrial.damage, bossTrial.phases) : Promise.resolve(null),
-      ]);
-      bossTrialBoard = rows;
-      bossTrialRank = rank;
-    } finally {
-      bossTrialBoardBusy = false;
-    }
-  }
-
-  /** Retroactive resolution (issue #120): the player never triggers the
-   * trial — it fights automatically the moment BOSS_TRIAL_HOUR CET has
-   * passed for the still-open day. Only the player mutates the board, so
-   * whatever's persisted RIGHT NOW is exactly the board as it stood at their
-   * last action before that hour — the same retroactive shape the offline
-   * ride-accrual loop below already relies on (≤24h/visit), just without
-   * needing any board history.
-   *
-   * Declared here (before the day-advance heartbeat further down) so that on
-   * a reload after being away, this runs against `build.date`/`build.day` as
-   * they stood BEFORE that heartbeat fast-forwards them across any elapsed
-   * dawns — checking AFTER the advance would ask "has today's 20:00 passed"
-   * about the wrong (brand new, and on a season rollover possibly emptied)
-   * day, silently losing a trial that was actually still resolvable.
-   *
-   * Empty board at the fixed hour: skip and leave the gate open (do not
-   * save/submit a 0-damage score) rather than permanently closing today's
-   * gate on an empty snapshot — if the player builds a horde later the same
-   * day, this effect re-runs (it depends on `build`) and resolves then.
-   *
-   * Gates on `bossTrial.day === build.day` rather than `bossTrial !== null`:
-   * `bossTrial` now persists across a dawn rollover as "the previous fight"
-   * (see the reload effect above and the template below), so a non-null
-   * leftover from yesterday must NOT block today's fight from resolving —
-   * only an actual record for *today* should.
-   *
-   * Factored out (rather than inlined in the `$effect` below) so
-   * `simulateDawn` — the dev "next day" fast-forward button — can call it
-   * too, BEFORE it jumps `build.date` forward. Without this, that button
-   * silently skipped a still-resolvable trial: it mutates `build` directly
-   * in a click handler, with no equivalent to the real heartbeat's
-   * declaration-order guarantee (see this function's doc comment above)
-   * that lets a page reload resolve today's trial before the date moves on.
-   * Once `build.date` is ahead of the real date, `bossTrialDue`'s own
-   * dev-fast-forward guard (see its doc comment) correctly refuses to fire
-   * early for it — so a skipped trial doesn't just resolve late, it doesn't
-   * resolve at all until real time independently catches up.
-   */
-  function resolveBossTrialIfDue(now: Date) {
-    if ((bossTrial !== null && bossTrial.day === build.day) || build.board.length === 0) return;
-    if (!bossTrialDue(now, build.date)) return;
-    // Same timedLineup pattern as every other scoring path in this file
-    // (see commit 3ba9b2d): `lineupFromBuild` does NOT set `timeOfDay`, and
-    // an omitted one makes Dawn-Runt/Dusk-Runt's condition-gated `teamBuff`
-    // silently no-op (Twilight-Runt's wave-based `teamBuffByWave` no longer
-    // depends on this — 2026-07-16 rework — but the two retired-from-shop
-    // units still do). ONE timed lineup feeds the sim, the local save, AND
-    // the submitted payload, so the
-    // stored/submitted lineup reproduces the exact score it earned (issue
-    // #118's replay, and any future server-side re-simulation for #81, both
-    // depend on that).
-    const timedLineup = { ...lineupFromBuild(build), timeOfDay: BOSS_TRIAL_TIME_OF_DAY };
-    const result = simulateBossTrial(timedLineup);
-    const today: BossTrialToday = {
-      day: build.day,
-      damage: result.totalDamage,
-      phases: result.phasesSurvived,
-      lineup: timedLineup,
-    };
-    bossTrial = today;
-    saveBossTrialToday(build.seasonId, build.day, today);
-    // Same guard as submitBest: an unnamed device still gets the local
-    // gate/result, it just doesn't post to the shared board until named.
-    if (playerName) {
-      void submitBossTrialScore({
-        seasonId: build.seasonId,
-        name: playerName,
-        damage: today.damage,
-        phases: today.phases,
-        day: build.day,
-        lineup: timedLineup,
-      });
-    }
-    void refreshBossTrialBoard();
-  }
-
-  $effect(() => {
-    void nowTick;
-    resolveBossTrialIfDue(new Date(nowTick));
-  });
 
   // Guard so an unchanged best/name/day doesn't re-POST on every rebuild.
   let lastSubmit = '';
@@ -478,7 +305,208 @@
       rideDate: seasonBestSnapshot?.date,
       kills: seasonKills,
     });
-    await refreshBoard();
+  }
+
+  // PvP league board sync (nightly duel). Unlike submitBest (a monotonic
+  // best-ride snapshot), this mirrors the player's CURRENT fighting board to
+  // pvp_boards as live, last-write-wins state — whatever's deployed now is what
+  // the 20:00 job duels and others scout. Debounced so a buy->place->merge
+  // burst is one sync, and signature-guarded so an unchanged board never
+  // re-POSTs (same shape as submitBest's lastSubmit guard).
+  let lastPvpSync = ''; // signature actually written to the server
+  let pvpPending = ''; // signature the debounce timer is currently waiting on
+  let pvpSyncTimer: ReturnType<typeof setTimeout> | undefined;
+  $effect(() => {
+    const season = build.seasonId;
+    const name = playerName;
+    // Read the full lineup SYNCHRONOUSLY so every nested change (tier, relics,
+    // order, count) is a tracked dependency — the debounced write below runs
+    // outside the effect's tracking scope, so it can't establish them itself.
+    const lineupJson = build.board.length > 0 ? JSON.stringify(lineupFromBuild(build)) : '';
+    const sig = `${season}|${name}|${lineupJson}`;
+    // The idle heartbeat reassigns `build` every second (nowTick), so this
+    // effect re-runs constantly. Only (re)arm the debounce when the board
+    // signature genuinely changed — otherwise the timer is cleared and reset
+    // every second and never fires. This is the fix for the sync silently
+    // never happening.
+    if (sig === pvpPending) return;
+    pvpPending = sig;
+    clearTimeout(pvpSyncTimer);
+    pvpSyncTimer = setTimeout(() => {
+      if (!name || lineupJson === '' || sig === lastPvpSync) return;
+      lastPvpSync = sig;
+      void submitPvpBoard({ seasonId: season, name, board: JSON.parse(lineupJson) });
+    }, 1500);
+  });
+
+  // League read side: last night's standings (the season score) and the
+  // ghosts to scout for tonight. Both empty-on-failure, same posture as the
+  // depth board's refreshBoard. Scouting shows an opponent's currently-synced
+  // board — real info, at worst a day stale (see pvp-board.ts's fetchGhosts).
+  let standings = $state<StandingRow[]>([]);
+  let ghosts = $state<GhostRow[]>([]);
+  let leagueBusy = $state(false);
+  // Which rival's board the scout panel is expanded to, by player_id (null =
+  // collapsed). One at a time keeps the panel phone-sized.
+  let scoutedGhost = $state<string | null>(null);
+
+  // Season-long totals (issue #157) alongside the existing single-night view,
+  // shown as two tabs so the panel's footprint doesn't grow — see App CSS
+  // `.lg-tabs`. "Season" is the default: it's the number that persists.
+  let leagueTab = $state<'season' | 'nights'>('season');
+  let seasonStandings = $state<SeasonStandingRow[]>([]);
+  let rounds = $state<RoundInfo[]>([]);
+  // Which past round the "Nights" tab is browsing. null = follow the latest
+  // round automatically (kept fresh by refreshLeague's interval); a specific
+  // round_id means the player picked an older, already-closed night, which
+  // never changes again, so it's fetched once and left alone.
+  let selectedRoundId = $state<string | null>(null);
+  let nightStandings = $state<StandingRow[]>([]);
+  // What the "Nights" table actually renders: the live-refreshed `standings`
+  // while following the latest round, or the one-shot fetch for a past pick.
+  const displayedNightStandings = $derived(
+    selectedRoundId === null || selectedRoundId === rounds[0]?.round_id
+      ? standings
+      : nightStandings
+  );
+
+  async function selectRound(roundId: string) {
+    if (roundId === rounds[0]?.round_id) {
+      selectedRoundId = null;
+      return;
+    }
+    selectedRoundId = roundId;
+    nightStandings = await fetchStandingsForRound(roundId);
+  }
+
+  function fmtRoundDate(closesAt: string): string {
+    return new Date(closesAt).toLocaleDateString(undefined, {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+    });
+  }
+
+  // My board as fielded in the round currently shown by the "Nights" tab —
+  // the other half every replay needs alongside an opponent's snapshotted
+  // board (issue #158). Rounds scored before the snapshot column shipped
+  // have `board: null`, so this (and every opponent's board) can be missing.
+  const myNightBoard = $derived(displayedNightStandings.find(isMe)?.board ?? null);
+
+  // Duel replay (issue #158): re-runs `simulateDuel` against the round's
+  // SNAPSHOTTED boards (never the live `pvp_boards` — those drift the moment
+  // either player edits their horde) so the replay is byte-identical to the
+  // fight that actually happened that night, no stored event log needed.
+  //
+  // `duelStageEl` is bound to an ALWAYS-mounted div (see the `.duel-overlay`
+  // markup near the end of the template, outside any `{#if}`) — same
+  // approach as the main ride `stageEl`/`player` — so `duelReplayPlayer`'s
+  // Pixi app stays attached to a live element across sheet open/close and
+  // league-tab switches instead of getting torn down with a conditional block.
+  let duelReplayPlayer: ReplayPlayer | undefined;
+  let duelStageEl: HTMLDivElement;
+  let duelReplay = $state<{ opponentName: string; playing: boolean; result: DuelResult | null } | null>(
+    null
+  );
+  // Playback speed for the duel replay — separate from the ride replay's
+  // `speed`/`setSpeed` (a different ReplayPlayer instance, and switching
+  // duels shouldn't fight over one shared multiplier). Persists across duels
+  // in one sitting, same as the ride replay's `speed` persists across rides.
+  let duelSpeed = $state(1);
+
+  function setDuelSpeed(s: number) {
+    duelSpeed = s;
+    if (duelReplayPlayer) duelReplayPlayer.speed = s;
+  }
+
+  async function watchDuelReplay(opponent: StandingRow) {
+    const mine = myNightBoard;
+    if (!mine || !opponent.board) return;
+    duelReplay = { opponentName: opponent.name, playing: true, result: null };
+    if (!duelReplayPlayer) {
+      duelReplayPlayer = new ReplayPlayer();
+      await duelReplayPlayer.init(duelStageEl);
+    }
+    duelReplayPlayer.speed = duelSpeed;
+    const { events, result } = simulateDuel(mine, opponent.board);
+    await duelReplayPlayer.play(events);
+    // The sheet may have been closed (or another duel started) mid-play —
+    // don't resurrect it with a stale result.
+    if (!duelReplay || duelReplay.opponentName !== opponent.name) return;
+    duelReplay = { ...duelReplay, playing: false, result };
+  }
+
+  function closeDuelReplay() {
+    duelReplay = null;
+  }
+
+  function duelResultText(name: string, result: DuelResult): string {
+    if (result.winner === 'draw') return 'draw';
+    const won = result.winner === 'a';
+    return won ? `you beat ${name}` : `${name} beat you`;
+  }
+  // Live league tuning (server-configured). Starts at the shipped fallback so
+  // the derived consolation figure reads sensibly before the first fetch lands.
+  let leagueConfig = $state<LeagueConfig>({ lossConsolation: LOSS_CONSOLATION_DEFAULT });
+  // The round_id whose loss-consolation scrap we've already banked, so a payout
+  // credits exactly once no matter how often refreshLeague runs. Season-keyed.
+  let creditedRound = $state(loadConsolationCredited(build.seasonId));
+
+  // My row in last night's standings, if any — the source for both the payout
+  // and the "what you got" note under the table.
+  const myStanding = $derived(standings.find(isMe) ?? null);
+  const myConsolation = $derived(
+    myStanding ? consolationScrap(myStanding.losses, leagueConfig.lossConsolation) : 0
+  );
+
+  async function refreshLeague() {
+    leagueBusy = true;
+    try {
+      const [rows, season, roundList, gh, cfg] = await Promise.all([
+        fetchLatestStandings(build.seasonId),
+        fetchSeasonStandings(build.seasonId),
+        fetchRounds(build.seasonId),
+        fetchGhosts(build.seasonId),
+        fetchLeagueConfig(),
+      ]);
+      standings = rows;
+      seasonStandings = season;
+      rounds = roundList;
+      ghosts = gh;
+      leagueConfig = cfg;
+      creditConsolationIfDue(rows, cfg.lossConsolation);
+    } finally {
+      leagueBusy = false;
+    }
+  }
+
+  // Bank the flat loss-consolation scrap for the latest scored round, exactly
+  // once. Losing pays; income is the board's strength, so this keeps whoever's
+  // behind funded enough to stay in the race (build order §6). Idempotent via
+  // the persisted `creditedRound` marker — refreshLeague runs on an interval,
+  // so this MUST no-op on every call after the first for a given round.
+  function creditConsolationIfDue(rows: StandingRow[], payoutPerLoss: number) {
+    if (rows.length === 0) return;
+    const mine = rows.find(isMe);
+    if (!mine || mine.round_id === creditedRound) return;
+    // Mark the round credited BEFORE mutating scrap (and even when the payout
+    // is 0, e.g. a clean sweep or a disabled lever) so we never re-pay it.
+    creditedRound = mine.round_id;
+    saveConsolationCredited(build.seasonId, mine.round_id);
+    const payout = consolationScrap(mine.losses, payoutPerLoss);
+    if (payout > 0) {
+      build = { ...build, scrap: build.scrap + payout };
+      saveBuild(build);
+    }
+  }
+
+  // A scouted board's units as "Name ★tier" chips, in placement order.
+  function ghostUnits(g: GhostRow): { key: string; label: string }[] {
+    return g.board.units.map((u, i) => {
+      const name = UNIT_DEFS[u.defId]?.name ?? u.defId;
+      const tier = u.tier ?? 1;
+      return { key: `${g.player_id}-${i}`, label: tier > 1 ? `${name} ★${tier}` : name };
+    });
   }
 
   function confirmName() {
@@ -487,6 +515,7 @@
     savePlayerName(n);
     nameEntryOpen = false;
     lastSubmit = ''; // force a resubmit so the board shows the new name
+    lastPvpSync = ''; // and re-sync the PvP board under the new name
     void submitBest();
   }
 
@@ -501,6 +530,21 @@
   // only one of the two can be armed at a time (arming either clears both).
   let pendingSwap = $state<number | null>(null);
   let inspect = $state<{ area: 'shop' | 'board' | 'bench'; index: number } | null>(null);
+  // Armed "tap sell again to confirm" mode. Selling is instant and
+  // irreversible, and its button sits directly beside `bench` in the same
+  // `.card-actions` row — a thumb-width apart on a phone — so a misfire cost
+  // players a rat with no undo (2026-08-02 playtest). Holds the identity of
+  // the card whose sell is armed rather than a bare boolean: `inspect`ing a
+  // different card, or reordering this one (which changes its index), then
+  // disarms on its own, so this needs no reset at the many sites that assign
+  // `inspect`. Deliberately NOT the pendingRelic/pendingSwap armed-selection
+  // pattern — those await a second, different target; this one just wants the
+  // same button pressed twice.
+  let sellArmed = $state<{ area: 'board' | 'bench'; index: number } | null>(null);
+
+  function isSellArmed(area: 'board' | 'bench', index: number): boolean {
+    return sellArmed?.area === area && sellArmed.index === index;
+  }
   // Compendium/bestiary (issue #136): browse full stats/abilities for every
   // UnitDef, own-horde or enemy, without needing an owned copy on the
   // board/bench/shop. `selected` holds a def id within the active tab's
@@ -619,10 +663,21 @@
       // to one, per Jesper's review of the season-4 patch notes (2026-07-25)
       // — the standalone `armorSentence` template stays untouched since
       // Dire-Rat (its only other user) has no ability to merge it with.
-      return `Shrugs off ${armor} damage a hit (★2 ${armor * 2} · ★3 ${armor * 3}) and bites back for ${e.damage} (★2 ${e.damage * 2} · ★3 ${e.damage * 3}) — poison slips past the armor, blocked hits draw no blood.`;
+      return `Shrugs off ${armor} damage a hit (★2 ${armor * 2} · ★3 ${armor * 3}) and bites back for ${e.damage} (★2 ${e.damage * 2} · ★3 ${e.damage * 3}) — poison slips past the armor, and the bite is blunted by the attacker’s own.`;
     }
     if (e.kind === 'blockFrontHits') {
-      return `Each wave, blocks the front ${own}’s first hit outright (★2 blocks 2, ★3 blocks 3) — resets every wave.`;
+      // Rewritten 2026-08-02 against sim.ts's `blockFrontHits` case. Three
+      // corrections: it is a per-SIDE pool, not a per-unit flag — the charges
+      // follow whoever is currently front and drain 1 per hit that would
+      // otherwise land, so "the front one's first hit" understated it; the
+      // counts are `blockHitsForTier`, read from core rather than the
+      // hand-copied "2"/"3" literals that were here (the drift risk this
+      // whole generator exists to prevent); and the pool is sized by
+      // `Math.max` across casters, never summed, which every other capped
+      // effect's sentence states and this one didn't. Since the Ward-Weaver
+      // block→armor rework this effect has exactly one user left, the
+      // armored rearguard enemy — so `${own}`/`${team}` render enemy-side.
+      return `Each wave, the ${team} shrugs off the next ${blockHitsForTier(1)} hit outright (★2 ${blockHitsForTier(2)}, ★3 ${blockHitsForTier(3)}) — whichever ${own} is at the front takes the save. Never stacks across multiple casters, and the pool resets every wave.`;
     }
     if (e.kind === 'grantArmor') {
       const who = e.all ? 'every ' + own : 'itself';
@@ -645,14 +700,26 @@
       // without an awkward bolt-on clause, same reasoning as chargeWhileBenched.
       return `When it faints, splits its current attack and max health evenly across the surviving horde (any remainder goes to the frontmost survivors first). All your Pack-Callers draw from one shared pool for this, spent across the ride.`;
     }
+    if (e.kind === 'poisonResist') {
+      // Bespoke sentence (not the generic trigger template below): it's a
+      // per-wave-banked passive ward, not a one-off proc — "at the start of
+      // every wave" is mechanically true but reads as noise for something
+      // that's simplest understood as just "always up." Trimmed the
+      // "ward, not antidote" caveat too (Jesper, 2026-08-01) — the cap
+      // number already says it's partial.
+      return `Wards the whole ${team} against poison, blunting every tick by ${poisonResistForTier(1)} (★2 ${poisonResistForTier(2)} · ★3 ${poisonResistForTier(3)}), capped at ${POISON_RESIST_CAP} across multiple casters.`;
+    }
     if (e.kind === 'backlineDamage') {
       // Merge scaling grows target count, not per-hit damage (issue #86
       // follow-up) — see `backlineTargetsForTier`'s doc comment in
       // data/units.ts for why the exponential attack curve is deliberately
-      // left out here.
-      const base = def?.attack ?? 0;
+      // left out here. Per-hit damage is the unit's CURRENT attack (base +
+      // relics + team-attack pool + any runtime buffs — see the
+      // `backlineDamage` case in sim.ts's `applyEffect`), not a flat number:
+      // a buffed Slink-Rat/MBP Rat hits harder here too, so the copy must
+      // say "current attack," never bake in the def's base stat.
       const targets = (t: number) => backlineTargetsForTier(t);
-      return `At the start of every wave, if not at the front, strikes the first ${foe} for ${base} (★2 hits the first ${targets(2)} ${foes} for ${base} each · ★3 hits the first ${targets(3)} ${foes} for ${base} each) — separate hits, landed before that wave's clashing even begins, with no retaliation. At the front, it just fights normally.`;
+      return `At the start of every wave, if not at the front, strikes the first ${foe} for its current attack (★2 hits the first ${targets(2)} ${foes} for its current attack each · ★3 hits the first ${targets(3)} ${foes} for its current attack each) — separate hits, landed before that wave's clashing even begins, with no retaliation. At the front, it just fights normally.`;
     }
     let what = '';
     switch (e.kind) {
@@ -672,11 +739,33 @@
         what = `keeps ${e.count} ${name}${e.count > 1 ? 's' : ''} (★2 ${e.count * 2} · ★3 ${e.count * 3}) at its side, piping in a fresh one whenever one falls`;
         break;
       }
+      case 'summonScaledPup': {
+        // Rat-Piper's issue #161 rework: fixed count, tier scales the
+        // summoned body's OWN stats (via `tierAttackMultiplier`/
+        // `tierHealthMultiplier`, same curve every recruited unit gets)
+        // rather than how many spawn — the inverse of `maintainSummons`
+        // above. One-time (`startOfBattle`), so the sentence says so
+        // explicitly rather than reading like a per-wave litter. Also calls
+        // out the relic-inheritance follow-up (issue #161) so equipping a
+        // relic on Piper reads as "affects two bodies," not a mystery buff
+        // on the newcomer.
+        const name = UNIT_DEFS[e.unitId]?.name ?? ENEMY_DEFS[e.unitId]?.name ?? e.unitId;
+        const base = UNIT_DEFS[e.unitId] ?? ENEMY_DEFS[e.unitId];
+        const stats = (t: number) => `${(base?.attack ?? 0) * tierAttackMultiplier(t)}/${(base?.health ?? 0) * tierHealthMultiplier(t)}`;
+        what = `summons ${e.count} ${name}${e.count > 1 ? 's' : ''} in front at ${stats(1)} strength (★2 ${stats(2)} · ★3 ${stats(3)}) — once, not a fresh litter every wave — and hands it a copy of any relic it's wearing`;
+        break;
+      }
       case 'buffBehind':
         what = `grants ${buffScale(e.attack, e.health)} to ${e.all ? `every ${own} behind it` : `the ${own} behind it`}`;
         break;
       case 'bequeathAttack':
-        what = `passes its OWN current attack to the rat behind it, plus a bonus for how deep into the ride it fell (capped at ${e.waveBonusCapMultiplier}× its own attack)`;
+        // The last-slot whiff is deliberate — sim.ts's `bequeathAttack` case
+        // takes `board[index]` after the splice and bails if nobody's there,
+        // which its comment calls "the intended 'wasted' placement case the
+        // issue's placement puzzle calls out." That puzzle is the whole card,
+        // so the copy has to state it (2026-08-02); silently paying nothing
+        // is exactly what a player needs to know BEFORE choosing the slot.
+        what = `passes its OWN current attack to the ${own} behind it, plus a bonus for how deep into the ride it fell (capped at ${e.waveBonusCapMultiplier}× its own attack) — from the last slot there is no one behind, and the whole payout is lost`;
         break;
       case 'poisonFrontEnemy':
         what = `applies ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) to the frontmost ${foe} — clears when the wave falls`;
@@ -694,7 +783,17 @@
         what = `gains ${gainStatsScale(e.attack, e.health)}`;
         break;
       case 'revive':
-        what = `revives your first fallen rat at ${reviveHpForTier(1)} health (★2 ${reviveHpForTier(2)} · ★3 ${reviveHpForTier(3)}), capped at its own max — once per rat`;
+        // Three engine conditions the old sentence left out (2026-08-02), all
+        // from sim.ts's `revive` case: the corpse search is
+        // `(c) => c !== source && !c.raised`, so it NEVER raises the caster
+        // (the two guards that killed the 0.6.2 immortal-Priest and the
+        // immortal-pair exploits — a player who fields one Bone-Priest and
+        // watches it fall needs to know nothing happens); it bails outright
+        // when `board.length >= capOf(side)`, so a full board silently wastes
+        // the trigger; and it sets `corpse.poison = 0`, so the raised rat
+        // comes back clean of rot. "capped at its own max" also read as the
+        // CASTER's max — it's the revived corpse's.
+        what = `raises the first ${own} to fall — never itself — at ${reviveHpForTier(1)} health (★2 ${reviveHpForTier(2)} · ★3 ${reviveHpForTier(3)}), clean of rot but never past that ${own}’s own max. Once per corpse, and only with room on the board`;
         break;
       case 'buffAdjacent':
         what = `grants ${buffScale(e.attack, e.health)} to the ${own}(s) beside it — a middle seat buffs both neighbours`;
@@ -716,20 +815,19 @@
         break;
       case 'reflectDamage':
         // Linear per-star curve — repeats every hit taken (see sim.ts).
-        what = `cuts back, dealing ${e.damage} damage (★2 ${e.damage * 2} · ★3 ${e.damage * 3}) to its attacker — a blocked hit draws no blood`;
+        // The reflect goes through `applyDamage(..., 'attack')`, so the
+        // ATTACKER's own armor blunts it (down to the MIN_ATTACK_DAMAGE
+        // floor) — say so, since Dire-Rat/Steel-Whisker/Ward-Weaver put real
+        // armor on the board. Dropped the old "a blocked hit draws no blood"
+        // clause (2026-08-02): it described `blockCharges`, and since the
+        // Ward-Weaver block→armor rework no rat or relic grants block at all,
+        // so horde-side block is permanently 0 and the caveat was unreachable.
+        what = `cuts back, dealing ${e.damage} damage (★2 ${e.damage * 2} · ★3 ${e.damage * 3}) to its attacker, blunted by that attacker’s own armor`;
         break;
       case 'healSelf':
         // Linear per-star curve — repeats every clash survived (see sim.ts).
         what = `drains ${e.amount} health back (★2 ${e.amount * 2} · ★3 ${e.amount * 3}) if it survived the clash — never past its own max`;
         break;
-      case 'weakenAllEnemies': {
-        // [0.05, 0.10, 0.15] per-star curve (2026-07-25, converted from flat,
-        // then halved after the leaderboard-ceiling guardrail) — re-applies
-        // to each fresh wave, off ORIGINAL wave-start attack (see sim.ts).
-        const pct = (t: number) => Math.round(e.percent * weakenPercentForTier(t) * 100);
-        what = `saps ${pct(1)}% attack (★2 ${pct(2)}% · ★3 ${pct(3)}%) from every ${foe} in the wave — they always keep at least 1`;
-        break;
-      }
     }
     const when = def.ability.condition?.timeOfDay
       ? `${TIME_OF_DAY_LABEL[def.ability.condition.timeOfDay] ?? ''}`
@@ -747,7 +845,7 @@
 
   function isSummoner(def: UnitDef | undefined): boolean {
     const kind = def?.ability?.effect.kind;
-    return kind === 'summon' || kind === 'maintainSummons';
+    return kind === 'summon' || kind === 'maintainSummons' || kind === 'summonScaledPup';
   }
 
   // Compendium (issue #136) lists every rat regardless of day-gating (a
@@ -764,67 +862,42 @@
   // Compact tile tag (issue: mobile shop overflow) — the tile shows only a
   // symbol + 1-2 word keyword; the full sentence lives in the inspect sheet
   // (abilitySentence, above) which already exists as the tap-to-detail
-  // destination, so the tile no longer needs to repeat it. Symbol register
-  // matches the game's existing restrained-glyph vocabulary (⚙ ❄ ✦ ★), not
-  // illustrated icons or emoji.
-  const TIME_OF_DAY_ICON: Record<string, string> = { beforeNoon: '☀', afterNoon: '☾' };
-
+  // destination, so the tile no longer needs to repeat it.
+  //
+  // The classification itself moved into core in #166 (`unitKeyword`, in
+  // data/keyword-family.ts) — this file is now a thin consumer, not the
+  // source of truth. That is what makes it testable and what makes the
+  // compiler refuse a new `Effect` kind until it has been classified and
+  // coloured. Per ADR-0005, any NEW surface that lists units takes its
+  // colour from `UnitKeyword.color` rather than inventing its own encoding.
   function keywordTag(def: UnitDef): string | null {
-    const ability = def.ability;
-    if (ability) {
-      switch (ability.effect.kind) {
-        case 'summon':
-        case 'maintainSummons':
-          return '❋ summon';
-        case 'buffBehind':
-        case 'buffAdjacent':
-        case 'gainStats':
-        case 'bequeathAttack':
-        case 'chargeWhileBenched':
-        case 'teamBuffByWave':
-        case 'distributeStatsOnFaint':
-          return '▲ buff';
-        case 'teamBuff': {
-          const icon = ability.condition ? (TIME_OF_DAY_ICON[ability.condition.timeOfDay] ?? '▲') : '▲';
-          return `${icon} buff`;
-        }
-        case 'poisonFrontEnemy':
-        case 'poisonLastEnemy':
-        case 'poisonTarget':
-        case 'poisonAllEnemies':
-          return '☠ poison';
-        case 'revive':
-          return '✚ revive';
-        case 'blockFrontHits':
-          return '⛨ block';
-        case 'grantArmor':
-          return '⛨ armor';
-        case 'backlineDamage':
-          return '⚔ snipe';
-        case 'buffSummoned':
-          return '❋ train';
-        case 'reflectDamage':
-          return '⚔ thorns';
-        case 'healSelf':
-          return '✚ drain';
-        case 'weakenAllEnemies':
-          return '▼ weaken';
-      }
-    }
-    if ((def.damageReduction ?? 0) > 0) return '⛨ armor';
-    return null;
+    return unitKeyword(def)?.text ?? null;
+  }
+
+  /**
+   * Inline family colours for a tile. Two variables, not one, because the
+   * two jobs have different contrast floors (ADR-0006):
+   *   `--family`       the 3px top edge — a graphical mark, sprite-true hex.
+   *   `--family-text`  the keyword line (10px) and relic glyph (13px), lifted
+   *                    to clear 4.5:1 on `--surface`.
+   * `transparent` rather than an omitted variable so a plain body with no
+   * keyword renders a clean tile instead of inheriting an ancestor's family.
+   */
+  function familyStyle(def: UnitDef): string {
+    const kw = unitKeyword(def);
+    return `--family: ${kw?.color ?? 'transparent'}; --family-text: ${kw?.textColor ?? 'transparent'}`;
+  }
+
+  /** Same two variables for a relic, which always has a family. */
+  function relicFamilyStyle(relic: { family: KeywordFamily }): string {
+    const kw = relicKeyword(relic);
+    return `--family: ${kw.color}; --family-text: ${kw.textColor}`;
   }
 
   let stageEl: HTMLDivElement;
   let player: ReplayPlayer | undefined;
   let phase: 'idle' | 'riding' | 'done' = $state('idle');
   let result: BattleResult | null = $state(null);
-  // Which replay `player` last played — the stage/controls are shared
-  // (single ReplayPlayer instance, see onMount below), but the caption and
-  // result copy read differently for an hourly ride ("wave X") vs a Boss
-  // Trial replay ("felled N bosses"). Defaults to 'ride' since that's the
-  // only kind before issue #118.
-  let replayKind: 'ride' | 'trial' = $state('ride');
 
   // Stale-tab fix (PWA-SCOPE.md Phase 1): a deployed build never reaches an
   // already-open tab on its own. `updateAvailable` flips true when the
@@ -904,11 +977,11 @@
       saveBuild(build);
     }
     const id = setInterval(() => (nowTick = Date.now()), 1000);
-    // Load the board now, then keep it loosely fresh while the tab is open.
-    void refreshBoard();
-    const boardId = setInterval(() => void refreshBoard(), 60_000);
-    void refreshBossTrialBoard();
-    const bossTrialBoardId = setInterval(() => void refreshBossTrialBoard(), 60_000);
+    // Load the league now, then keep it loosely fresh while the tab is open.
+    // Standings only change once a day (at 20:00), but the ghosts to scout
+    // update as rivals rebuild.
+    void refreshLeague();
+    const leagueId = setInterval(() => void refreshLeague(), 60_000);
     const stopUpdateCheck = startUpdateCheck(() => {
       updateDismissed = false;
       updateAvailable = true;
@@ -936,8 +1009,7 @@
     })();
     return () => {
       clearInterval(id);
-      clearInterval(boardId);
-      clearInterval(bossTrialBoardId);
+      clearInterval(leagueId);
       stopUpdateCheck();
       stopInstallCapture();
       stopPwaUpdate?.();
@@ -1056,8 +1128,11 @@
       saveSeasonBest(build.seasonId, 0);
       saveSeasonKills(build.seasonId, 0);
       saveRideLog(build.seasonId, []);
-      void refreshBoard(); // new week → pull the fresh (empty) board
-      void refreshBossTrialBoard(); // and the boss-trial board alongside it
+      // Re-key the consolation marker to the new season (empty until the new
+      // week's first round pays out).
+      creditedRound = loadConsolationCredited(build.seasonId);
+      selectedRoundId = null; // last season's round_id means nothing this season
+      void refreshLeague(); // new week → pull the fresh (empty) league + ghosts
     }
     // Auto-submit the season-best on any improvement (guarded so an
     // unchanged score never re-POSTs).
@@ -1094,16 +1169,13 @@
 
   // Dev: repeated `simulateDawn`/`devSkipHours` use can push `build.date`
   // arbitrarily far ahead of real time (each jump is unbounded, there's no
-  // ceiling tying it back to `currentRideDate()`). Once that happens,
-  // `bossTrialDue`'s dev-fast-forward guard (see its doc comment) correctly
-  // refuses to fire until real time independently catches up — which, for a
-  // date pushed weeks out, means the Boss Trial looks permanently broken on
-  // that device. `freshBuild` does NOT fix this (it deliberately preserves
-  // `build.date`/`build.day`, only clearing shop/board). This button re-anchors
-  // date/day/seasonId to what a genuinely fresh build would have right now,
-  // while keeping the roster/scrap/relics intact (unlike `freshBuild`, which
-  // wipes the board) — the same carry-forward `advanceAfterDawn` uses, just
-  // targeting today instead of build.date's "next day".
+  // ceiling tying it back to `currentRideDate()`). `freshBuild` does NOT fix
+  // this (it deliberately preserves `build.date`/`build.day`, only clearing
+  // shop/board). This button re-anchors date/day/seasonId to what a genuinely
+  // fresh build would have right now, while keeping the roster/scrap/relics
+  // intact (unlike `freshBuild`, which wipes the board) — the same
+  // carry-forward `advanceAfterDawn` uses, just targeting today instead of
+  // build.date's "next day".
   function resetTestDate() {
     stopReplay();
     const today = currentRideDate();
@@ -1139,11 +1211,6 @@
       lastRide = ride;
       submitRun({ rideDate: build.date, lineup, result: outcome.result, dev: true });
     }
-    // Give today's Boss Trial a chance to resolve against the board as it
-    // stands RIGHT NOW, before the date jumps forward — otherwise this
-    // button can silently skip a still-resolvable trial (see
-    // `resolveBossTrialIfDue`'s doc comment).
-    resolveBossTrialIfDue(new Date());
     stopReplay();
     build = advanceAfterDawn(build, addDay(build.date));
     saveBuild(build);
@@ -1331,6 +1398,11 @@
 
   function sellFromCard() {
     if (inspect?.area !== 'board') return;
+    if (!isSellArmed('board', inspect.index)) {
+      sellArmed = { area: 'board', index: inspect.index };
+      return;
+    }
+    sellArmed = null;
     if (apply(sellUnit(build, inspect.index))) inspect = null;
   }
 
@@ -1356,6 +1428,11 @@
 
   function sellBenchFromCard() {
     if (inspect?.area !== 'bench') return;
+    if (!isSellArmed('bench', inspect.index)) {
+      sellArmed = { area: 'bench', index: inspect.index };
+      return;
+    }
+    sellArmed = null;
     if (apply(sellBenchUnit(build, inspect.index))) inspect = null;
   }
 
@@ -1374,7 +1451,6 @@
     inspect = null;
     pendingRelic = null;
     pendingSwap = null;
-    replayKind = 'ride';
     phase = 'riding';
     stageEl?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     result = null;
@@ -1389,38 +1465,6 @@
     // that no longer exists, so don't write it over the fresh idle state.
     if (gen !== replayGeneration) return;
     result = outcome.result;
-    phase = 'done';
-  }
-
-  /**
-   * Watch TODAY's Boss Trial — the historic, already-resolved fight (issue
-   * #118), not a live preview. Only ever callable once `bossTrial` is
-   * non-null (the template gates the button on that), so `bossTrial.lineup`
-   * is always the exact timed lineup that fought at BOSS_TRIAL_HOUR — per
-   * commit 3ba9b2d and boss-trial.ts's `simulateBossTrialReplay` doc comment,
-   * re-simulating that SAME lineup reproduces the identical event stream
-   * byte-for-byte, so this is freely re-watchable (unlike fighting the
-   * trial itself, which #120 gates to once/day) — no gate here at all.
-   */
-  async function watchBossTrial() {
-    if (!player || phase === 'riding' || !bossTrial) return;
-    inspect = null;
-    pendingRelic = null;
-    pendingSwap = null;
-    replayKind = 'trial';
-    phase = 'riding';
-    stageEl?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    result = null;
-    player.speed = speed;
-    const events = simulateBossTrialReplay(bossTrial.lineup);
-    const gen = replayGeneration;
-    await player.play(events);
-    // Same stale-replay guard as watchRide: a build/season change mid-play
-    // shouldn't clobber a fresh idle state with a result for a stale watch.
-    if (gen !== replayGeneration) return;
-    // The Boss Trial has no BattleResult of its own (simulateBossTrialReplay
-    // returns only events) — the result line below reads `bossTrial` instead
-    // of `result` for trial replays, so `result` intentionally stays null.
     phase = 'done';
   }
 
@@ -1514,24 +1558,37 @@
     <div class="board horde-board">
       {#each build.board as unit, bi}
         {@const stats = unitStats(unit)}
+        {@const def = UNIT_DEFS[unit.defId]}
         <button
           class="tile unit-tile"
           class:selected={inspect?.area === 'board' && inspect.index === bi}
           class:pin-target={pendingRelic !== null || pendingSwap !== null}
+          class:maxed={unit.tier >= MAX_TIER}
+          class:front={bi === 0}
+          style={familyStyle(def)}
           onclick={() => clickBoardUnit(bi)}
         >
           {#if ART_URL[unit.defId]}
             <img class="portrait" src={ART_URL[unit.defId]} alt="" />
           {/if}
-          <span class="tile-name">{UNIT_DEFS[unit.defId].name}{unit.tier > 1 ? ` ★${unit.tier}` : ''}</span>
+          <span class="tile-name">{def.name}</span>
           <span class="tile-stats">{stats.attack}/{stats.health}</span>
-          <span class="tile-sub">
+          <span
+            class="tile-sub"
+            class:keyword={unit.relicIds.length === 0}
+            class:relic-text={unit.relicIds.length > 0}
+          >
             {#if unit.relicIds.length > 0}
               ✦ {unit.relicIds.map((r) => RELIC_DEFS[r].name).join(', ')}
             {:else}
-              {keywordTag(UNIT_DEFS[unit.defId]) ?? ''}
+              {keywordTag(def) ?? ''}
             {/if}
           </span>
+          {#if unit.tier > 1}
+            <span class="tier-pips" aria-label="tier {unit.tier}">
+              {#each Array.from({ length: unit.tier }) as _}<i class="pip"></i>{/each}
+            </span>
+          {/if}
         </button>
       {/each}
       {#each Array.from({ length: Math.max(0, effectiveBoardCap(build) - build.board.length) }) as _}
@@ -1564,24 +1621,36 @@
     <div class="board bench-board">
       {#each build.bench as unit, bi}
         {@const stats = unitStats(unit)}
+        {@const def = UNIT_DEFS[unit.defId]}
         <button
           class="tile unit-tile bench-tile"
           class:selected={inspect?.area === 'bench' && inspect.index === bi}
           class:arming={pendingSwap === bi}
+          class:maxed={unit.tier >= MAX_TIER}
+          style={familyStyle(def)}
           onclick={() => clickBenchUnit(bi)}
         >
           {#if ART_URL[unit.defId]}
             <img class="portrait" src={ART_URL[unit.defId]} alt="" />
           {/if}
-          <span class="tile-name">{UNIT_DEFS[unit.defId].name}{unit.tier > 1 ? ` ★${unit.tier}` : ''}</span>
+          <span class="tile-name">{def.name}</span>
           <span class="tile-stats">{stats.attack}/{stats.health}</span>
-          <span class="tile-sub">
+          <span
+            class="tile-sub"
+            class:keyword={unit.relicIds.length === 0}
+            class:relic-text={unit.relicIds.length > 0}
+          >
             {#if unit.relicIds.length > 0}
               ✦ {unit.relicIds.map((r) => RELIC_DEFS[r].name).join(', ')}
             {:else}
-              {keywordTag(UNIT_DEFS[unit.defId]) ?? ''}
+              {keywordTag(def) ?? ''}
             {/if}
           </span>
+          {#if unit.tier > 1}
+            <span class="tier-pips" aria-label="tier {unit.tier}">
+              {#each Array.from({ length: unit.tier }) as _}<i class="pip"></i>{/each}
+            </span>
+          {/if}
         </button>
       {/each}
       {#each Array.from({ length: Math.max(0, BENCH_SIZE - build.bench.length) }) as _}
@@ -1595,13 +1664,14 @@
       <span>the scrap-market · ⚙ {build.scrap}</span>
       <span>❄ keeps a stall when you reroll</span>
     </div>
-    <div class="board">
+    <div class="board shop-board">
       {#each build.shop.slots as slot, i}
         {#if slot.kind === 'unit'}
           {@const def = UNIT_DEFS[slot.defId]}
           <button
             class="tile shop-tile"
             class:frozen={build.shop.frozen[i]}
+            style={familyStyle(def)}
             onclick={() => clickShopSlot(i)}
           >
             {#if ART_URL[def.id]}
@@ -1609,7 +1679,7 @@
             {/if}
             <span class="tile-name">{def.name}</span>
             <span class="tile-stats">{def.attack}/{def.health}</span>
-            <span class="tile-sub">{keywordTag(def) ?? ''}</span>
+            <span class="tile-sub keyword">{keywordTag(def) ?? ''}</span>
             <span class="tile-cost">⚙ {def.cost}</span>
             <span
               class="freeze"
@@ -1629,8 +1699,10 @@
             class="tile shop-tile relic-tile"
             class:frozen={build.shop.frozen[i]}
             class:arming={pendingRelic === i}
+            style={relicFamilyStyle(relic)}
             onclick={() => clickShopSlot(i)}
           >
+            <span class="relic-mark" aria-hidden="true">✦<span class="relic-family" aria-hidden="true">{relicKeyword(relic).glyph}</span></span>
             <span class="tile-name">{relic.name}</span>
             <span class="tile-sub">{relic.desc}</span>
             <span class="tile-cost">⚙ {relic.cost} · {relic.scope === 'team' ? 'whole team' : 'one rat'}</span>
@@ -1690,29 +1762,17 @@
     {/if}
 
     {#if phase !== 'idle'}
-      {#if replayKind === 'trial'}
-        <p class="ride-caption">
-          {bossTrial && bossTrial.day === build.day ? "today's" : 'the previous'} Boss Trial · the horde that fought at {BOSS_TRIAL_HOUR}:00 CET
+      <p class="ride-caption">the next hourly ride · your horde as it stands now</p>
+      {#if result}
+        <p class="result">
+          Your horde rides to <strong>depth {result.wavesCleared}</strong>
+          &middot; {result.wavesCleared >= WAVE_COUNT
+            ? `⚑ the drains cleared — ${result.survivors.length} rats ride home`
+            : result.survivors.length > 0
+              ? `${result.survivors.length} rats ride home`
+              : 'until the last rat falls'}
         </p>
-        {#if phase === 'done' && bossTrial}
-          <p class="result">
-            Dealt <strong>{bossTrial.damage}</strong> damage &middot; felled {bossTrial.phases} {bossTrial.phases === 1 ? 'boss' : 'bosses'}
-          </p>
-          <p class="result-note">watch it again any time — this fight already happened, so replaying it never costs you today's shot</p>
-        {/if}
-      {:else}
-        <p class="ride-caption">the next hourly ride · your horde as it stands now</p>
-        {#if result}
-          <p class="result">
-            Your horde rides to <strong>depth {result.wavesCleared}</strong>
-            &middot; {result.wavesCleared >= WAVE_COUNT
-              ? `⚑ the drains cleared — ${result.survivors.length} rats ride home`
-              : result.survivors.length > 0
-                ? `${result.survivors.length} rats ride home`
-                : 'until the last rat falls'}
-          </p>
-          <p class="result-note">the drains hold steady all week — resets Monday</p>
-        {/if}
+        <p class="result-note">the drains hold steady all week — resets Monday</p>
       {/if}
       <button class="ride" onclick={backToWarren} disabled={phase === 'riding'}>
         {phase === 'riding' ? 'Riding…' : '← back to the warren'}
@@ -1736,6 +1796,12 @@
           {/if}
         </p>
         <button class="watch" onclick={watchRide}>▶ watch the next ride</button>
+        <!-- `watchRide` replays a live simulation of the CURRENT build (see the
+             `stopReplay`/`skipReplay` anchor at the top of this file) — it banks
+             no scrap, logs no ride, and moves neither stat below. A playtester
+             took it for a committed ride (2026-08-02); nothing on screen said
+             otherwise, so say it here. -->
+        <p class="season-hint">a look ahead, not a real ride — nothing is hauled and no depth is banked</p>
         <p class="season-best">Deepest ride this week: <strong>depth {seasonBest}</strong> · resets Monday</p>
         <p class="season-kills">Enemies felled this week: <strong>{seasonKills}</strong></p>
         {#if currentDepth > seasonBest}
@@ -1770,94 +1836,136 @@
 
   <div class="leaderboard">
     <div class="lb-head">
-      <span class="panel-label">Deepest riders · week of {build.seasonId.slice(0, 10)}</span>
-      <button class="lb-refresh" onclick={() => void refreshBoard()} disabled={boardBusy}>
-        {boardBusy ? '…' : '↻'}
+      <span class="panel-label">Nightly league · week of {build.seasonId.slice(0, 10)}</span>
+      <button class="lb-refresh" onclick={() => void refreshLeague()} disabled={leagueBusy}>
+        {leagueBusy ? '…' : '↻'}
       </button>
     </div>
-    {#if board.length === 0}
-      <p class="lb-empty">{boardBusy ? 'reading the war-drums…' : 'no riders yet this week — be the first'}</p>
+    <p class="lg-blurb">
+      Your horde duels every rival's at <strong>20:00 CET</strong> — one board does both jobs, riding the drains for scrap by day and fighting the duel at night. Points: <strong>win 3 · draw 1 · loss 0</strong> against each rival, summed. Monday wipes the table.
+    </p>
+
+    <div class="lg-tabs" role="tablist">
+      <button
+        class="lg-tab"
+        class:active={leagueTab === 'season'}
+        role="tab"
+        aria-selected={leagueTab === 'season'}
+        onclick={() => (leagueTab = 'season')}
+      >
+        Season
+      </button>
+      <button
+        class="lg-tab"
+        class:active={leagueTab === 'nights'}
+        role="tab"
+        aria-selected={leagueTab === 'nights'}
+        onclick={() => (leagueTab = 'nights')}
+      >
+        Nights
+      </button>
+    </div>
+
+    {#if leagueTab === 'season'}
+      {#if seasonStandings.length === 0}
+        <p class="lb-empty">{leagueBusy ? 'reading the war-drums…' : 'no duel yet — the first table posts after tonight\'s 20:00 CET'}</p>
+      {:else}
+        <p class="lg-caption">season total · week of {build.seasonId.slice(0, 10)}</p>
+        <ol class="lb-rows">
+          {#each seasonStandings as row, i}
+            <li class="lb-row" class:me={isMe(row)}>
+              <span class="lb-rank">{i === 0 ? '👑' : i + 1}</span>
+              <span class="lb-name">{row.name}{isMe(row) ? ' · you' : ''}</span>
+              <span class="lg-record" title="wins–draws–losses">{row.wins}–{row.draws}–{row.losses}</span>
+              <span class="lg-points">{row.points} pts</span>
+            </li>
+          {/each}
+        </ol>
+      {/if}
     {:else}
-      <p class="lb-tiebreak">ties in depth are broken by best Boss Trial damage · 👑 tops the Boss Trial</p>
-      <ol class="lb-rows">
-        {#each board as row, i}
-          <li class="lb-row" class:me={isMe(row)}>
-            <span class="lb-rank">{i + 1}</span>
-            <span class="lb-name"
-              >{#if row.device_id === crownDeviceId}<span class="crown" title="tops the Boss Trial board">👑</span> {/if}{row.name}{isMe(row) ? ' · you' : ''}</span
-            >
-            <span class="lb-boss" title="best Boss Trial damage — breaks depth ties"
-              >{row.boss_attempted ? `${row.boss_damage} dmg` : '—'}</span
-            >
-            <span class="lb-depth">depth {row.depth}</span>
-          </li>
-        {/each}
-      </ol>
+      {#if rounds.length > 1}
+        <select
+          class="lg-round-picker"
+          value={selectedRoundId ?? rounds[0]?.round_id}
+          onchange={(e) => void selectRound(e.currentTarget.value)}
+        >
+          {#each rounds as r (r.round_id)}
+            <option value={r.round_id}>{fmtRoundDate(r.closes_at)}</option>
+          {/each}
+        </select>
+      {/if}
+      {#if displayedNightStandings.length === 0}
+        <p class="lb-empty">{leagueBusy ? 'reading the war-drums…' : 'no duel yet — the first table posts after tonight\'s 20:00 CET'}</p>
+      {:else}
+        <p class="lg-caption">
+          {selectedRoundId === null || selectedRoundId === rounds[0]?.round_id
+            ? "last night's table"
+            : `${fmtRoundDate(rounds.find((r) => r.round_id === selectedRoundId)?.closes_at ?? '')}'s table`}
+        </p>
+        <ol class="lb-rows">
+          {#each displayedNightStandings as row, i}
+            <li class="lb-row" class:me={isMe(row)}>
+              <span class="lb-rank">{i === 0 ? '👑' : i + 1}</span>
+              <span class="lb-name">{row.name}{isMe(row) ? ' · you' : ''}</span>
+              <span class="lg-record" title="wins–draws–losses">{row.wins}–{row.draws}–{row.losses}</span>
+              <span class="lg-points">{row.points} pts</span>
+              {#if !isMe(row) && myNightBoard && row.board}
+                <button class="lg-replay" title="watch this duel" onclick={() => void watchDuelReplay(row)}>▶</button>
+              {/if}
+            </li>
+          {/each}
+        </ol>
+        {#if myNightBoard === null && displayedNightStandings.length > 0}
+          <p class="lg-caption">no replay for this night — scored before replays existed</p>
+        {/if}
+        {#if myStanding && myConsolation > 0 && (selectedRoundId === null || selectedRoundId === rounds[0]?.round_id)}
+          <p class="lg-consolation">
+            last night's {myStanding.losses}
+            {myStanding.losses === 1 ? 'loss' : 'losses'} paid
+            <strong>+{myConsolation} scrap</strong> consolation
+          </p>
+        {/if}
+      {/if}
     {/if}
-    {#if myRank !== null && myRank > board.length}
-      <p class="lb-myrank">your rank: <strong>#{myRank}</strong> · depth {seasonBest} · {myBossDamage() > 0 ? `${myBossDamage()} boss dmg` : 'no Boss Trial yet'}</p>
-    {/if}
+
+    <div class="scout">
+      <p class="lg-caption">scout tonight's rivals · last synced boards</p>
+      {#if ghosts.length === 0}
+        <p class="lb-empty">{leagueBusy ? 'scouting the drains…' : 'no rivals synced yet this week'}</p>
+      {:else}
+        <ul class="scout-list">
+          {#each ghosts as g (g.player_id)}
+            {@const open = scoutedGhost === g.player_id}
+            <li class="scout-item">
+              <button
+                class="scout-row"
+                aria-expanded={open}
+                onclick={() => (scoutedGhost = open ? null : g.player_id)}
+              >
+                <span class="scout-name">{g.name}</span>
+                <span class="scout-count">{g.board.units.length} rats {open ? '▾' : '▸'}</span>
+              </button>
+              {#if open}
+                {#if g.board.units.length === 0}
+                  <p class="scout-empty">empty board — no horde synced</p>
+                {:else}
+                  <div class="scout-board">
+                    {#each ghostUnits(g) as u (u.key)}
+                      <span class="scout-chip">{u.label}</span>
+                    {/each}
+                  </div>
+                {/if}
+              {/if}
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </div>
+
     <p class="lb-you">
       riding as <strong>{playerName || '—'}</strong>
       <button class="lb-rename" onclick={openRename}>rename</button>
     </p>
-  </div>
-
-  <!-- Daily Boss Trial (issue #107, Phase 1 — leaderboard number only, no
-       rewards yet). The trial fights the player's LIVE current board (no
-       snapshot), once per calendar day; `bossTrial` holds the MOST RECENT
-       resolved fight (persistence.ts, keyed by seasonId only) — `bossTrial.day
-       === build.day` means today's shot is spent, otherwise it's still
-       yesterday's (or older) fight, kept watchable as "the previous fight"
-       until the next one resolves. -->
-  <div class="boss-trial">
-    <div class="bt-head">
-      <span class="panel-label">Boss Trial · day {build.day}/{SEASON_DAYS}</span>
-      <button class="lb-refresh" onclick={() => void refreshBossTrialBoard()} disabled={bossTrialBoardBusy}>
-        {bossTrialBoardBusy ? '…' : '↻'}
-      </button>
-    </div>
-    <img class="bt-portrait" src={ART_URL['boss-trial']} alt="" />
-    <p class="bt-blurb">
-      Every day at {BOSS_TRIAL_HOUR}:00 CET your horde automatically faces a boss — no trigger, no preview. Fell it to reach the next phase — every phase the next boss hits ×{BOSS_TRIAL_ESCALATION} as hard and carries +{BOSS_TRIAL_HP_GROWTH_PER_PHASE} health, until the horde falls. Score is total damage dealt.
-    </p>
-    {#if bossTrial && bossTrial.day === build.day}
-      <p class="bt-result">Today's damage: <strong>{bossTrial.damage}</strong> · felled {bossTrial.phases} {bossTrial.phases === 1 ? 'boss' : 'bosses'} · back tomorrow</p>
-      <button class="watch bt-watch" onclick={watchBossTrial} disabled={phase === 'riding'}>
-        ▶ watch today's trial
-      </button>
-    {:else}
-      <p class="bt-hint">
-        {build.board.length === 0
-          ? `have a horde standing by before ${BOSS_TRIAL_HOUR}:00 CET — an empty board isn't scored`
-          : `fights automatically at ${BOSS_TRIAL_HOUR}:00 CET`}
-      </p>
-      {#if bossTrial}
-        <p class="bt-result">Previous fight: <strong>{bossTrial.damage}</strong> dmg · felled {bossTrial.phases} {bossTrial.phases === 1 ? 'boss' : 'bosses'}</p>
-        <button class="watch bt-watch" onclick={watchBossTrial} disabled={phase === 'riding'}>
-          ▶ watch previous fight
-        </button>
-      {/if}
-    {/if}
-    {#if bossTrialBoard.length === 0}
-      <p class="lb-empty">{bossTrialBoardBusy ? 'reading the war-drums…' : 'no challengers yet this week — be the first'}</p>
-    {:else}
-      <ol class="bt-rows">
-        {#each bossTrialBoard as row, i}
-          <li class="bt-row" class:me={isMe(row)}>
-            <span class="bt-rank">{i + 1}</span>
-            <span class="bt-name"
-              >{#if row.device_id === crownDeviceId}<span class="crown" title="reigning Boss-Breaker">👑</span> {/if}{row.name}{isMe(row) ? ' · you' : ''}</span
-            >
-            <span class="bt-phases">{row.phases} felled</span>
-            <span class="bt-damage">{row.damage} dmg</span>
-          </li>
-        {/each}
-      </ol>
-    {/if}
-    {#if bossTrialRank !== null && bossTrialRank > bossTrialBoard.length}
-      <p class="bt-myrank">your rank: <strong>#{bossTrialRank}</strong> · {bossTrial?.damage ?? 0} dmg</p>
-    {/if}
   </div>
 
   {#if telemetryConfigured}
@@ -1917,7 +2025,9 @@
             {@const owned = relic.scope === 'team' && build.teamRelicIds.includes(relic.id)}
             {@const noTarget = relic.scope === 'unit' && !hasValidRelicTarget(build, relic.id)}
             <div class="card-head">
-              <div class="card-relic-icon">✦</div>
+              <div class="card-relic-icon" aria-hidden="true" style={relicFamilyStyle(relic)}>
+                ✦<span class="relic-family" aria-hidden="true">{relicKeyword(relic).glyph}</span>
+              </div>
               <div>
                 <div class="card-name">{relic.name}</div>
                 <div class="card-sub">{relic.scope === 'team' ? 'whole team' : 'pin to one rat'}</div>
@@ -1959,10 +2069,14 @@
               <button disabled={ins.index === 0} onclick={() => moveFromCard(-1)}>front ▶</button>
               <button disabled={ins.index >= build.board.length - 1} onclick={() => moveFromCard(1)}>◀ back</button>
               <button disabled={benchFull} onclick={benchFromCard}>bench</button>
-              <button onclick={sellFromCard}>sell · +{sellRefund(unit, build.day)}</button>
+              <button class:armed={isSellArmed('board', ins.index)} onclick={sellFromCard}>
+                {isSellArmed('board', ins.index) ? 'sure?' : 'sell'} · +{sellRefund(unit, build.day)}
+              </button>
               <button onclick={() => (inspect = null)}>close</button>
             </div>
-            {#if benchFull}<div class="card-warn">the bench is full</div>{/if}
+            {#if isSellArmed('board', ins.index)}
+              <div class="card-warn">tap again — the rat is gone for good</div>
+            {:else if benchFull}<div class="card-warn">the bench is full</div>{/if}
           {/if}
         {:else}
           {@const unit = build.bench[ins.index]}
@@ -1992,9 +2106,14 @@
               {:else}
                 <button class="primary" onclick={deployFromCard}>deploy</button>
               {/if}
-              <button onclick={sellBenchFromCard}>sell · +{sellRefund(unit, build.day)}</button>
+              <button class:armed={isSellArmed('bench', ins.index)} onclick={sellBenchFromCard}>
+                {isSellArmed('bench', ins.index) ? 'sure?' : 'sell'} · +{sellRefund(unit, build.day)}
+              </button>
               <button onclick={() => (inspect = null)}>close</button>
             </div>
+            {#if isSellArmed('bench', ins.index)}
+              <div class="card-warn">tap again — the rat is gone for good</div>
+            {/if}
           {/if}
         {/if}
       </div>
@@ -2004,15 +2123,8 @@
   {#if compendium}
     {@const comp = compendium}
     {@const unitList = seasonUnitPool().sort((a, b) => a.cost - b.cost)}
-    {@const relicList = [...Object.values(RELIC_DEFS)].sort((a, b) => a.cost - b.cost)}
-    {@const bossDef = {
-      id: 'boss-trial',
-      name: 'The Gauntlet Boss',
-      attack: Math.round(bossTrialPhaseAttack(0)),
-      health: Math.round(bossTrialPhaseHP(0)),
-      cost: 0,
-    } as UnitDef}
-    {@const enemyList = [...ENEMY_POOL, bossDef]}
+    {@const relicList = seasonRelicPool().sort((a, b) => a.cost - b.cost)}
+    {@const enemyList = [...ENEMY_POOL]}
     {@const selectedUnit =
       comp.tab === 'units' && comp.selected
         ? UNIT_DEFS[comp.selected]
@@ -2042,19 +2154,12 @@
               {/if}
             </div>
           </div>
-          {#if selectedUnit.id === 'boss-trial'}
-            <p class="card-ability">
-              Fought once a day in the Boss Trial, not the weekly gauntlet — a single foe that escalates every phase
-              cleared: attack ×{BOSS_TRIAL_ESCALATION}, health +{BOSS_TRIAL_HP_GROWTH_PER_PHASE}. Stats shown are phase 1.
-            </p>
-          {:else}
-            <p class="card-ability">{abilitySentence(selectedUnit, comp.tab === 'enemies' ? 'enemy' : 'horde')}</p>
-            {#if comp.tab === 'units' && isSummoner(selectedUnit)}
-              <p class="card-hint">summoned rats fight beyond your warren's size (up to {combatCapForBuild(build)} in the drains)</p>
-            {/if}
-            {#if comp.tab === 'enemies'}
-              <p class="card-hint">shown at ★1 — enemies never star up; the gauntlet may scale their stats by depth</p>
-            {/if}
+          <p class="card-ability">{abilitySentence(selectedUnit, comp.tab === 'enemies' ? 'enemy' : 'horde')}</p>
+          {#if comp.tab === 'units' && isSummoner(selectedUnit)}
+            <p class="card-hint">summoned rats fight beyond your warren's size (up to {combatCapForBuild(build)} in the drains)</p>
+          {/if}
+          {#if comp.tab === 'enemies'}
+            <p class="card-hint">shown at ★1 — enemies never star up; the gauntlet may scale their stats by depth</p>
           {/if}
           <div class="card-actions">
             <button onclick={() => (compendium = { tab: comp.tab, selected: null })}>◀ back</button>
@@ -2062,7 +2167,9 @@
           </div>
         {:else if selectedRelic}
           <div class="card-head">
-            <div class="card-relic-icon">✦</div>
+            <div class="card-relic-icon" aria-hidden="true" style={relicFamilyStyle(selectedRelic)}>
+              ✦<span class="relic-family" aria-hidden="true">{relicKeyword(selectedRelic).glyph}</span>
+            </div>
             <div>
               <div class="card-name">{selectedRelic.name}</div>
               <div class="card-stats">⚙ {selectedRelic.cost}</div>
@@ -2104,7 +2211,9 @@
             {:else}
               {#each relicList as relic (relic.id)}
                 <button class="compendium-row" onclick={() => (compendium = { tab: 'relics', selected: relic.id })}>
-                  <div class="compendium-row-icon">✦</div>
+                  <div class="compendium-row-icon" aria-hidden="true" style={relicFamilyStyle(relic)}>
+                    ✦<span class="relic-family" aria-hidden="true">{relicKeyword(relic).glyph}</span>
+                  </div>
                   <span class="compendium-row-name">{relic.name}</span>
                   <span class="compendium-row-cost">⚙ {relic.cost}</span>
                 </button>
@@ -2139,6 +2248,31 @@
       </div>
     </div>
   {/if}
+
+  <!-- Duel replay (issue #158). This wrapper and the stage inside it are
+       ALWAYS mounted (not `{#if duelReplay}`) so `duelReplayPlayer`'s Pixi
+       app stays attached to a live element — same reasoning as the main ride
+       `stage`/`player`. Only visibility and the surrounding text react to
+       `duelReplay`. -->
+  <div class="duel-overlay" class:hidden={!duelReplay} role="presentation" onclick={closeDuelReplay}>
+    <div class="duel-sheet" role="dialog" aria-modal="true" onclick={(e) => e.stopPropagation()}>
+      <div class="duel-head">
+        <span>{duelReplay ? `vs ${duelReplay.opponentName}` : ''}</span>
+        <button class="duel-close" onclick={closeDuelReplay} aria-label="close replay">✕</button>
+      </div>
+      <div class="stage duel-stage" bind:this={duelStageEl}></div>
+      {#if duelReplay?.playing}
+        <div class="ride-controls">
+          {#each [1, 2, 4] as s}
+            <button class:active={duelSpeed === s} onclick={() => setDuelSpeed(s)}>{s}×</button>
+          {/each}
+        </div>
+      {/if}
+      {#if duelReplay && !duelReplay.playing && duelReplay.result}
+        <p class="duel-result">{duelResultText(duelReplay.opponentName, duelReplay.result)}</p>
+      {/if}
+    </div>
+  </div>
 </main>
 
 <style>
@@ -2162,7 +2296,7 @@
 
   .update-banner {
     background: var(--accent);
-    border-bottom: 1px solid #7a3018;
+    border-bottom: 1px solid var(--accent-deep);
   }
 
   .install-banner {
@@ -2178,7 +2312,7 @@
     font-family: inherit;
     font-size: 13px;
     font-weight: bold;
-    color: #f5ead2;
+    color: var(--ink-bright);
     background: transparent;
     border: none;
     cursor: pointer;
@@ -2193,7 +2327,7 @@
     padding: 8px 14px;
     font-family: inherit;
     font-size: 13px;
-    color: #f5ead2;
+    color: var(--ink-bright);
     background: transparent;
     border: none;
     cursor: pointer;
@@ -2201,7 +2335,7 @@
   }
 
   .update-banner-dismiss {
-    border-left: 1px solid #7a3018;
+    border-left: 1px solid var(--accent-deep);
   }
 
   .install-banner-dismiss {
@@ -2246,15 +2380,15 @@
     justify-content: center;
     flex-wrap: wrap;
     gap: 6px;
-    border: 1px dashed #322820;
+    border: 1px dashed var(--edge-dim);
     border-radius: 8px;
     font-size: 12px;
     color: var(--ink-dim);
   }
 
   .dev input[type='date'] {
-    background: #241a14;
-    border: 1px solid #4a3520;
+    background: var(--surface);
+    border: 1px solid var(--edge);
     border-radius: 6px;
     color: var(--ink);
     font-family: inherit;
@@ -2267,15 +2401,15 @@
     font-family: inherit;
     font-size: 12px;
     color: var(--ink);
-    background: #241a14;
-    border: 1px solid #4a3520;
+    background: var(--surface);
+    border: 1px solid var(--edge);
     border-radius: 6px;
     cursor: pointer;
   }
 
   .dev button.active {
     border-color: var(--accent);
-    color: #f0e6d2;
+    color: var(--ink-bright);
   }
 
   .dev button:disabled {
@@ -2284,11 +2418,11 @@
   }
 
   .dev-theme {
-    color: #c9b891;
+    color: var(--ink-soft);
   }
 
   .dev-sep {
-    color: #4a3520;
+    color: var(--edge);
   }
 
   .build {
@@ -2304,32 +2438,49 @@
     margin-bottom: 10px;
   }
 
+  /* Wet metal on the panels (issue #167), same recipe as `.tile`: a light
+     catch along the top edge, a shadow along the bottom, `--sheen` instead
+     of a flat fill, and an off-square radius so the frame reads as a
+     stamped plate rather than a rounded rectangle. Each panel gets its OWN
+     radius rotation — three stacked panels with identical corners is the
+     laser-cut look this is trying to leave behind. */
+  .horde-panel,
+  .bench-panel,
+  .shop-panel,
+  .battle-panel,
+  .leaderboard {
+    background-image: var(--sheen);
+    box-shadow:
+      inset 0 1px 0 var(--inset-light),
+      inset 0 -1px 0 var(--inset-shadow);
+  }
+
   .horde-panel {
     padding: 10px 12px 12px;
-    border: 1.5px solid #6b4a2a;
-    border-radius: 10px;
-    background: #1c150f;
+    border: 1.5px solid var(--edge-warm);
+    border-radius: 12px 9px 11px 8px;
+    background-color: var(--surface-sunk);
   }
 
   .bench-panel {
     margin-top: 8px;
     padding: 8px 12px 10px;
-    border: 1px dashed #4a3520;
-    border-radius: 10px;
-    background: #191310;
+    border: 1px dashed var(--edge);
+    border-radius: 9px 12px 8px 11px;
+    background-color: var(--surface-sunk);
   }
 
   .shop-panel {
     margin-top: 14px;
     padding: 10px 12px 12px;
-    border: 1px solid #322820;
-    border-radius: 10px;
+    border: 1px solid var(--edge-dim);
+    border-radius: 11px 8px 12px 9px;
   }
 
   .arriving {
     margin-top: 10px;
     padding: 8px 12px;
-    border: 1px dashed #4a3520;
+    border: 1px dashed var(--edge);
     border-radius: 8px;
   }
 
@@ -2344,8 +2495,8 @@
     font-size: 12px;
     padding: 3px 10px;
     border-radius: 10px;
-    background: #2a2118;
-    color: #c9b891;
+    background: var(--surface-raised);
+    color: var(--ink-soft);
   }
 
   .phase-divider {
@@ -2365,21 +2516,27 @@
     content: '';
     flex: 1;
     height: 1px;
-    background: #4a3520;
+    background: var(--edge);
   }
 
   .battle-panel {
     max-width: 620px;
     margin: 0 auto;
     padding: 14px;
-    border: 1px solid #322820;
-    border-radius: 10px;
-    background: #100d0a;
+    border: 1px solid var(--edge-dim);
+    border-radius: 8px 11px 9px 12px;
+    background-color: var(--well);
   }
 
+  /* Tarnished brass (issue #167): every gold number in the app carries the
+     same 1px verdigris cast where it meets its own shadow. Brass in a wet
+     drain does not stay clean, and it is one text-shadow — see `--tarnish`.
+     Applied at each `color: var(--brass)` site rather than as one utility
+     rule, because the brass selectors have nothing else in common. */
   .scrap {
     font-size: 16px;
-    color: #d4af37;
+    color: var(--brass);
+    text-shadow: 0 1px 0 var(--tarnish);
   }
 
   .status-notice {
@@ -2390,16 +2547,17 @@
 
   .notice {
     font-size: 13px;
-    color: #d8452e;
+    color: var(--danger);
   }
 
   .cancel-pending {
     font-size: 12px;
     padding: 2px 8px;
-    border: 1px solid #6b4a2a;
+    border: 1px solid var(--edge-warm);
     border-radius: 6px;
     background: transparent;
-    color: #d4af37;
+    color: var(--brass);
+    text-shadow: 0 1px 0 var(--tarnish);
   }
 
   .row-label {
@@ -2429,8 +2587,64 @@
     grid-template-columns: repeat(5, 1fr);
   }
 
+  .shop-board {
+    /* SHOP_UNIT_SLOTS(4) + SHOP_RELIC_SLOTS(1) = 5 (issue #156's relic-slot
+       cut, 2026-08-01) — was the shared 6-column `.board` default, which
+       left a dead 6th track and squeezed every tile a column narrower than
+       it needed to be. A dedicated column count lets tiles actually use the
+       freed-up width instead of wrapping names/costs onto extra lines. */
+    grid-template-columns: repeat(5, 1fr);
+  }
+
+  /* Scoped to .shop-tile, not the shared .tile — the horde/bench boards
+     already sit at 5 columns and weren't part of this resize; only the shop
+     gained width from the relic-slot cut above. */
+  .shop-tile {
+    min-height: 104px;
+    padding: 9px 5px;
+  }
+
+  .shop-tile .portrait {
+    width: 48px;
+    height: 48px;
+  }
+
+  .shop-tile .tile-name {
+    font-size: 12.5px;
+  }
+
+  .shop-tile .tile-stats {
+    font-size: 15px;
+  }
+
+  .shop-tile .tile-sub {
+    font-size: 10.5px;
+  }
+
+  .shop-tile .tile-cost {
+    font-size: 11.5px;
+  }
+
   .bench-tile {
     opacity: 0.92;
+  }
+
+  /* Keyword-family edge (issue #166): a full board used to be five identical
+     brown boxes — the sprite is 40px of an 86px tile and everything else was
+     10-12px text on the same ground, so nothing distinguished a poison rat
+     from an armor rat at a glance. The colour comes from the inline
+     `--family` each tile sets (see `familyStyle`), never from a per-surface
+     palette invented here — ADR-0005. Drawn as an absolute bar rather than a
+     `border-top` so it costs no layout height on an already-tight tile;
+     `transparent` for a plain body makes it a no-op instead of a rule that
+     has to be conditionally applied. */
+  .tile::before {
+    content: '';
+    position: absolute;
+    inset: 0 0 auto;
+    height: 3px;
+    background: var(--family, transparent);
+    pointer-events: none;
   }
 
   .tile {
@@ -2448,19 +2662,56 @@
     flex-direction: column;
     align-items: center;
     gap: 3px;
-    background: #241a14;
-    border: 1px solid #4a3520;
-    border-radius: 8px;
+    /* Wet metal, not a fill (issue #167). `background-color` + `--sheen` as
+       a separate background-IMAGE, deliberately not the `background`
+       shorthand: every state rule below (front/selected/frozen/arming) swaps
+       only the colour, and a shorthand there would silently wipe the sheen.
+       Same reason the inset light/shadow live here rather than per state. */
+    background-color: var(--surface);
+    background-image: var(--sheen);
+    box-shadow:
+      inset 0 1px 0 var(--inset-light),
+      inset 0 -1px 0 var(--inset-shadow);
+    border: 1px solid var(--edge);
+    /* Stamped, not laser-cut: four different radii read as a struck object,
+       a uniform 8px reads as a div. Varied per tile by position below. */
+    border-radius: 9px 6px 8px 7px;
     color: var(--ink);
     font-family: inherit;
     font-size: 12px;
     cursor: pointer;
   }
 
+  /* Three radius rotations across a row so no two neighbours are identical.
+     `.tile::before` (the family edge) has to track the TOP two corners of
+     whichever rotation applies, hence the paired rules — the bar sits inside
+     the 1px border, so each value is 1px tighter than the tile's. */
+  .board .tile:nth-child(3n + 1) {
+    border-radius: 7px 9px 6px 8px;
+  }
+
+  .board .tile:nth-child(3n + 2) {
+    border-radius: 8px 7px 9px 6px;
+  }
+
+  .tile::before {
+    border-radius: 8px 5px 0 0;
+  }
+
+  .board .tile:nth-child(3n + 1)::before {
+    border-radius: 6px 8px 0 0;
+  }
+
+  .board .tile:nth-child(3n + 2)::before {
+    border-radius: 7px 6px 0 0;
+  }
+
   .empty-tile {
-    background: transparent;
-    border: 1px dashed #322820;
-    color: #5f564a;
+    background-color: transparent;
+    background-image: none;
+    box-shadow: none;
+    border: 1px dashed var(--edge-dim);
+    color: var(--ink-faint);
     justify-content: center;
     cursor: default;
   }
@@ -2482,7 +2733,7 @@
   .tile-stats {
     font-size: 14px;
     font-weight: bold;
-    color: #f0e6d2;
+    color: var(--ink-bright);
   }
 
   .tile-sub {
@@ -2492,34 +2743,164 @@
     overflow-wrap: break-word;
   }
 
+  /* Only when `.tile-sub` is actually showing a keyword — a relic list (the
+     other thing that span renders) belongs to the relic's gold register, not
+     to the unit's family. */
+  /* `--family-text`, not `--family`: this line is 10px, and three of the six
+     sprite-true family hexes sit below `--ink-dim` on `--surface` (ADR-0006's
+     floor for anything under 12px). The lift is enforced in
+     `keyword-family.test.ts`. The edge stripe above keeps the true hex. */
+  .tile-sub.keyword {
+    color: var(--family-text, var(--ink-dim));
+  }
+
+  /* ...and that gold register, stated. Before this the relic list simply
+     inherited `--ink-dim`, so pinning a relic read as the rat's family
+     QUIETLY DRAINING AWAY rather than as a deliberate switch of subject.
+     Brass is the app-wide relic colour (costs, the ✦ marks, `.relic-tile`
+     names) and clears 8:1 on `--surface`, where the family reds do not — so
+     this is also the contrast-safe choice for 10px text. The rat's own
+     family is never actually lost: the 3px tile edge still carries it. */
+  .tile-sub.relic-text {
+    color: var(--brass);
+    text-shadow: 0 1px 0 var(--tarnish);
+  }
+
+  /* Relic marks (issue #166 follow-up). A relic had no visual identity at
+     all: the same brass ✦ in four places while every unit beside it carried
+     a portrait, a family colour and a light source. Until the sprites land
+     this is the interim — the ✦ stays as the "this is an item, not a rat"
+     marker, with the relic's keyword-family glyph badged onto it in the
+     family colour, so a relic answers "what does this do" the same way a
+     rat's tile does. Two marks rather than one recoloured mark, because
+     they say different things. */
+  .relic-mark {
+    position: relative;
+    width: 48px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 26px;
+    line-height: 1;
+    color: var(--brass);
+    text-shadow: 0 1px 0 var(--tarnish);
+    pointer-events: none;
+  }
+
+  .card-relic-icon,
+  .compendium-row-icon {
+    position: relative;
+  }
+
+  .relic-family {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    font-size: 13px;
+    line-height: 1;
+    /* 13px is still small text for AA purposes — see `.tile-sub.keyword`. */
+    color: var(--family-text, var(--ink-dim));
+    text-shadow: none;
+  }
+
+  .card-relic-icon .relic-family {
+    right: 6px;
+    bottom: 6px;
+    font-size: 18px;
+  }
+
+  .compendium-row-icon .relic-family {
+    font-size: 11px;
+  }
+
   .tile-cost {
     font-size: 11px;
-    color: #d4af37;
+    color: var(--brass);
+    text-shadow: 0 1px 0 var(--tarnish);
     overflow-wrap: break-word;
+  }
+
+  /* Tier as pips, not text (issue #166). `★2` was two characters of 11.5px
+     name suffix for what is the single biggest power spike in the game;
+     tier 1 shows nothing at all, so the marker only ever means "this one is
+     merged". The `aria-label` carries the tier for screen readers, and the
+     inspect sheet still spells out `★N` on tap. Shop tiles never render
+     these — everything on offer is tier 1 — which is also why they don't
+     collide with the ❄ freeze control in the same corner. */
+  .tier-pips {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    display: flex;
+    gap: 2px;
+    pointer-events: none;
+  }
+
+  .pip {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--brass);
+  }
+
+  /* Keeps the tile's own wet-metal insets and adds the merge glow on top —
+     a bare `box-shadow` here would replace them, flattening the ★3 tile back
+     to a fill at exactly the moment it should look struck. */
+  .unit-tile.maxed {
+    border-color: var(--brass);
+    box-shadow:
+      inset 0 1px 0 var(--inset-light),
+      inset 0 -1px 0 var(--inset-shadow),
+      inset 0 0 9px var(--brass-glow);
+  }
+
+  /* Only the frontmost unit ever clashes (see CONTEXT.md, "Clash"), and
+     nothing on the board said so. Horde-only — the `front` class is set at
+     board index 0 and nowhere else, since the bench never fights and the shop
+     has no ordering. Brighter ground plus a rust chevron pointing the way the
+     board reads, matching the `front → into the drains` label above it.
+     Deliberately kept at two-class specificity and placed ABOVE
+     `.unit-tile.selected`, so selecting the front rat still repaints its
+     ground rather than losing that feedback to this rule. */
+  .unit-tile.front {
+    background-color: var(--surface-lit);
+  }
+
+  .unit-tile.front::after {
+    content: '›';
+    position: absolute;
+    bottom: 1px;
+    right: 5px;
+    font-size: 13px;
+    line-height: 1;
+    color: var(--accent);
+    pointer-events: none;
   }
 
   .unit-tile.selected {
     border-color: var(--accent);
-    background: #2c1e15;
+    background-color: var(--surface-raised);
   }
 
   .unit-tile.pin-target {
-    border-color: #d4af37;
+    border-color: var(--brass);
   }
 
   .relic-tile .tile-name {
-    color: #d4af37;
+    color: var(--brass);
+    text-shadow: 0 1px 0 var(--tarnish);
   }
 
   .relic-tile.arming,
   .bench-tile.arming {
-    border-color: #d4af37;
-    background: #2c2415;
+    border-color: var(--brass);
+    background-color: var(--surface-brass);
   }
 
   .shop-tile.frozen {
-    background: #16202a;
-    border-color: #3d5a75;
+    background-color: var(--frost-surface);
+    border-color: var(--frost-edge);
   }
 
   .freeze {
@@ -2533,7 +2914,7 @@
     align-items: center;
     justify-content: center;
     font-size: 12px;
-    color: #7ba7cc;
+    color: var(--frost);
     opacity: 0.65;
   }
 
@@ -2553,8 +2934,8 @@
     font-family: inherit;
     font-size: 13px;
     color: var(--ink);
-    background: #241a14;
-    border: 1px solid #4a3520;
+    background: var(--surface);
+    border: 1px solid var(--edge);
     border-radius: 6px;
     cursor: pointer;
   }
@@ -2581,8 +2962,8 @@
   .sheet {
     width: 100%;
     max-width: 480px;
-    background: #1a140f;
-    border: 1px solid #4a3520;
+    background: var(--surface-sunk);
+    border: 1px solid var(--edge);
     border-bottom: none;
     border-radius: 14px 14px 0 0;
     padding: 18px 18px 26px;
@@ -2599,20 +2980,9 @@
     width: 72px;
     height: 72px;
     object-fit: contain;
-    background: #241a14;
-    border: 1px solid #4a3520;
+    background: var(--surface);
+    border: 1px solid var(--edge);
     border-radius: 10px;
-  }
-
-  .bt-portrait {
-    width: 64px;
-    height: 64px;
-    object-fit: contain;
-    background: #241a14;
-    border: 1px solid #4a3520;
-    border-radius: 10px;
-    display: block;
-    margin: 12px auto;
   }
 
   .card-relic-icon {
@@ -2622,9 +2992,10 @@
     align-items: center;
     justify-content: center;
     font-size: 34px;
-    color: #d4af37;
-    background: #241a14;
-    border: 1px solid #4a3520;
+    color: var(--brass);
+    text-shadow: 0 1px 0 var(--tarnish);
+    background: var(--surface);
+    border: 1px solid var(--edge);
     border-radius: 10px;
   }
 
@@ -2637,7 +3008,7 @@
     margin-top: 3px;
     font-size: 17px;
     font-weight: bold;
-    color: #f0e6d2;
+    color: var(--ink-bright);
   }
 
   .card-tier {
@@ -2657,13 +3028,14 @@
     margin: 14px 0 4px;
     font-size: 14px;
     line-height: 1.45;
-    color: #c9b891;
+    color: var(--ink-soft);
   }
 
   .card-relics {
     margin: 2px 0 0;
     font-size: 13px;
-    color: #d4af37;
+    color: var(--brass);
+    text-shadow: 0 1px 0 var(--tarnish);
   }
 
   .card-actions {
@@ -2678,8 +3050,8 @@
     font-family: inherit;
     font-size: 14px;
     color: var(--ink);
-    background: #241a14;
-    border: 1px solid #4a3520;
+    background: var(--surface);
+    border: 1px solid var(--edge);
     border-radius: 6px;
     cursor: pointer;
   }
@@ -2687,7 +3059,7 @@
   .card-actions button.primary {
     background: var(--accent);
     border-color: var(--accent);
-    color: #f7ede0;
+    color: var(--ink-bright);
   }
 
   .card-actions button:disabled {
@@ -2695,10 +3067,18 @@
     cursor: default;
   }
 
+  /* Armed sell (see `sellArmed`): borrows .card-warn's red so the "one more
+     tap destroys this" state reads at a glance, without the filled-in weight
+     of .primary — this is a warning, not the sheet's recommended action. */
+  .card-actions button.armed {
+    color: var(--danger);
+    border-color: var(--danger);
+  }
+
   .card-warn {
     margin-top: 8px;
     font-size: 12px;
-    color: #d8452e;
+    color: var(--danger);
   }
 
   .card-hint {
@@ -2710,7 +3090,8 @@
   .card-note {
     margin-top: 8px;
     font-size: 12px;
-    color: #d4af37;
+    color: var(--brass);
+    text-shadow: 0 1px 0 var(--tarnish);
   }
 
   .compendium-nav {
@@ -2725,8 +3106,8 @@
     font-family: inherit;
     font-size: 12px;
     color: var(--ink);
-    background: #241a14;
-    border: 1px solid #4a3520;
+    background: var(--surface);
+    border: 1px solid var(--edge);
     border-radius: 6px;
     cursor: pointer;
   }
@@ -2754,14 +3135,14 @@
     font-family: inherit;
     font-size: 13px;
     color: var(--ink-dim);
-    background: #241a14;
-    border: 1px solid #4a3520;
+    background: var(--surface);
+    border: 1px solid var(--edge);
     border-radius: 6px;
     cursor: pointer;
   }
 
   .compendium-tabs button.active {
-    color: #f0e6d2;
+    color: var(--ink-bright);
     border-color: var(--accent);
   }
 
@@ -2791,8 +3172,8 @@
     font-family: inherit;
     text-align: left;
     color: var(--ink);
-    background: #241a14;
-    border: 1px solid #4a3520;
+    background: var(--surface);
+    border: 1px solid var(--edge);
     border-radius: 8px;
     cursor: pointer;
   }
@@ -2801,8 +3182,8 @@
     width: 36px;
     height: 36px;
     object-fit: contain;
-    background: #1a140f;
-    border: 1px solid #4a3520;
+    background: var(--surface-sunk);
+    border: 1px solid var(--edge);
     border-radius: 6px;
     flex-shrink: 0;
   }
@@ -2814,9 +3195,10 @@
     align-items: center;
     justify-content: center;
     font-size: 16px;
-    color: #d4af37;
-    background: #1a140f;
-    border: 1px solid #4a3520;
+    color: var(--brass);
+    text-shadow: 0 1px 0 var(--tarnish);
+    background: var(--surface-sunk);
+    border: 1px solid var(--edge);
     border-radius: 6px;
     flex-shrink: 0;
   }
@@ -2835,14 +3217,14 @@
   .compendium-row-stats {
     font-size: 13px;
     font-weight: bold;
-    color: #f0e6d2;
+    color: var(--ink-bright);
     flex-shrink: 0;
   }
 
   .team-relics {
     margin-top: 8px;
     font-size: 12px;
-    color: #c9b891;
+    color: var(--ink-soft);
   }
 
   .ride-controls {
@@ -2863,25 +3245,90 @@
     font-family: inherit;
     font-size: 12px;
     color: var(--ink);
-    background: #241a14;
-    border: 1px solid #4a3520;
+    background: var(--surface);
+    border: 1px solid var(--edge);
     border-radius: 6px;
     cursor: pointer;
   }
 
   .ride-controls button.active {
     border-color: var(--accent);
-    color: #f0e6d2;
+    color: var(--ink-bright);
   }
 
   .stage :global(canvas) {
     max-width: 100%;
-    border: 1px solid #2a221a;
+    border: 1px solid var(--edge-faint);
     border-radius: 6px;
   }
 
   .stage.hidden {
     display: none;
+  }
+
+  .duel-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: rgba(0, 0, 0, 0.7);
+  }
+
+  .duel-overlay.hidden {
+    display: none;
+  }
+
+  .duel-sheet {
+    width: 100%;
+    max-width: 620px;
+    background: var(--surface-sunk);
+    border: 1px solid var(--edge);
+    border-radius: 12px;
+    padding: 14px;
+  }
+
+  .duel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    font-size: 13px;
+    color: var(--ink-dim);
+  }
+
+  .duel-close {
+    min-width: 32px;
+    min-height: 32px;
+    font-family: inherit;
+    font-size: 14px;
+    color: var(--ink);
+    background: var(--surface);
+    border: 1px solid var(--edge);
+    border-radius: 6px;
+    cursor: pointer;
+  }
+
+  .duel-result {
+    margin: 10px 0 0;
+    font-size: 14px;
+    text-align: center;
+    color: var(--ink-bright);
+  }
+
+  .lg-replay {
+    min-width: 32px;
+    min-height: 32px;
+    padding: 2px 8px;
+    font-family: inherit;
+    font-size: 12px;
+    color: var(--ink);
+    background: var(--surface);
+    border: 1px solid var(--edge);
+    border-radius: 6px;
+    cursor: pointer;
   }
 
   .idle {
@@ -2907,8 +3354,8 @@
     flex-direction: column;
     min-width: 96px;
     padding: 10px 6px;
-    background: #1d1713;
-    border: 1px solid #322820;
+    background: var(--surface-sunk);
+    border: 1px solid var(--edge-dim);
     border-radius: 8px;
   }
 
@@ -2933,7 +3380,8 @@
   .season-best {
     margin: 12px 0 0;
     font-size: 14px;
-    color: #d4af37;
+    color: var(--brass);
+    text-shadow: 0 1px 0 var(--tarnish);
   }
 
   .season-kills {
@@ -2952,8 +3400,8 @@
     margin: 14px 0 0;
     padding: 8px 12px;
     border-radius: 6px;
-    background: #1d1713;
-    border: 1px solid #2a221a;
+    background: var(--surface-sunk);
+    border: 1px solid var(--edge-faint);
     font-size: 12px;
     color: var(--ink-dim);
     text-align: center;
@@ -2962,7 +3410,7 @@
   .ride-log {
     margin-top: 16px;
     padding-top: 10px;
-    border-top: 1px solid #2a221a;
+    border-top: 1px solid var(--edge-faint);
     text-align: left;
   }
 
@@ -2989,11 +3437,12 @@
   }
 
   .rl-row:nth-child(odd) {
-    background: #17110d;
+    background: var(--panel);
   }
 
   .rl-row.deepest {
-    color: #d4af37;
+    color: var(--brass);
+    text-shadow: 0 1px 0 var(--tarnish);
   }
 
   .rl-time {
@@ -3003,7 +3452,8 @@
   }
 
   .rl-row.deepest .rl-time {
-    color: #d4af37;
+    color: var(--brass);
+    text-shadow: 0 1px 0 var(--tarnish);
   }
 
   .rl-depth {
@@ -3020,21 +3470,22 @@
   .rl-scrap {
     min-width: 48px;
     white-space: nowrap;
-    color: #c9b891;
+    color: var(--ink-soft);
   }
 
   .rl-surv {
     flex: 1;
     text-align: right;
-    color: #d4af37;
+    color: var(--brass);
+    text-shadow: 0 1px 0 var(--tarnish);
   }
 
   .away {
     margin: 14px 0 0;
     padding-top: 12px;
-    border-top: 1px solid #2a221a;
+    border-top: 1px solid var(--edge-faint);
     font-size: 14px;
-    color: #c9b891;
+    color: var(--ink-soft);
   }
 
   .watch {
@@ -3098,9 +3549,9 @@
     max-width: 620px;
     margin: 18px auto 0;
     padding: 12px 14px 14px;
-    border: 1px solid #322820;
-    border-radius: 10px;
-    background: #14100c;
+    border: 1px solid var(--edge-dim);
+    border-radius: 12px 8px 11px 9px;
+    background-color: var(--well);
     text-align: left;
   }
 
@@ -3120,8 +3571,8 @@
     font-family: inherit;
     font-size: 13px;
     color: var(--ink);
-    background: #241a14;
-    border: 1px solid #4a3520;
+    background: var(--surface);
+    border: 1px solid var(--edge);
     border-radius: 6px;
     cursor: pointer;
   }
@@ -3129,6 +3580,46 @@
   .lb-refresh:disabled {
     opacity: 0.5;
     cursor: default;
+  }
+
+  .lg-tabs {
+    display: flex;
+    gap: 6px;
+    margin: 10px 0 0;
+  }
+
+  .lg-tab {
+    flex: 1;
+    min-height: 36px;
+    padding: 6px 10px;
+    font-family: inherit;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--ink-dim);
+    background: var(--surface-sunk);
+    border: 1px solid var(--edge-dim);
+    border-radius: 6px;
+    cursor: pointer;
+  }
+
+  .lg-tab.active {
+    color: var(--ink);
+    background: var(--surface);
+    border-color: var(--edge);
+  }
+
+  .lg-round-picker {
+    display: block;
+    width: 100%;
+    margin: 10px 0 0;
+    padding: 6px 8px;
+    font-family: inherit;
+    font-size: 13px;
+    color: var(--ink);
+    background: var(--surface-sunk);
+    border: 1px solid var(--edge-dim);
+    border-radius: 6px;
   }
 
   .lb-empty {
@@ -3153,12 +3644,12 @@
   }
 
   .lb-row:nth-child(odd) {
-    background: #1a140f;
+    background: var(--surface-sunk);
   }
 
   .lb-row.me {
-    background: #2c2415;
-    color: #f0e6d2;
+    background: var(--surface-brass);
+    color: var(--ink-bright);
   }
 
   .lb-rank {
@@ -3168,7 +3659,8 @@
   }
 
   .lb-row.me .lb-rank {
-    color: #d4af37;
+    color: var(--brass);
+    text-shadow: 0 1px 0 var(--tarnish);
   }
 
   .lb-name {
@@ -3178,37 +3670,116 @@
     white-space: nowrap;
   }
 
-  .lb-boss {
-    flex: 0 0 auto;
-    white-space: nowrap;
+  .lg-blurb {
+    margin: 8px 0 4px;
     font-size: 12px;
     color: var(--ink-dim);
-    font-variant-numeric: tabular-nums;
   }
 
-  .lb-tiebreak {
-    margin: 0 0 6px;
+  .lg-caption {
+    margin: 12px 0 2px;
     font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
     color: var(--ink-dim);
   }
 
-  .crown {
+  .lg-consolation {
+    margin: 8px 0 0;
     font-size: 12px;
+    color: var(--ink-soft);
   }
 
-  .lb-depth {
+  .lg-consolation strong {
+    color: var(--brass);
+    text-shadow: 0 1px 0 var(--tarnish);
+  }
+
+  .lg-record {
     flex: 0 0 auto;
     white-space: nowrap;
-    color: #d4af37;
+    font-size: 12px;
+    color: var(--ink-dim);
     font-variant-numeric: tabular-nums;
   }
 
-  .lb-myrank {
-    margin: 8px 0 0;
-    padding-top: 8px;
-    border-top: 1px solid #2a221a;
-    font-size: 13px;
-    color: #c9b891;
+  .lg-points {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    color: var(--brass);
+    text-shadow: 0 1px 0 var(--tarnish);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .scout {
+    margin-top: 4px;
+  }
+
+  .scout-list {
+    list-style: none;
+    margin: 4px 0 0;
+    padding: 0;
+  }
+
+  .scout-item {
+    border-radius: 6px;
+  }
+
+  .scout-item:nth-child(odd) {
+    background: var(--surface-sunk);
+  }
+
+  .scout-row {
+    display: flex;
+    width: 100%;
+    align-items: baseline;
+    gap: 10px;
+    padding: 6px 8px;
+    font-family: inherit;
+    font-size: 14px;
+    color: var(--ink);
+    background: none;
+    border: none;
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .scout-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .scout-count {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    font-size: 12px;
+    color: var(--ink-dim);
+  }
+
+  .scout-empty {
+    margin: 0;
+    padding: 0 8px 8px;
+    font-size: 12px;
+    color: var(--ink-dim);
+  }
+
+  .scout-board {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 0 8px 10px;
+  }
+
+  .scout-chip {
+    padding: 3px 8px;
+    font-size: 12px;
+    color: var(--ink-bright);
+    background: var(--surface);
+    border: 1px solid var(--edge);
+    border-radius: 999px;
+    white-space: nowrap;
   }
 
   .lb-you {
@@ -3223,116 +3794,10 @@
     font-family: inherit;
     font-size: 12px;
     color: var(--ink);
-    background: #241a14;
-    border: 1px solid #4a3520;
+    background: var(--surface);
+    border: 1px solid var(--edge);
     border-radius: 6px;
     cursor: pointer;
-  }
-
-  /* Boss Trial panel (issue #107) — deliberately the same box/row shapes as
-     .leaderboard/.lb-* just above, with a bt- prefix so the two boards'
-     columns (damage/phase vs. depth/kills) stay easy to tell apart in the
-     markup despite looking identical on screen. */
-  .boss-trial {
-    max-width: 620px;
-    margin: 14px auto 0;
-    padding: 12px 14px 14px;
-    border: 1px solid #322820;
-    border-radius: 10px;
-    background: #14100c;
-    text-align: left;
-  }
-
-  .bt-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
-
-  .bt-blurb {
-    margin: 8px 0 10px;
-    font-size: 12px;
-    color: var(--ink-dim);
-  }
-
-  .bt-result {
-    margin: 4px 0 10px;
-    font-size: 14px;
-    color: #d4af37;
-  }
-
-  .bt-watch {
-    margin: 0 0 12px;
-  }
-
-  .bt-hint {
-    margin: 2px 0 10px;
-    font-size: 12px;
-    color: var(--ink-dim);
-  }
-
-  .bt-rows {
-    list-style: none;
-    margin: 10px 0 0;
-    padding: 0;
-  }
-
-  .bt-row {
-    display: flex;
-    align-items: baseline;
-    gap: 10px;
-    padding: 5px 8px;
-    border-radius: 6px;
-    font-size: 14px;
-  }
-
-  .bt-row:nth-child(odd) {
-    background: #1a140f;
-  }
-
-  .bt-row.me {
-    background: #2c2415;
-    color: #f0e6d2;
-  }
-
-  .bt-rank {
-    min-width: 24px;
-    color: var(--ink-dim);
-    font-variant-numeric: tabular-nums;
-  }
-
-  .bt-row.me .bt-rank {
-    color: #d4af37;
-  }
-
-  .bt-name {
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .bt-phases {
-    flex: 0 0 auto;
-    white-space: nowrap;
-    font-size: 12px;
-    color: var(--ink-dim);
-    font-variant-numeric: tabular-nums;
-  }
-
-  .bt-damage {
-    flex: 0 0 auto;
-    white-space: nowrap;
-    color: #d4af37;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .bt-myrank {
-    margin: 8px 0 0;
-    padding-top: 8px;
-    border-top: 1px solid #2a221a;
-    font-size: 13px;
-    color: #c9b891;
   }
 
   .name-sheet {
@@ -3347,8 +3812,8 @@
     font-family: inherit;
     font-size: 16px;
     color: var(--ink);
-    background: #241a14;
-    border: 1px solid #4a3520;
+    background: var(--surface);
+    border: 1px solid var(--edge);
     border-radius: 8px;
   }
 
@@ -3368,12 +3833,6 @@
       gap: 8px;
       padding: 2px 6px;
       font-size: 12px;
-    }
-
-    .bt-row {
-      gap: 6px;
-      padding: 4px 6px;
-      font-size: 13px;
     }
   }
 </style>

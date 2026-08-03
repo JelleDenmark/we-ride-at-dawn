@@ -1,0 +1,54 @@
+# Runs the guards.
+#
+# Until this existed, nothing did. `deploy.yml` only builds and publishes, and
+# neither `vite build` nor `vitest run` typechecks — so ADR-0005's guarantee
+# that a new `Effect` kind "fails typecheck" was never actually exercised by
+# any automated process, and the ADR-0003/0005/0006 canary tests only ran when
+# someone remembered the command locally. Mechanisms that nothing triggers are
+# documentation.
+#
+# Deliberately a SEPARATE workflow rather than a gate in front of deploy.yml:
+# that job checks out master and dev and builds both channels in one run, so
+# making it depend on tests would let a dev-only failure block a prod deploy.
+# Splitting them keeps the signal loud and the release path independent. If
+# deploy.yml is ever restructured to build the two channels separately, gating
+# each on this becomes the better arrangement.
+name: CI
+
+on:
+  push:
+    branches: [master, dev]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      # The compiler half of the enforcement: `satisfies Record<Effect['kind'],
+      # …>` in data/keyword-family.ts refuses a new effect kind until it is
+      # classified. Scoped to src — see tsconfig.typecheck.json for why test
+      # and scripts are still excluded.
+      - name: Typecheck (core/src)
+        run: npm run typecheck
+
+      # The runtime half: the compounding-law, keyword-family, ui-tokens and
+      # sprite-ramps canaries, plus the rest of the suite.
+      - name: Test
+        run: npm test
+
+      # A broken build reaching Pages is the one failure deploy.yml cannot
+      # report on its own, since it publishes whatever compiled.
+      - name: Build
+        run: npm run build

@@ -1,26 +1,57 @@
+import type { KeywordFamily } from './keyword-family';
+
 export interface RelicDef {
   id: string;
   name: string;
   scope: 'unit' | 'team';
   cost: number;
   desc: string;
+  /**
+   * Which keyword family this relic reads as (ADR-0005). REQUIRED, and that
+   * is the enforcement: a new relic cannot be declared without declaring
+   * what it does, the same way a new `Effect` kind cannot ship without an
+   * entry in `EFFECT_FAMILY`. Relics deliberately reuse the UNIT families
+   * rather than getting a second vocabulary — pinning Glass Shard to a rat
+   * genuinely does make that rat more offensive, and one encoding the player
+   * learns once beats two that nearly rhyme.
+   *
+   * Classify by MECHANISM, not by flavour — the same rule the unit side
+   * follows. Weeping Boil is the case that tests it: the name and the art
+   * register are pure blight, but it deals flat damage and applies no poison
+   * stacks, so it is `offence`. A green tile promising rot that never
+   * arrives would be worse than no colour at all.
+   */
+  family: KeywordFamily;
   attack?: number;
   health?: number;
-  /** Extra damage on the unit's first attack of the battle (Glass Shard). */
+  /** Extra damage on the unit's first attack each wave (Glass Shard) — fires
+   * anew every wave (a PvE ride is 45 of them; a PvP duel is exactly one),
+   * see `firstAttackDone`'s per-wave reset in sim.ts. */
   firstHitBonus?: number;
   /**
-   * Glass Shard rework (Jesper's call, 2026-07-16): the first-hit bonus
-   * damage scales with the current wave number instead of a flat literal,
-   * and is deliberately left UNCAPPED — the compounding-law risk (this
-   * relic can eventually out-damage the rest of the build by late waves)
-   * was explicitly accepted rather than capped. Recomputed fresh from
-   * `currentWave` on every wave's first hit; nothing is stored on the
-   * unit, so it cannot stack within a wave or carry over — it only grows
-   * because the wave number itself grows.
+   * That same first attack each wave also ignores the target's armor
+   * outright — not reduced-then-floored, straight through, skipping even
+   * MIN_ATTACK_DAMAGE's floor logic (Glass Shard's rework, issue #156; see
+   * `applyDamage`'s `ignoreArmor` param in sim.ts). Paired with
+   * `firstHitBonus` above under the SAME `firstAttackDone` gate — one
+   * "alpha strike," not two independent triggers — so a unit can't bank the
+   * armor-break on one attack and the bonus damage on another.
    */
-  firstHitBonusScalesWithWave?: boolean;
+  firstHitIgnoresArmor?: boolean;
   /** On faint, deal this much damage to every enemy (Weeping Boil). */
   onFaintDamageAll?: number;
+  /**
+   * Flat armor against 'attack' damage only (Filth Totem's rework, issue
+   * #156) — same `UnitDef.damageReduction` mechanism Ward-Weaver grants
+   * (`sim.ts`'s `applyDamage`), just team-scoped instead of unit-scoped.
+   * Poison bypasses it and the net-damage floor (`MIN_ATTACK_DAMAGE`) still
+   * applies, so this reads as anti-chip/anti-swarm defense, not a poison
+   * counter (that's Gutter-Acolyte's job, issue #155). Applied once via
+   * `teamPool`/`instantiate` before the wave loop starts, not a repeating
+   * trigger, so it's flat and compounding-law safe regardless of tier or
+   * wave count.
+   */
+  damageReduction?: number;
   /** Heal this much at the start of each combat tick (Fat Tick). */
   healPerTick?: number;
   /** Survive one otherwise-lethal hit at 1 health, once per battle (Tail-Charm). */
@@ -46,16 +77,34 @@ export interface RelicDef {
 }
 
 export const RELIC_DEFS: Record<string, RelicDef> = {
+  // Retired from the shop pool (Jesper, 2026-08-01, issue #156): `pvp:relics`
+  // confirmed a flat +2 attack is duel-dead from T2 on (a permanent bonus
+  // spread across only 8 board slots barely moves one duel's outcome, and
+  // the reworked Glass Shard below now fills the "attack relic" niche more
+  // interestingly). Def stays here for golden logs/replays; see
+  // SHOP_RELIC_POOL in shop.ts for the pool exclusion.
   'rusted-nail': {
-    id: 'rusted-nail', name: 'Rusted Nail', scope: 'unit', cost: 4,
+    id: 'rusted-nail', name: 'Rusted Nail', scope: 'unit', cost: 4, family: 'offence',
     desc: '+2 attack', attack: 2,
   },
+  // Reworked (Jesper, 2026-08-01, issue #156): was a first-hit bonus that
+  // scaled with the current wave number, UNCAPPED — both the PvP dud (a
+  // one-wave duel never gets past wave 1, so it read as a flat +1) and the
+  // last uncapped compounding-law liability in the roster (a deep PvE ride
+  // could eventually out-damage the rest of the build). Now a flat, capped
+  // "alpha strike": a fixed bonus on the first hit that ALSO ignores the
+  // target's armor outright — the deliberate counter to the Ward-Weaver
+  // armor meta, completing the RPS spine armor > swarm, armor-break > armor,
+  // swarm > poison (poison countered separately, see Gutter-Acolyte).
+  // Numbers are a first pass, not final — flagged for balance sign-off same
+  // as every other fresh magnitude in this file (see `pvp:relics`/
+  // `balance:relic-value` for how to re-check it).
   'glass-shard': {
-    id: 'glass-shard', name: 'Glass Shard', scope: 'unit', cost: 4,
-    desc: '+dmg = wave number, first hit each wave', firstHitBonusScalesWithWave: true,
+    id: 'glass-shard', name: 'Glass Shard', scope: 'unit', cost: 4, family: 'offence',
+    desc: '+4 dmg & ignores armor, first hit', firstHitBonus: 4, firstHitIgnoresArmor: true,
   },
   'weeping-boil': {
-    id: 'weeping-boil', name: 'Weeping Boil', scope: 'unit', cost: 4,
+    id: 'weeping-boil', name: 'Weeping Boil', scope: 'unit', cost: 4, family: 'offence',
     desc: 'faint: 2 dmg, all foes', onFaintDamageAll: 2,
   },
   // SEASON-4 JOINT-TUNING FLAG (issue #135): Grave-Leech gives sustain a
@@ -66,23 +115,30 @@ export const RELIC_DEFS: Record<string, RelicDef> = {
   // it. Decision DEFERRED to the balance pass, but the two must be tuned
   // together — probe a wave-40+ ride with and without this on the Leech.
   'fat-tick': {
-    id: 'fat-tick', name: 'Fat Tick', scope: 'unit', cost: 6,
+    id: 'fat-tick', name: 'Fat Tick', scope: 'unit', cost: 6, family: 'sustain',
     desc: '+1/+2, heal 1/clash', attack: 1, health: 2, healPerTick: 1,
   },
   'tail-charm': {
-    id: 'tail-charm', name: 'Tail-Charm', scope: 'unit', cost: 6,
+    id: 'tail-charm', name: 'Tail-Charm', scope: 'unit', cost: 6, family: 'sustain',
     desc: 'cheats death once', surviveLethal: true,
   },
+  // Reworked (Jesper, 2026-08-01, issue #156): was a flat +0/+1 health, which
+  // just duplicated Forgotten Backpack's bulk on a smaller scale. Now team
+  // armor instead — differentiates from Backpack (raw HP) since armor runs
+  // through the net-damage floor and is bypassed by poison, so it reads as
+  // anti-chip/anti-swarm defense and stacks with Backpack rather than
+  // competing with it. Numbers are a first pass, not final — see
+  // `pvp:relics`/`balance:relic-value` for how to re-check it.
   'filth-totem': {
-    id: 'filth-totem', name: 'Filth Totem', scope: 'team', cost: 6,
-    desc: 'all rats +0/+1', health: 1,
+    id: 'filth-totem', name: 'Filth Totem', scope: 'team', cost: 6, family: 'defence',
+    desc: 'all rats +1 armor', damageReduction: 1,
   },
   'gore-cleaver': {
-    id: 'gore-cleaver', name: 'Gore-Cleaver', scope: 'unit', cost: 5,
+    id: 'gore-cleaver', name: 'Gore-Cleaver', scope: 'unit', cost: 5, family: 'offence',
     desc: 'overkill spills to next foe', cleaveOverkill: true,
   },
   'marrow-snap': {
-    id: 'marrow-snap', name: 'Marrow-Snap', scope: 'unit', cost: 5,
+    id: 'marrow-snap', name: 'Marrow-Snap', scope: 'unit', cost: 5, family: 'offence',
     desc: 'kills a foe its own hit drops to half health or below', executeThreshold: 0.5,
   },
   // Easter egg (issue #24): the name is the whole point — someone else's
@@ -95,7 +151,7 @@ export const RELIC_DEFS: Record<string, RelicDef> = {
   // combat model, so splitting a heal pool across the whole board mostly
   // healed units that could never be hit. Redesigned as a flat stat buff.
   'forgotten-backpack': {
-    id: 'forgotten-backpack', name: 'The Forgotten Backpack', scope: 'team', cost: 12,
+    id: 'forgotten-backpack', name: 'The Forgotten Backpack', scope: 'team', cost: 12, family: 'buff',
     desc: '+2/+2, whole horde', attack: 2, health: 2,
   },
 };

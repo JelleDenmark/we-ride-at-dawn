@@ -68,13 +68,15 @@ export function blockHitsForTier(tier: number): number {
  * curve, for two reasons stacked:
  *   1. Same as `blockHitsForTier` — a steep curve on a defensive magnitude
  *      lets a ★3 no-sell whole early waves.
- *   2. More importantly, this is the fix for the Boss Trial exploit: flat
- *      armor is subtracted per hit with a `MIN_ATTACK_DAMAGE` floor (see
- *      `applyDamage` in sim.ts), so a warded unit ALWAYS takes ≥1 per hit and
- *      the exponentially-escalating trial boss eventually pierces — unlike the
- *      old full-negate block, which let a high-DPS board ride untouched to the
- *      60-phase hard cap (all three season `2026-07-20` ceiling boards ran a
- *      ★3 Ward-Weaver; the best board without one stalled at 13).
+ *   2. More importantly, it closes a full-negate exploit: flat armor is
+ *      subtracted per hit with a `MIN_ATTACK_DAMAGE` floor (see `applyDamage`
+ *      in sim.ts), so a warded unit ALWAYS takes ≥1 per hit and even an
+ *      escalating attacker eventually pierces — unlike the old full-negate
+ *      block, which let a high-DPS board ride untouched indefinitely. (Found
+ *      via the since-removed Boss Trial, where all three season `2026-07-20`
+ *      ceiling boards ran a ★3 Ward-Weaver to the 60-phase cap and the best
+ *      board without one stalled at 13; the floor now likewise bounds the PvP
+ *      duel's unkillable-front stalemate.)
  *
  * PLACEHOLDER magnitudes [2, 4, 6] — subject to the balance pass, same as
  * every new number in this file. The whole-warren reach makes this pricier
@@ -165,40 +167,35 @@ export function backlineTargetsForTier(tier: number): number {
 }
 
 /**
- * Gutter-Acolyte's `weakenAllEnemies` shred, as a fraction of the target's
- * ORIGINAL wave-start attack, by tier (Jesper, 2026-07-25: converted from a
- * flat `attack * tier` amount, issue #137, to percentage — the flat version
- * decays into irrelevance late-ride since enemy attack scales `1 + wave *
- * ENEMY_ATTACK_SCALE_PER_WAVE` (~5x by wave 45), while a fixed -1/-2/-3 stays
- * fixed. Percentage keeps the shred proportionally meaningful at any depth.
+ * Gutter-Acolyte's `poisonResist` protection: a FLAT amount of poison tick
+ * damage negated for its own side, by tier (issue #155 remake). `[1, 2, 3]`
+ * — small explicit table, same shape as `reviveHpForTier`/`blockHitsForTier`,
+ * not a multiplier of a base value (owner call, 2026-07-31: an earlier
+ * uniform-flat-1-regardless-of-tier cut was tried and rejected — merging
+ * should still buy more protection, not just more body).
  *
- * `[0.05, 0.10, 0.15]` — halved from an initial `[0.10, 0.20, 0.30]` probe
- * after `scripts/maxed-board-guardrail.ts` found even a SINGLE ★3 Acolyte
- * swapped into the deepest existing guardrail comp erased all headroom and
- * full-cleared the 45-wave gauntlet (top-depth 41/45 -> 45/45). That's a
- * single-caster magnitude problem, not a stacking one: with only one caster,
- * "percent of current attack" and "percent of original attack" are the same
- * number, so a same-side rebase alone couldn't have fixed it — the rate
- * itself had to come down. Re-verified against the guardrail before
- * shipping; a percentage shred that GROWS in absolute terms with depth is
- * the mirror-image risk of the enemy-HP softening issue #92 rejected for
- * saturating the leaderboard, so treat any future bump here as gated by
- * that same guardrail, not just a "feels right" call.
- *
- * Applied against the target's attack AT WAVE START (`weakenOriginalAttack`
- * in sim.ts), not whatever it's been shredded down to by an earlier caster
- * this wave — that's what lets multi-caster stacking be a simple ADDITIVE
- * cap-not-sum budget (`weakenAppliedPercent`, capped at
- * `weakenPercentForTier(3)` total per enemy per wave) instead of a
- * multiplicative one: one ★3 fills the 15% budget alone, two ★2s (10% each)
- * sum to 20% and clip to 15%, same "cap-not-sum" precedent as
- * `poisonAllEnemies`/`blockCharges` — see the `weakenAllEnemies` case in
- * sim.ts.
+ * Still deliberately never a hard/100% counter: `table[2] === POISON_RESIST_CAP`
+ * (3) by construction, so a single ★3 Acolyte alone already exhausts the
+ * multi-caster cap-not-sum budget (`poisonResistApplied` in sim.ts) — extra
+ * casters on top of one ★3 add nothing further, and even the cap leaves a
+ * `poisonStacksForTier(3)` (5) source dealing 2 through per tick. See
+ * `POISON_RESIST_CAP`'s doc comment for the budget itself.
  */
-export function weakenPercentForTier(tier: number): number {
-  const table = [0.05, 0.1, 0.15];
+export function poisonResistForTier(tier: number): number {
+  const table = [1, 2, 3];
   return table[tier - 1] ?? table[table.length - 1];
 }
+
+/**
+ * Hard ceiling on total poison-tick damage `poisonResist` casters on one
+ * side can negate per wave, cap-not-sum (issue #155) — sized to exactly one
+ * ★3 Acolyte's own `poisonResistForTier(3)` value, same "one strong instance"
+ * idiom as `poisonStacksForTier(3)`'s cap on `poisonAllEnemies`: one ★3 fills
+ * the budget alone, extra casters (of any tier) clip rather than add, so
+ * poison can never be fully zeroed out no matter how many Acolytes are
+ * stacked.
+ */
+export const POISON_RESIST_CAP = 3;
 
 /**
  * Squeak-Sensei's `buffSummoned` grant per tier (Jesper, 2026-07-25: bumped
@@ -235,6 +232,44 @@ export type Effect =
    * hard per-instance cap like `cellarCoilChargeCapForTier`).
    */
   | { kind: 'maintainSummons'; unitId: string; count: number }
+  /**
+   * Rat-Piper's issue #161 rework, replacing `maintainSummons` above.
+   * Wired to `startOfBattle` (fires exactly once per unit instance across
+   * the whole run — see `fireEntryTriggers`'s `startOfBattleFired` flag),
+   * NOT `startOfWave`: the owner's spec was "summon one pup per wave," but a
+   * repeating per-wave summon needs the `maintainSummons`-style self-bound
+   * ownership tracking to stay safe under ADR-0003 (ADR-0003, the
+   * compounding law). Firing once instead sidesteps that entirely — same
+   * shape as Gnawer's `bequeathAttack`/Warren-Warden's `buffBehind`, which
+   * is exactly why THIS effect's summoned body is instantiated at the
+   * CASTER's own tier (see the `summonScaledPup` case in sim.ts) rather
+   * than through a new per-tier magnitude table: tier scales the pup's
+   * STRENGTH via the same exponential `tierAttackMultiplier`/
+   * `tierHealthMultiplier` curve every recruited unit already gets, per the
+   * fire-once precedent (issue #58) that only a REPEATING trigger needs the
+   * flatter linear curve. `count` is fixed, not `* tier` — tier scales the
+   * one pup's body, never how many spawn.
+   *
+   * Compounding-law note (ADR-0003, issue #161 open question #1): trivially
+   * bounded — this fires once, ever, per Piper instance, so there is no
+   * accumulation to police across the other 44 waves. In a duel (one wave)
+   * it fires exactly once, same as PvE's wave 1 — "summon one pup" reads
+   * the same in both modes, per the issue's open question #3.
+   *
+   * Relic inheritance (issue #161 follow-up, Jesper 2026-08-01): the
+   * summoned pup also gets a COPY of whatever unit relics the caster itself
+   * is wearing — see the `summonScaledPup` case in sim.ts for exactly how
+   * (`source.relics`, already `scope === 'unit'`-filtered). This is the one
+   * exception to the game-wide rule that summoned bodies are always
+   * relic-less (Brood-Mother's cascade included) — deliberate, to make
+   * Rat-Piper's own relic choice do double duty. Compounding-law-safe for
+   * the same reason the summon itself is: fire-once means a fixed one-time
+   * duplication, not a repeating one. Equipping the SAME relic on two
+   * separately-purchased units is already normal play (nothing here is a
+   * new relic-sharing mechanic), so the only new thing is getting a second
+   * copy for free — a balance question (`pvp:relics`), not a correctness one.
+   */
+  | { kind: 'summonScaledPup'; unitId: string; count: number }
   /**
    * Squeak-Sensei (issue #133) — the swarm archetype's first payoff. Wired to
    * the new `allySummoned` trigger: whenever an ally is summoned onto this
@@ -303,28 +338,41 @@ export type Effect =
    */
   | { kind: 'healSelf'; amount: number }
   /**
-   * Gutter-Acolyte (issue #137) — the first enemy-STAT debuff (poison races
-   * enemy health; nothing before this lowered the incoming number itself).
-   * Wired to `startOfWave`, same firing point as `poisonAllEnemies`: saps
-   * `percent * weakenPercentForTier(tier)` (2026-07-25, converted from the
-   * original flat `attack * tier` — see `weakenPercentForTier`'s doc comment
-   * for why, including the guardrail-driven `[0.10,0.20,0.30] ->
-   * [0.05,0.10,0.15]` cut) of EVERY living enemy's ORIGINAL wave-start attack,
-   * floored at MIN_ATTACK_DAMAGE so a stack of Acolytes can never zero-out a
-   * wave (enemies still hit for at least 1, mirroring the armor rule).
-   * Whole-line, not front-only, by design: a front-only shred inherits the
-   * exact "the front enemy was dying to the clash anyway" dead-weight
-   * problem that forced Plague-Bearer's #112 rework.
+   * Gutter-Acolyte (issue #155 remake, replacing #137's `weakenAllEnemies`
+   * enemy-attack shred — that effect read dead on the PvP panel and was
+   * bottom-tier in PvE, per the joint balance pass, so the whole unit was
+   * repurposed rather than buffed in place; see the retired effect's history
+   * in git blame if the old shred's reasoning is ever needed again). The
+   * roster's first poison COUNTER: poison bypasses armor entirely (`sim.ts`
+   * `applyDamage`: "poison is rot, it goes around the hide") and nothing else
+   * lowers the incoming poison number, which the #155 panel data showed makes
+   * Blight-Witch/Draughtsman-Moe an undefeated matchup-agnostic answer, not a
+   * counter-pickable one.
    *
-   * Compounding-law note (ADR-0003): safe — enemies are re-instantiated
-   * fresh every wave, so a stat debuff cannot carry across the 45-wave ride
-   * (identical bound to `poisonAllEnemies`). Multiple Acolytes stack
-   * ADDITIVELY against a shared per-enemy cap-not-sum budget
-   * (`weakenAppliedPercent` in sim.ts, capped at `weakenPercentForTier(3)`
-   * total) — same precedent as `poisonAllEnemies`'s stack cap (issue #116):
-   * one ★3 fills the budget alone, extra casters clip rather than add.
+   * Wired to `startOfWave`, same firing point as `weakenAllEnemies` used and
+   * `poisonAllEnemies` fires — one Acolyte per side is enough to apply, no
+   * per-target aim needed since this protects the caster's OWN side rather
+   * than debuffing the enemy's. `poisonResistForTier(tier)` (`[1, 2, 3]`) of
+   * poison tick damage this side takes is negated per caster, flat, looked
+   * up per-tier same as `poisonAllEnemies` reads `poisonStacksForTier` — no
+   * scalar field on the effect itself, the table is the whole magnitude. See
+   * the `poisonResist` case in sim.ts, applied at the point poison ticks are
+   * resolved.
+   *
+   * Deliberately partial by design (owner sign-off, #155): "not a hard or
+   * 100% counter". Multiple Acolytes stack ADDITIVELY against a shared
+   * per-side cap-not-sum budget (`poisonResistApplied` in sim.ts, capped at
+   * `POISON_RESIST_CAP` — exactly one ★3's own value) — same precedent as
+   * `poisonAllEnemies`'s stack cap (issue #116): extra casters clip rather
+   * than add, so poison can never be fully zeroed out no matter how many
+   * Acolytes are stacked.
+   *
+   * Compounding-law note (ADR-0003): safe — the budget resets every wave
+   * alongside poison itself (`waveClear`'s antidote already zeroes carried
+   * poison), so protection cannot accumulate across the 45-wave ride any
+   * more than the poison it's negating can.
    */
-  | { kind: 'weakenAllEnemies'; percent: number }
+  | { kind: 'poisonResist' }
   /**
    * Buffs the rat(s) behind the source (or `all` of them) by
    * `attack`/`health`, scaled by `tierAttackMultiplier`/`tierHealthMultiplier`
@@ -435,15 +483,14 @@ export type Effect =
    * a no-op, not a crash.
    *
    * PAYOUT-CONCENTRATION fix, v1 — RECEIVER-side cap (issue #131, shipped
-   * 2026-07-17, replaced same day): the real Boss Trial risk was never
+   * 2026-07-17, replaced same day): the real risk was never
    * Pack-Caller-buffing-Pack-Caller — it was PAYOUT CONCENTRATION as a board
    * thins: as fewer survivors remain, each subsequent faint's split lands on
    * a shrinking pool, letting a late "sink" unit (which need not be another
    * Pack-Caller — Corpse-Glutton or even a plain Dire-Rat reproduces it)
-   * accumulate enough attack/health to tank far more escalating-attack Boss
-   * Trial phases than the design assumes — reproduced hitting
-   * `BOSS_TRIAL_MAX_PHASES` (the trial's hard safety cap, which
-   * boss-trial.ts's own comment calls a bug signal, not a valid outcome),
+   * accumulate enough attack/health to tank far more escalating-attack waves
+   * than the design assumes (originally reproduced against a deep synthetic
+   * gauntlet, runaway to the tick-safety cap), and it is
    * highly sensitive to board ORDER (identical units/tiers scored 7 vs. 60
    * phases depending purely on ordering). The first fix capped what ANY
    * single recipient could absorb, tuned empirically against Jesper's actual
@@ -692,14 +739,9 @@ export type Effect =
    * power over the whole 45-wave battle is bounded by `early + late`,
    * never more, no matter how many waves are left to run.
    *
-   * This also fixes the Boss Trial dead-axis bug at the root instead of
-   * patching around it: Trial reuses `simulate` unmodified with phase=wave
-   * (see boss-trial.ts), so `currentWave` is just as real there as on a
-   * normal ride — a Trial run that survives to phase `switchWave` gets the
-   * late dose exactly like a ride would, no fixed-hour blind spot possible.
    * Weaker boards that die before `switchWave` simply never see the late
-   * dose in EITHER mode — an intentional "you have to survive to earn the
-   * survival buff" shape, not a bug.
+   * dose — an intentional "you have to survive to earn the survival buff"
+   * shape, not a bug.
    *
    * MAGNITUDES (balance pass run 2026-07-18, this rework's required gate):
    * early {attack: 2, health: 1}, late {attack: 1, health: 1}, switchWave
@@ -920,8 +962,9 @@ export interface Lineup {
  *     tribe already has the deepest bench (5 other units), which makes an
  *     all-runt board a genuinely buildable theme rather than a trap with no
  *     support.
- *   - "swarm": breeding/summon-focused units — Rat-Piper (pipes in pups
- *     every wave) and Brood-Mother (births pups on faint).
+ *   - "swarm": breeding/summon-focused units — Rat-Piper (pipes in
+ *     one pup at battle start, issue #161) and Brood-Mother (births pups on
+ *     faint).
  *   - "plague": poison-dealing units — Plague-Bearer and Blight-Witch.
  *   - "brute": big, tanky anchors — Warren-Warden, Dire-Rat (armored),
  *     MD Rattyfock (Warren-Warden's kit, reskinned).
@@ -956,32 +999,34 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     // sells for exactly what was spent, never a loss.
     retireDay: 1,
   },
-  // Rat-Piper (issue #105 rework): maintenance summoner. Keeps a litter of
-  // `count * tier` = 1/2/3 pups topped up — summons only the shortfall each
-  // wave, nothing when the litter is full. Its permanent contribution is
-  // bounded at the source (see `maintainSummons`), which is what lets the
-  // global combat cap rise for Brood-Mother's cascade.
+  // Rat-Piper (issue #161 rework, replacing #105's `maintainSummons`):
+  // brought back into the season roster in place of Gnawer (see Gnawer's own
+  // note below). Summons exactly ONE pup, ONCE, at the start of the run —
+  // see `summonScaledPup`'s doc comment above for why `startOfBattle` (not
+  // `startOfWave`) and why tier scales the pup's body instead of the count.
+  // The pup also inherits a copy of whatever unit relic(s) Piper itself
+  // wears (issue #161 follow-up) — makes Piper's own relic pick do double
+  // duty, e.g. a Glass-Shard Piper fields TWO armor-breaking alpha strikers.
   'rat-piper': {
     id: 'rat-piper', name: 'Rat-Piper', attack: 1, health: 2, cost: 4,
-    // Target 2/4/6 pups (count*tier). count is 2, not 1, per the #105 balance
-    // read: the OLD `summon 1/wave` accidentally accumulated ~2 pups against
-    // the tiny +2 cap before no-op'ing, so a target of 1 was a stealth nerf
-    // (T1 value rank fell 15->18). Two restores its effective power while
-    // keeping the litter bounded at the source. Still nowhere near flagged in
-    // exploit-stress (weak 1/1 bodies, hard-capped by combatCap).
-    ability: { trigger: 'startOfWave', effect: { kind: 'maintainSummons', unitId: 'pup', count: 2 } },
+    ability: { trigger: 'startOfBattle', effect: { kind: 'summonScaledPup', unitId: 'pup', count: 1 } },
     tribe: 'swarm',
-    // Season rotation (Jesper, 2026-07-24): retired outright to make roster
-    // room for the season-4 intake, same mechanism/precedent as Gutter-Runt
-    // above — out of the shop pool from day 1 on, carried-in copies still
-    // sell at par (`sellRefund`). NOTE the #105 `maintainSummons` rework only
-    // landed 2026-07-21; the cap-raise it justified (COMBAT_CAP_BONUS=6) is
-    // now carried by Brood-Mother alone, which is fine (see
-    // [[wrad-summon-cap-rework]]). CAVEAT: Squeak-Sensei (#133) was
-    // sign-off-probed as "Rat-Piper + Brood-Mother + Sensei"; retiring Piper
-    // leaves Brood-Mother as Sensei's sole summon feeder — Sensei still
-    // works, but re-check its swarm-payoff read before season start.
-    retireDay: 1,
+    // Un-retired 2026-08-01 (issue #161) for the swap-in — see Gnawer's
+    // retirement note below for the season-roster rationale. The #105
+    // `maintainSummons` history (target 2/4/6 pups, self-bound litter) is
+    // now dead code path context only; this season's kit is the
+    // `summonScaledPup` fire-once summon above. CAVEAT carried forward from
+    // the #105 retirement: Squeak-Sensei's `allySummoned` payoff (#133) only
+    // sees ONE summon event from Piper per battle now (fire-once, not
+    // per-wave) — a much thinner feed than the repeating engine the issue's
+    // rationale envisioned. Brood-Mother remains Sensei's main summon
+    // source; Piper is a minor top-up, not a second real engine.
+    // `pvp:combos` checked (issue #161 open question #4): Piper+Sensei
+    // doesn't surface in the top-15-synergy, combo-unlocks-a-win, or
+    // bottom-5-anti-synergy lists at any tier — no red flag, but also no
+    // real payoff in the duel format (expected: a fire-once single pup is a
+    // PvE-swarm play, not a PvP one — see `pvp:matrix`'s Rat-Piper row, near
+    // the bottom of the panel at every tier, same as retired Gnawer was).
   },
   // Brood-Mother (issue #105 rework): the babushka. On faint she spawns two
   // Brood-Broodlings; each broodling, on ITS faint, spawns two Brood-Runts;
@@ -1031,6 +1076,10 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     id: 'draughtsman-moe', name: 'Draughtsman Moe', attack: 3, health: 3, cost: 8,
     ability: { trigger: 'startOfWave', effect: { kind: 'poisonAllEnemies' } },
     tribe: 'plague',
+    // Day-2 gate added (Jesper, 2026-08-01) — a deliberate departure from the
+    // "day-1, matching Blight-Witch" precedent noted above; holds the
+    // poison-all prestige pick back one day this season.
+    unlockDay: 2,
   },
   gnawer: {
     id: 'gnawer', name: 'Gnawer', attack: 3, health: 1, cost: 4,
@@ -1040,6 +1089,15 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     // compounding-law/Cellar-Coil reasoning behind the cap living here.
     ability: { trigger: 'faint', effect: { kind: 'bequeathAttack', waveBonusCapMultiplier: 2 } },
     tribe: 'runt',
+    // Retired for the upcoming season (Jesper, 2026-08-01, issue #161), same
+    // mechanism/precedent as Gutter-Runt/Cellar-Coil above — out of the shop
+    // pool from day 1 on, carried-in copies still sell at par (`sellRefund`).
+    // Rationale: `pvp:matrix` measures Gnawer duel-dead at every tier —
+    // `bequeathAttack`'s wave-died-on bonus is near-zero in a duel's single
+    // wave, so it was tuned purely for the (now economy-only) depth ladder
+    // and contributes nothing to the scored PvP mode. Rat-Piper, reworked,
+    // takes its roster slot (see Rat-Piper's own note above).
+    retireDay: 1,
   },
   'corpse-glutton': {
     id: 'corpse-glutton', name: 'Corpse-Glutton', attack: 3, health: 2, cost: 7,
@@ -1064,14 +1122,12 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   'dire-rat': {
     id: 'dire-rat', name: 'Dire-Rat', attack: 4, health: 5, cost: 7,
     damageReduction: 2,
-    // Day-1 shop is deliberately kept plain (Jesper, 2026-07-11): the three
-    // strongest early picks — the armored tank, the Season-1 anchor, and the
-    // front-shield — hold back to day 2, so day 1 is a humble scramble and the
-    // shop gets visibly stronger as the expedition opens up (days 2-4 are the
-    // exciting stretch). Only gates the SHOP roll; a unit already owned/on the
-    // board is unaffected, and the balance scripts build lineups directly so
-    // they don't see this gate.
-    unlockDay: 2,
+    // Day-1 gate REMOVED (Jesper, 2026-08-01): was held back to day 2
+    // (2026-07-11) so day 1 read as a humble scramble before the shop opened
+    // up. Lifted for the upcoming season — day 1 now offers the full pool
+    // immediately, no ramp-in. `unlockDay` is a pure function of `day`, so
+    // this takes effect for any day rolled from this deploy forward, not just
+    // future seasons.
     tribe: 'brute',
   },
   'md-rattyfock': {
@@ -1093,20 +1149,21 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   // ARMOR REWORK (2026-07-24, prototype pending balance pass): was a
   // `startOfWave` `blockFrontHits` full-negate pool (1/2/3 hits cancelled per
   // wave). That pool was a two-mode outlier — the single best depth back-seat
-  // swap (+5.9 waves, PR #123 probe) AND the enabler of the Boss Trial exploit
-  // (every season `2026-07-20` board that rode to the 60-phase cap ran a ★3
-  // Ward-Weaver; the best board without one stalled at 13). Full hit-negation
-  // scales infinitely against the trial's exponentially-escalating boss, so it
-  // never dies. Reworked to a `startOfBattle` `grantArmor`: it now hardens the
-  // whole warren with flat armor (`wardArmorForTier`, 2/4/6) for the ride.
-  // Flat armor can't fully negate (MIN_ATTACK_DAMAGE floor), so the trial boss
-  // eventually pierces and the mode terminates — while the ward keeps a
-  // coherent "hardens the line" identity. Cost/stats untouched pending the
+  // swap (+5.9 waves, PR #123 probe) AND the enabler of a full-negate exploit
+  // (found via the since-removed Boss Trial: every season `2026-07-20` board
+  // that rode to its 60-phase cap ran a ★3 Ward-Weaver; the best board without
+  // one stalled at 13). Full hit-negation scales infinitely against any
+  // escalating attacker, so such a unit never dies. Reworked to a
+  // `startOfBattle` `grantArmor`: it now hardens the whole warren with flat
+  // armor (`wardArmorForTier`, 2/4/6) for the ride. Flat armor can't fully
+  // negate (MIN_ATTACK_DAMAGE floor), so an escalating attacker eventually
+  // pierces — while the ward keeps a coherent "hardens the line" identity.
+  // Cost/stats untouched pending the
   // pass; the whole-warren reach may want a lower table or a cost bump.
   'ward-weaver': {
     id: 'ward-weaver', name: 'Ward-Weaver', attack: 1, health: 3, cost: 6,
     ability: { trigger: 'startOfBattle', effect: { kind: 'grantArmor', all: true } },
-    unlockDay: 2, // day-1 shop kept plain — see Dire-Rat's note.
+    // Day-1 gate removed (Jesper, 2026-08-01) — see Dire-Rat's note above.
   },
   // Issue #12: a parallel "Runt" pair (Gutter-Runt precedent) tied to the
   // game's dawn/dusk duality rather than literal noon-splitting — the actual
@@ -1162,6 +1219,12 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   // point, NOT final — flagged for Jesper's balance sign-off. 1 HP is
   // deliberate: worthless (dies to almost anything) if it ever reaches the
   // front, rewarding a durable front wall built to protect it.
+  //
+  // Retired from the purchasable pool (issue #159): MBP Rat below is its
+  // exact-kit prestige reskin, same replacement pattern as Draughtsman Moe
+  // (Blight-Witch, #115), MD Rattyfock (Warren-Warden, #149), and Gutter
+  // Gourmand (Twilight-Runt, #151). This def stays in UNIT_DEFS for golden
+  // logs/replays — only SHOP_UNIT_POOL (shop.ts) drops it.
   'slink-rat': {
     id: 'slink-rat', name: 'Slink-Rat', attack: 3, health: 1, cost: 6,
     // startOfWave, via `backlineDamage` (see that Effect's doc comment for
@@ -1171,6 +1234,16 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     // see `backlineTargetsForTier` — not the per-hit damage, which stays this
     // unit's flat base attack (3) regardless of tier. No accumulation across
     // waves; multiple Slink-Rats stack additively, bounded by board/wave size.
+    ability: { trigger: 'startOfWave', effect: { kind: 'backlineDamage' } },
+  },
+  // Prestige reskin (issue #159): MBP Rat reskins Slink-Rat's exact
+  // kit/stats — same "prestige replaces the base" pattern as Draughtsman Moe/
+  // Gutter Gourmand above. Owner-specced flavor: glasses (the "professional"
+  // look — matches the pun on the name) and a glass of Nutella somewhere in
+  // the art (see mbp-rat.svg). Stats/ability are a byte-for-byte carryover,
+  // not a fresh tune — balance sign-off already covers Slink-Rat's numbers.
+  'mbp-rat': {
+    id: 'mbp-rat', name: 'MBP Rat', attack: 3, health: 1, cost: 6,
     ability: { trigger: 'startOfWave', effect: { kind: 'backlineDamage' } },
   },
   // Issue #110: single-unit fusion of the Dawn-Runt/Dusk-Runt pair above —
@@ -1230,7 +1303,9 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
         switchWave: 15,
       },
     },
-    unlockDay: 3,
+    // Day-3 gate removed (Jesper, 2026-08-01), same season-wide lift as
+    // Dire-Rat/Ward-Weaver's day-2 gate above — day 1 now offers the full
+    // pool immediately.
   },
   // Issue #106: Cellar-Coil — "positional patience" (docs/design/future-minions.md
   // concept 2). Attack 2 / health 4 / cost 5 are the design doc's rough
@@ -1254,6 +1329,12 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
       effect: { kind: 'chargeWhileBenched', attackPerWave: 1 },
       condition: { notFront: true },
     },
+    // Retired outright for the upcoming season (Jesper, 2026-08-01), same
+    // mechanism/precedent as Gutter-Runt/Rat-Piper above — out of the shop
+    // pool from day 1 on. Par-buyback severance (`sellRefund` in shop.ts)
+    // still applies, so any copy carried in from a prior season sells for
+    // exactly what was spent, never a loss.
+    retireDay: 1,
   },
   // ---- Season 4 (issues #133-#135, #137) — every stat line below is a
   // placeholder pending Jesper's balance sign-off, same as every other new
@@ -1293,29 +1374,32 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   // Warren-Warden incident shape) and the only one whose cost-efficiency
   // ROSE with tier. afterAttack repeats every clash (compounding law), so
   // the sustain number, not the body, is the lever that compounds.
-  // unlockDay: 3 — a warded Grave-Leech (Ward-Weaver armor pushing incoming
-  // damage to the MIN_ATTACK_DAMAGE floor) runs a genuine zero-net-damage
-  // window in the earliest waves, verified by probe: flat health for the
-  // first 6 waves before enemy attack scaling starts to bite. Day-gating
-  // pushes its first legal appearance past day 1-2's shallowest, softest
-  // waves so that window buys less. Not a fix for the underlying interaction
-  // (still worth a real balance-script pass), just a blast-radius limiter.
+  // Gate changed from day-3 to day-2 (Jesper, 2026-08-01) — still a
+  // blast-radius limiter, NOT a fix, for a still-unaddressed interaction: a
+  // warded Grave-Leech (Ward-Weaver armor pushing incoming damage to the
+  // MIN_ATTACK_DAMAGE floor) runs a genuine zero-net-damage window in the
+  // earliest waves, verified by probe — flat health for the first 6 waves
+  // before enemy attack scaling starts to bite. Ward-Weaver itself has NO
+  // gate this season (day-1 available, see its own note above), so the combo
+  // is reachable from day 2 either way — day-2 buys one day less runway than
+  // the old day-3 gate did, not a full mitigation. Worth a real
+  // balance-script pass if it turns out to matter in practice.
   'grave-leech': {
     id: 'grave-leech', name: 'Grave-Leech', attack: 3, health: 6, cost: 6,
     ability: { trigger: 'afterAttack', effect: { kind: 'healSelf', amount: 1 } },
     tribe: 'brute',
-    unlockDay: 3,
+    unlockDay: 2,
   },
-  // Issue #137: Gutter-Acolyte — anti-brute tech: the roster's first enemy
-  // attack-shred (armor blunts hits, poison races health; nothing lowered
-  // the incoming number itself before this). Whole-line targeting and the
-  // ≥1 floor are design calls documented on `weakenAllEnemies` above, both
-  // flagged for sign-off. Shipping AFTER the compendium (#136, already on
-  // dev) per the issue's readability dependency. Tagged plague for the
-  // Catacombs curse flavor — a soft read, like every tribe tag.
+  // Issue #155: Gutter-Acolyte remade from #137's dead-in-both attack shred
+  // into the roster's first poison counter (gutter apothecary -> antidote
+  // fits the theme). Partial by design, per owner sign-off — not a hard or
+  // 100% counter, see `poisonResist`'s doc comment above for the cap-not-sum
+  // budget that guarantees that no matter how many are stacked. Tagged
+  // plague still fits: an apothecary who works the plague wards, not just
+  // the ones who spread it.
   'gutter-acolyte': {
     id: 'gutter-acolyte', name: 'Gutter-Acolyte', attack: 2, health: 3, cost: 5,
-    ability: { trigger: 'startOfWave', effect: { kind: 'weakenAllEnemies', percent: 1 } },
+    ability: { trigger: 'startOfWave', effect: { kind: 'poisonResist' } },
     tribe: 'plague',
   },
 };

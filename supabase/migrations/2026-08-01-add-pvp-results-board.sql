@@ -1,0 +1,22 @@
+-- Snapshot each player's board per round in pvp_results (issue #158).
+--
+-- pvp_boards is explicitly LIVE state (see 2026-07-30-add-pvp-league.sql) —
+-- it always holds whatever a player's horde looks like RIGHT NOW, not what
+-- fought in any specific past round. Re-simulating a past duel from live
+-- boards would silently diverge the moment either player edits their horde
+-- since (the normal case — boards sync continuously through the day). So
+-- this snapshots the exact Lineup each player fielded for the round, at
+-- scoring time, alongside the aggregate result already written there — the
+-- same "store the deterministic inputs, not the output" precedent
+-- submitScore/generateGauntlet already use for ride replays (see
+-- packages/app/src/leaderboard.ts).
+--
+-- Nullable, no backfill: rows scored before this migration have no snapshot
+-- and simply can't be replayed — nothing else about them (points/wins/etc.)
+-- changes, and the client already treats a missing/failed fetch as "no
+-- replay available" rather than throwing.
+--
+-- DO NOT RUN AUTOMATICALLY. Apply by hand (SQL editor / CLI) against the live
+-- project before the replay-snapshot job code ships. Inert until applied.
+-- Re-run safe: `add column if not exists`.
+alter table public.pvp_results add column if not exists board jsonb;
