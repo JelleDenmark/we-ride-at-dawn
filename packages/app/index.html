@@ -36,6 +36,18 @@
       service worker and caches so the sibling channel on the shared origin
       is never touched, and falling back to a readable message rather than
       looping if it doesn't take.
+
+      KNOWN LIMIT (issue #171): the reload's cache-busting query string only
+      defeats the browser's own HTTP cache. GitHub Pages' Fastly layer
+      ignores query strings for this path's cache key (confirmed by curl:
+      distinct, never-before-seen `?_fresh=` values came back `X-Cache: HIT`
+      off the same response) and serves `Cache-Control: max-age=600`, so for
+      up to ~10 minutes after a deploy, a retry can legitimately reload into
+      the exact same stale HTML that caused the failure. That is not a bug
+      in this script — there is no client-side fix for an edge cache keyed
+      on path alone — so `fallbackUI()`'s copy sets that expectation instead
+      of implying one tap always works. See `reloadFresh()` below for the
+      full writeup.
     -->
     <script>
       (function () {
@@ -51,13 +63,22 @@
         function fallbackUI() {
           var el = document.getElementById('app');
           if (!el) return;
+          // Reaching this function AT ALL means one silent auto-recovery
+          // attempt already ran and failed (see the two call sites below) —
+          // so the copy is written for "a retry already happened," not
+          // "here's your first chance." The CDN-cache line (#171) is real in
+          // both cases: even the very first time a player SEES this screen,
+          // it's already after one failed reload.
           el.innerHTML =
             '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;' +
             'padding:24px;font-family:system-ui,sans-serif;color:#e8ded0;background:#0d0b09;text-align:center">' +
             '<div style="max-width:32ch">' +
             '<p style="font-size:1.1rem;margin:0 0 12px">The drains are jammed.</p>' +
-            '<p style="opacity:.75;line-height:1.5;margin:0 0 20px">This ride couldn\'t load its gear. ' +
+            '<p style="opacity:.75;line-height:1.5;margin:0 0 12px">This ride couldn\'t load its gear. ' +
             'Your horde is safe — nothing was lost.</p>' +
+            '<p style="opacity:.6;line-height:1.5;font-size:.9rem;margin:0 0 20px">Already tried once and ' +
+            'still stuck? Right after an update, it can take a few minutes for that to clear up — ' +
+            'worth another dig, or just come back shortly.</p>' +
             // min-height 44px: this is a phone-first game, and the retry tap
             // is the only way out of this screen.
             '<button id="wrad-retry" style="font:inherit;color:#0d0b09;background:#c9a227;border:0;' +
@@ -68,10 +89,24 @@
         }
 
         function reloadFresh() {
-          // A plain reload can be answered from the HTTP cache with the same
-          // stale HTML that caused this. A one-off query string guarantees a
-          // URL the cache has never seen, so index.html comes from network.
-          // main.ts strips it again once the app is actually running.
+          // A plain reload can be answered from the browser's OWN HTTP cache
+          // with the same stale HTML that caused this. A one-off query string
+          // defeats that. main.ts strips it again once the app is running.
+          //
+          // What it does NOT defeat (issue #171, confirmed by curl): GitHub
+          // Pages' Fastly layer ignores the query string when computing its
+          // cache key for this path — three requests with three distinct,
+          // never-before-seen `?_fresh=` values came back `X-Cache: HIT` off
+          // the same cached response, `Age` climbing across them. index.html
+          // is served `Cache-Control: max-age=600`, so for up to ~10 minutes
+          // after a deploy, EVERY reload — forced or automatic — can still
+          // land on the exact same stale HTML that named the now-deleted
+          // chunk, and the retry will look like it did nothing. There is no
+          // client-side trick that busts an edge cache keyed on path alone;
+          // this is a real platform constraint (same one #144 already
+          // accepted for the update-detection banner), not a bug to keep
+          // chasing here. `fallbackUI()`'s copy is written to set that
+          // expectation rather than imply one tap always fixes it.
           location.replace(baseDir + '?_fresh=' + Date.now());
         }
 
