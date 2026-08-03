@@ -2,6 +2,7 @@ import { xorshift128, type Rng } from './prng';
 import { dailySeed, fnv1a } from './seed';
 import { seasonIdFor } from './shop';
 import { ENEMY_POOL } from './data/enemies';
+import type { AnomalyDef } from './anomaly';
 import type { Archetype, UnitDef } from './data/units';
 
 export interface EnemyWave {
@@ -21,6 +22,14 @@ export interface Gauntlet {
   theme: GauntletTheme;
   /** Absolute hour bucket this ride belongs to; absent = the day's base gauntlet. */
   hour?: number;
+  /**
+   * Id of the weekly anomaly this gauntlet was generated under; absent = a
+   * clean week (issue #141). Carried on the gauntlet so a replay and the
+   * scout report are self-describing — neither has to re-derive the season
+   * to know why the waves look wrong. Appended last so a clean gauntlet's
+   * key order (and therefore its `JSON.stringify` bytes) is unchanged.
+   */
+  anomalyId?: string;
   waves: EnemyWave[];
 }
 
@@ -86,8 +95,22 @@ export function difficultyForDay(_day: number): number {
  * "minimal option" #34 itself took for the same kind of now-dead capability
  * in `App.svelte`. If ever revived, it should probably also key off the
  * season rather than the date, for consistency with the rest of this fix.
+ *
+ * `anomaly` (issue #141) is the week's modifier, and is **explicitly passed,
+ * never derived here**. Deriving it internally from `seasonIdFor(date)` would
+ * be tidier at the call sites, but it would silently rewrite every golden
+ * assertion and balance fixture dated on or after `ANOMALY_FIRST_SEASON` —
+ * and this file's tests reach as far out as 2026-09-09, with balance scripts
+ * further still. An explicit parameter keeps the omitted-argument path
+ * byte-identical to the pre-anomaly generator forever, which is the whole
+ * safety property; callers that want the real week ask `anomalyFor` for it.
  */
-export function generateGauntlet(date: string, day = 1, hour?: number): Gauntlet {
+export function generateGauntlet(
+  date: string,
+  day = 1,
+  hour?: number,
+  anomaly?: AnomalyDef | null
+): Gauntlet {
   const seasonSeed = dailySeed(seasonIdFor(date));
   const seed = seasonSeed;
   const themeRng = xorshift128(seasonSeed);
@@ -95,7 +118,22 @@ export function generateGauntlet(date: string, day = 1, hour?: number): Gauntlet
   const primary = ARCHETYPES[themeRng.int(ARCHETYPES.length)];
   const rest = ARCHETYPES.filter((a) => a !== primary);
   const secondary = rest[themeRng.int(rest.length)];
-  const pivotWave = 4 + themeRng.int(4);
+
+  // Anomaly overrides are applied AFTER the full theme roll, never in place
+  // of it, so the rng stream advances identically whether or not a week has
+  // an anomaly — WHICH archetypes a week fields stays a function of the
+  // season alone, and the anomaly only reshapes how the budget is spent on
+  // them. Deliberate: forcing an archetype is a difficulty lever, not a
+  // variance lever (see rule 2b in anomaly.ts).
+  const overrides = anomaly?.gauntlet;
+  // Drawn unconditionally, then overridden — `?? 4 + themeRng.int(4)` would
+  // short-circuit the draw and leave the theme stream at a different
+  // position on an anomaly week. Harmless today (the stream is discarded
+  // here and the waves use their own `#waves` seed), but the kind of thing
+  // that silently reseeds a week the day someone reuses `themeRng` below.
+  const rolledPivot = 4 + themeRng.int(4);
+  const pivotWave = overrides?.pivotWave ?? rolledPivot;
+
   const theme: GauntletTheme = { primary, secondary, pivotWave };
 
   // The base (hourless) gauntlet rolls its waves from a season-seeded
@@ -111,8 +149,12 @@ export function generateGauntlet(date: string, day = 1, hour?: number): Gauntlet
   // primary archetype (and on the secondary once its pivot wave is
   // reached), so the scout report is guaranteed to describe what the
   // player actually meets. The secondary never appears before its pivot.
-  const PRIMARY_SHARE = 0.6;
-  const SECONDARY_SHARE = 0.25;
+  const PRIMARY_SHARE = overrides?.primaryShare ?? 0.6;
+  const SECONDARY_SHARE = overrides?.secondaryShare ?? 0.25;
+  // Bodies allowed to stand in one wave. Constant at WAVE_UNIT_CAP for the
+  // whole life of the game until #141 — which is exactly why moving it reads
+  // as "this week is different" rather than as a tuning change.
+  const waveUnitCap = overrides?.waveUnitCap ?? WAVE_UNIT_CAP;
   const scale = difficultyForDay(day);
 
   const waves: EnemyWave[] = [];
@@ -125,7 +167,7 @@ export function generateGauntlet(date: string, day = 1, hour?: number): Gauntlet
 
     const spendPhase = (archetype: Archetype | null, quota: number): void => {
       let spent = 0;
-      while (spent < quota && units.length < WAVE_UNIT_CAP) {
+      while (spent < quota && units.length < waveUnitCap) {
         const pool = ENEMY_POOL.filter((u) => {
           if (u.cost > budget) return false;
           // Depth floor (issue #138: enchanters must not appear where the
@@ -165,5 +207,10 @@ export function generateGauntlet(date: string, day = 1, hour?: number): Gauntlet
     waves.push({ units: [...units.filter((u) => !u.rearguard), ...units.filter((u) => u.rearguard)] });
   }
 
-  return hour === undefined ? { date, seed, theme, waves } : { date, seed, theme, hour, waves };
+  // Key order is preserved exactly as it was pre-anomaly for the clean path;
+  // `anomalyId` only ever appends, so a clean gauntlet stringifies to the
+  // same bytes it always has.
+  const base: Gauntlet =
+    hour === undefined ? { date, seed, theme, waves } : { date, seed, theme, hour, waves };
+  return anomaly ? { ...base, anomalyId: anomaly.id } : base;
 }

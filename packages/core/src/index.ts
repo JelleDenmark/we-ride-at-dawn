@@ -48,6 +48,13 @@ export {
   type EnemyWave,
   WAVE_COUNT,
 } from './gauntlet';
+export {
+  anomalyFor,
+  ANOMALY_DEFS,
+  ANOMALY_FIRST_SEASON,
+  type AnomalyDef,
+  type GauntletOverrides,
+} from './anomaly';
 export { scoutReport, ARCHETYPE_LABEL, type ScoutReport, type ScoutHint } from './scout';
 export {
   newBuild,
