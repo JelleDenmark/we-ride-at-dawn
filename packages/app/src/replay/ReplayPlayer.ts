@@ -115,12 +115,15 @@ export class ReplayPlayer {
   private lastWaveStartIndex = -1;
   /** While currentIndex < skipUntilIndex, d(ms) fast-forwards to 0. */
   private skipUntilIndex = -1;
+  /** Set by play()'s `outcome` arg; only read when `isDuel`. */
+  private duelOutcome?: 'a' | 'b' | 'draw';
 
   /** True for the PvP duel overlay (`App.svelte`'s `duelReplayPlayer`), which
    * shares this engine with the solo-run stage. A duel is always exactly one
    * `battleEnd` with no waves, so `wavesCleared`/`score` — meaningful depth-run
-   * progress numbers — are noise here; the caller already shows a plain
-   * win/loss line (`duelResultText`) once playback finishes. */
+   * progress numbers — are noise here; the on-stage banner instead reads
+   * VICTORY/DEFEAT/DRAW from `play()`'s `outcome` arg (the caller also shows
+   * a plain win/loss line, `duelResultText`, once playback finishes). */
   constructor(private readonly isDuel = false) {}
 
   async init(el: HTMLElement): Promise<void> {
@@ -146,7 +149,12 @@ export class ReplayPlayer {
     ).then(() => undefined);
   }
 
-  async play(events: BattleEvent[]): Promise<void> {
+  /** `outcome` is only used when `isDuel`: which seat (from the DuelResult
+   * already computed by `simulateDuel`) the battleEnd banner should read as
+   * victory/defeat for. Seat 'a' is always the local player's board — see
+   * `duel.ts`'s seat note — so 'a' reads VICTORY, 'b' reads DEFEAT. */
+  async play(events: BattleEvent[], outcome?: 'a' | 'b' | 'draw'): Promise<void> {
+    this.duelOutcome = outcome;
     this.reset();
     this.lastWaveStartIndex = -1;
     for (let i = 0; i < events.length; i++) {
@@ -295,7 +303,9 @@ export class ReplayPlayer {
       }
       case 'battleEnd': {
         this.showBanner(
-          this.isDuel ? 'THE DUEL ENDS' : `THE RIDE ENDS — DEPTH ${event.wavesCleared} · SCORE ${event.score}`,
+          this.isDuel
+            ? this.duelBanner()
+            : `THE RIDE ENDS — DEPTH ${event.wavesCleared} · SCORE ${event.score}`,
           true
         );
         await wait(this.d(400));
@@ -336,6 +346,12 @@ export class ReplayPlayer {
       if (sprite) moves.push(tween(sprite.root, { x: W / 2 + FRONT_GAP + i * gauntletSpacing, y: GROUND_Y }, ms));
     });
     return Promise.all(moves);
+  }
+
+  private duelBanner(): string {
+    if (this.duelOutcome === 'a') return 'VICTORY';
+    if (this.duelOutcome === 'b') return 'DEFEAT';
+    return 'DRAW';
   }
 
   private showBanner(text: string, persistent = false): void {

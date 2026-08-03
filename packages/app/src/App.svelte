@@ -462,7 +462,7 @@
     }
     duelReplayPlayer.speed = duelSpeed;
     const { events, result } = simulateDuel(mine, opponent.board);
-    await duelReplayPlayer.play(events);
+    await duelReplayPlayer.play(events, result.winner);
     // The sheet may have been closed (or another duel started) mid-play —
     // don't resurrect it with a stale result.
     if (!duelReplay || duelReplay.opponentName !== opponent.name) return;
