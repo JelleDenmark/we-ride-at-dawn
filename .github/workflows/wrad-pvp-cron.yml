@@ -5,22 +5,31 @@ name: WRAD PvP nightly round
 # standings to pvp_results. See packages/core/scripts/run-league-round.ts.
 #
 # Two triggers:
-#   * schedule — nightly. 18:00 UTC ≈ 20:00 Copenhagen in summer (CEST),
-#     19:00 in winter (CET). GitHub cron can't do timezones; the ±1h DST
-#     drift is fine for a friend-group evening slot, and the runner derives
-#     the correct league day from the 06:00 Copenhagen rollover regardless.
-#     Minute is offset to :07, not :00 — GitHub's docs warn that schedule
-#     events queue behind everyone else's cron at "high load" times,
-#     explicitly including the top of every hour, and can fire significantly
-#     late. That matches what we saw: both of the first two nights ran
-#     ~66min late (19:06/19:07 UTC instead of 18:00), missing the evening
-#     window entirely. An off-peak minute is GitHub's own recommended fix.
+#   * schedule — nightly, just shy of the evening slot. 17:53 UTC ≈ 19:53
+#     Copenhagen in summer (CEST), 18:53 in winter (CET) — 7min before the
+#     advertised 20:00/19:00 CET duel time. GitHub cron can't do timezones;
+#     the ±1h DST drift is fine for a friend-group evening slot, and the
+#     runner derives the correct league day from the 06:00 Copenhagen
+#     rollover regardless.
+#     Minute is offset 7min BEFORE the hour, not on it or after — two
+#     separate reasons. (1) GitHub's docs warn that schedule events queue
+#     behind everyone else's cron at "high load" times, explicitly including
+#     the top of every hour, and can fire significantly late: both of the
+#     first two nights ran ~66min late (19:06/19:07 UTC instead of 18:00),
+#     missing the evening window entirely. An off-peak minute avoids that.
+#     (2) It has to be BEFORE the advertised 20:00 slot, not after: this is
+#     an idle game, and scoring a few minutes *past* the deadline rewards
+#     whoever's actively watching the clock to dump fresh scrap into their
+#     board right before the snapshot, which is the opposite of the idle
+#     incentive the game wants. Landing before 20:00 means the round is
+#     already locked by the time players expect it to run — no clock-sniping
+#     window to camp.
 #   * workflow_dispatch — the manual "Run workflow" button. Phone-friendly
 #     (GitHub mobile/web) and doubles as the dev trigger: click it to score
 #     the current boards on demand instead of waiting for the evening.
 on:
   schedule:
-    - cron: '7 18 * * *'
+    - cron: '53 17 * * *'
   workflow_dispatch:
     inputs:
       dry:
