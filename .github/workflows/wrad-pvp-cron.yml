@@ -9,12 +9,18 @@ name: WRAD PvP nightly round
 #     19:00 in winter (CET). GitHub cron can't do timezones; the ±1h DST
 #     drift is fine for a friend-group evening slot, and the runner derives
 #     the correct league day from the 06:00 Copenhagen rollover regardless.
+#     Minute is offset to :07, not :00 — GitHub's docs warn that schedule
+#     events queue behind everyone else's cron at "high load" times,
+#     explicitly including the top of every hour, and can fire significantly
+#     late. That matches what we saw: both of the first two nights ran
+#     ~66min late (19:06/19:07 UTC instead of 18:00), missing the evening
+#     window entirely. An off-peak minute is GitHub's own recommended fix.
 #   * workflow_dispatch — the manual "Run workflow" button. Phone-friendly
 #     (GitHub mobile/web) and doubles as the dev trigger: click it to score
 #     the current boards on demand instead of waiting for the evening.
 on:
   schedule:
-    - cron: '0 18 * * *'
+    - cron: '7 18 * * *'
   workflow_dispatch:
     inputs:
       dry:
