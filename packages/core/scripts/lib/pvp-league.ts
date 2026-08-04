@@ -120,6 +120,23 @@ function serviceHeaders(key: string, extra: Record<string, string> = {}): Record
  * The cost is that a keyless `--dry` can no longer read. That's called out
  * explicitly below rather than surfacing as a bare 403.
  */
+/**
+ * Has this round already been scored and closed? Read-only, anon-readable
+ * (pvp_rounds grants anon select). Used to make the nightly job idempotent —
+ * two triggers landing for the same round_id (a backup schedule entry, a
+ * stray manual dispatch) must not re-score or double-post to Discord; only
+ * the first to close the round should count.
+ */
+export async function roundAlreadyClosed(roundId: string): Promise<boolean> {
+  const url =
+    `${SUPABASE_URL}/rest/v1/pvp_rounds?round_id=eq.${encodeURIComponent(roundId)}` +
+    `&status=eq.closed&select=round_id`;
+  const res = await fetch(url, { headers: anonHeaders() });
+  if (!res.ok) throw new Error(`pvp_rounds check failed: ${res.status} ${await res.text()}`);
+  const rows = (await res.json()) as unknown[];
+  return rows.length > 0;
+}
+
 export async function fetchBoards(seasonId: string, key: string | undefined): Promise<BoardRow[]> {
   const url =
     `${SUPABASE_URL}/rest/v1/pvp_boards?season_id=eq.${encodeURIComponent(seasonId)}` +

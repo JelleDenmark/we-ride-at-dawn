@@ -26,7 +26,7 @@
  */
 import { currentRideDate } from '../src/seed';
 import { seasonIdFor } from '../src/shop';
-import { runNightlyRound } from './lib/pvp-league';
+import { roundAlreadyClosed, runNightlyRound } from './lib/pvp-league';
 import { postPvpResults } from './lib/discord-post';
 
 const DRY = process.argv.slice(2).some((a) => a === '--dry' || a === 'dry');
@@ -41,6 +41,16 @@ async function runSeason(
 ) {
   const roundId = `${seasonId}#${rideDate}`;
   console.log(`\n=== round ${roundId}${DRY ? '  (DRY RUN)' : ''} ===`);
+
+  // Idempotency guard: a backup schedule trigger or a stray re-dispatch can
+  // land after this round already closed. Only the first trigger to close a
+  // round should score/post — re-running would re-fetch (possibly drifted)
+  // boards and double-post to Discord. --dry still previews regardless, since
+  // it can't write or post either way.
+  if (!DRY && (await roundAlreadyClosed(roundId))) {
+    console.log('Already scored and closed by an earlier trigger — skipping.');
+    return;
+  }
 
   const outcome = await runNightlyRound(seasonId, roundId, now, key, readKey);
   console.log(`Fetched boards, ${outcome.dropped.length} dropped as illegal.`);
