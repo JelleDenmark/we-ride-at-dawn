@@ -5,6 +5,7 @@ import {
   legalEntrants,
   consolationScrap,
   LOSS_CONSOLATION_DEFAULT,
+  winPointsForDay,
 } from '../src/pvp';
 import type { LeagueEntrant } from '../src/pvp';
 import { BOARD_CAP } from '../src/sim';
@@ -42,6 +43,37 @@ describe('scoreRound — determinism', () => {
     const first = scoreRound(entrants);
     const second = scoreRound(entrants);
     expect(second).toEqual(first);
+  });
+});
+
+describe('winPointsForDay', () => {
+  it('discounts wins on league days 1-2, full value from day 3 on', () => {
+    expect(winPointsForDay(1)).toBe(2);
+    expect(winPointsForDay(2)).toBe(2);
+    expect(winPointsForDay(3)).toBe(3);
+    expect(winPointsForDay(7)).toBe(3);
+  });
+
+  it('falls through to the full value for an unparseable day', () => {
+    expect(winPointsForDay(NaN)).toBe(3);
+  });
+});
+
+describe('scoreRound — winPoints param', () => {
+  it('defaults to 3 per win when omitted', () => {
+    const entrants: LeagueEntrant[] = [
+      { id: 'titan', board: triRat },
+      { id: 'weakling', board: soloRat },
+    ];
+    expect(scoreRound(entrants)[0].points).toBe(3);
+  });
+
+  it('honors an explicit winPoints value (the day-1/2 discount)', () => {
+    const entrants: LeagueEntrant[] = [
+      { id: 'titan', board: triRat },
+      { id: 'weakling', board: soloRat },
+    ];
+    expect(scoreRound(entrants, 2)[0].points).toBe(2);
   });
 });
 

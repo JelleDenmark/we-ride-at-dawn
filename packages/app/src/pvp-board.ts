@@ -29,7 +29,7 @@ const HEADERS = {
 /**
  * Upsert this device's CURRENT board into `pvp_boards` for the given season.
  * Last-write-wins (not monotonic like the depth board) — the player reworks
- * their horde freely through the day, and the nightly 20:00 job fights
+ * their horde freely through the day, and the nightly 22:00 job fights
  * whatever was synced last. Fire-and-forget: a failed sync just means the
  * server keeps the previous board; it never blocks or breaks play.
  *

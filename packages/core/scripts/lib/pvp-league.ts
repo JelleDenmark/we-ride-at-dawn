@@ -15,7 +15,8 @@
  * scoring of whatever is currently synced for the season — one round per
  * ride-date.
  */
-import { legalEntrants, scoreRound, type Lineup } from '../../src/pvp';
+import { legalEntrants, scoreRound, winPointsForDay, type Lineup } from '../../src/pvp';
+import { weekdayFor } from '../../src/shop';
 
 export const SUPABASE_URL = 'https://wvrllhiktnkvbpclmrpq.supabase.co';
 // Public, publishable anon key — same as packages/app/src/telemetry.ts. Read-only.
@@ -83,7 +84,14 @@ export function roundResultsFor(
     return { resultRows: [], scored: legal.length, dropped, skipped: true };
   }
 
-  const resultRows = scoreRound(legal).map((s) => ({
+  // roundId is `${seasonId}#${rideDate}` (see this module's doc comment);
+  // pull the ride-date back out to find which league day this round pays out
+  // for. A malformed/test roundId with no rideDate falls through weekdayFor
+  // to NaN, which winPointsForDay treats as the steady-state (day 3+) value.
+  const rideDate = roundId.slice(roundId.indexOf('#') + 1);
+  const winPoints = winPointsForDay(weekdayFor(rideDate));
+
+  const resultRows = scoreRound(legal, winPoints).map((s) => ({
     round_id: roundId,
     season_id: seasonId,
     device_id: s.id,

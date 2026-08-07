@@ -25,7 +25,8 @@
  * degrade-not-fail shape as the missing service-role key above.
  */
 import { currentRideDate } from '../src/seed';
-import { seasonIdFor } from '../src/shop';
+import { seasonIdFor, weekdayFor } from '../src/shop';
+import { winPointsForDay } from '../src/pvp';
 import { roundAlreadyClosed, runNightlyRound } from './lib/pvp-league';
 import { postPvpResults } from './lib/discord-post';
 
@@ -61,7 +62,8 @@ async function runSeason(
     return;
   }
 
-  console.log(`Standings (points: win 3 / draw 1 / loss 0; survivor_diff breaks ties):`);
+  const winPoints = winPointsForDay(weekdayFor(rideDate));
+  console.log(`Standings (points: win ${winPoints} / draw 1 / loss 0; survivor_diff breaks ties):`);
   outcome.resultRows.forEach((r, i) => {
     const sd = (r.survivor_diff >= 0 ? '+' : '') + r.survivor_diff;
     console.log(

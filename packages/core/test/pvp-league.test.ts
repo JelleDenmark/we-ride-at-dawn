@@ -35,6 +35,15 @@ describe('roundResultsFor (pure nightly transform)', () => {
     }
   });
 
+  it('pays the discounted win value on league day 1-2, full value from day 3', () => {
+    const boards = [b('a', 'A', triRat), b('c', 'C', soloRat)];
+    // 2026-08-03 is a Monday (day 1); 2026-08-05 is a Wednesday (day 3).
+    const day1 = roundResultsFor(boards, '2026-08-03', '2026-08-03#2026-08-03');
+    const day3 = roundResultsFor(boards, '2026-08-03', '2026-08-03#2026-08-05');
+    expect(day1.resultRows.find((r) => r.device_id === 'a')!.points).toBe(2);
+    expect(day3.resultRows.find((r) => r.device_id === 'a')!.points).toBe(3);
+  });
+
   it('maps survivorDiff -> survivor_diff (camel to snake) intact', () => {
     const boards = [b('a', 'A', triRat), b('c', 'C', soloRat)];
     const { resultRows } = roundResultsFor(boards, 's', 'r');
