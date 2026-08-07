@@ -15,14 +15,14 @@ describe('MD Rattyfock (issue #23)', () => {
     expect(md.cost).toBe(warren.cost);
   });
 
-  it('has the same ability as Warren-Warden (startOfBattle, +1/+1 to all behind)', () => {
+  it('has the same ability as Warren-Warden (startOfBattle, +2/+1 to all behind)', () => {
     const warren = UNIT_DEFS['warren-warden'];
     const md = UNIT_DEFS['md-rattyfock'];
     expect(md.ability).toBeDefined();
     expect(md.ability?.trigger).toBe('startOfBattle');
     expect(md.ability?.effect.kind).toBe('buffBehind');
     if (md.ability?.effect.kind === 'buffBehind') {
-      expect(md.ability.effect.attack).toBe(1);
+      expect(md.ability.effect.attack).toBe(2);
       expect(md.ability.effect.health).toBe(1);
       expect(md.ability.effect.all).toBe(true);
     }

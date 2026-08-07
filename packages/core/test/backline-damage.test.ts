@@ -124,7 +124,7 @@ describe('backline damage primitive (issue #85)', () => {
   });
 
   it('a runtime attack buff (e.g. Warren-Warden buffBehind) raises the per-hit damage, same as any other attack-based effect', () => {
-    // Warren-Warden's startOfBattle buffBehind grants +1 attack (tier 1) to
+    // Warren-Warden's startOfBattle buffBehind grants +2 attack (tier 1) to
     // every unit behind it, including a backline sniper. Backline damage
     // recomputes its own flat, tier-multiplier-free magnitude rather than
     // reusing `source.attack` directly (see the `backlineDamage` case in
@@ -135,7 +135,7 @@ describe('backline damage primitive (issue #85)', () => {
     );
     const foeId = ofType(events, 'waveStart')[0].enemies[0].instanceId;
     const firstHit = ofType(events, 'damage').find((d) => d.targetId === foeId);
-    expect(firstHit?.amount).toBe(4); // base 3 + Warren-Warden's +1 buff.
+    expect(firstHit?.amount).toBe(5); // base 3 + Warren-Warden's +2 buff.
   });
 
   it('backline damage does not grow with wave count (compounding-law canary)', () => {

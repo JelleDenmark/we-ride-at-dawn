@@ -336,7 +336,7 @@ describe('unit abilities', () => {
     const clashIdx = events.findIndex((e) => e.type === 'clash');
     const buffs = ofType(events.slice(0, clashIdx), 'buff');
     expect(buffs.length).toBe(2);
-    expect(buffs.every((b) => b.attack === 1 && b.health === 1)).toBe(true);
+    expect(buffs.every((b) => b.attack === 2 && b.health === 1)).toBe(true);
   });
 
   it('Rat-Piper summons exactly one pup, once, at battle start (issue #161 rework)', () => {
