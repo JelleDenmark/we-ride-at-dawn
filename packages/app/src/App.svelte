@@ -337,7 +337,7 @@
   // PvP league board sync (nightly duel). Unlike submitBest (a monotonic
   // best-ride snapshot), this mirrors the player's CURRENT fighting board to
   // pvp_boards as live, last-write-wins state — whatever's deployed now is what
-  // the 20:00 job duels and others scout. Debounced so a buy->place->merge
+  // the 22:00 job duels and others scout. Debounced so a buy->place->merge
   // burst is one sync, and signature-guarded so an unchanged board never
   // re-POSTs (same shape as submitBest's lastSubmit guard).
   let lastPvpSync = ''; // signature actually written to the server
@@ -375,7 +375,7 @@
   let leagueBusy = $state(false);
   // The depth board (issue #171): a live-updating ranked read of `scores`,
   // restored as a third tab so the game has a social signal between nightly
-  // duels — the PvP standings only change once a day at 20:00.
+  // duels — the PvP standings only change once a day at 22:00.
   let board = $state<BoardRow[]>([]);
   let myRank = $state<number | null>(null);
   // Which rival's board the scout panel is expanded to, by player_id (null =
@@ -412,11 +412,21 @@
     nightStandings = await fetchStandingsForRound(roundId);
   }
 
-  function fmtRoundDate(closesAt: string): string {
-    return new Date(closesAt).toLocaleDateString(undefined, {
+  // Labels a round by its RIDE-date (the part of round_id after '#'), not by
+  // when it happened to close. A round scored past local midnight but before
+  // the 06:00 Copenhagen dawn rollover (see currentRideDate) still belongs to
+  // the PREVIOUS ride-day — formatting `closes_at` in the browser's local
+  // timezone got that wrong (e.g. a round that closed at 00:37 CEST showed as
+  // the next day). Anchoring the parse+format to UTC (T00:00:00Z in, timeZone
+  // 'UTC' out) means the plain YYYY-MM-DD round-id date reads back unchanged
+  // regardless of the viewer's own timezone offset.
+  function fmtRoundDate(roundId: string): string {
+    const rideDate = roundId.slice(roundId.lastIndexOf('#') + 1);
+    return new Date(`${rideDate}T00:00:00Z`).toLocaleDateString(undefined, {
       weekday: 'short',
       month: 'short',
       day: 'numeric',
+      timeZone: 'UTC',
     });
   }
 
@@ -1015,7 +1025,7 @@
     }
     const id = setInterval(() => (nowTick = Date.now()), 1000);
     // Load the league now, then keep it loosely fresh while the tab is open.
-    // Standings only change once a day (at 20:00), but the ghosts to scout
+    // Standings only change once a day (at 22:00), but the ghosts to scout
     // update as rivals rebuild.
     void refreshLeague();
     const leagueId = setInterval(() => void refreshLeague(), 60_000);
@@ -1893,7 +1903,7 @@
       </button>
     </div>
     <p class="lg-blurb">
-      Your horde duels every rival's at <strong>20:00 CET</strong> — one board does both jobs, riding the drains for scrap by day and fighting the duel at night. Points: <strong>win 3 · draw 1 · loss 0</strong> against each rival, summed. Monday wipes the table.
+      Your horde duels every rival's at <strong>22:00 CET</strong> — one board does both jobs, riding the drains for scrap by day and fighting the duel at night. Points: <strong>win 2 · draw 1 · loss 0</strong> the first two days, <strong>win 3</strong> after — against each rival, summed. Monday wipes the table.
     </p>
 
     <div class="lg-tabs" role="tablist">
@@ -1928,7 +1938,7 @@
 
     {#if leagueTab === 'season'}
       {#if seasonStandings.length === 0}
-        <p class="lb-empty">{leagueBusy ? 'reading the war-drums…' : 'no duel yet — the first table posts after tonight\'s 20:00 CET'}</p>
+        <p class="lb-empty">{leagueBusy ? 'reading the war-drums…' : 'no duel yet — the first table posts after tonight\'s 22:00 CET'}</p>
       {:else}
         <p class="lg-caption">season total · week of {build.seasonId.slice(0, 10)}</p>
         <ol class="lb-rows">
@@ -1950,17 +1960,17 @@
           onchange={(e) => void selectRound(e.currentTarget.value)}
         >
           {#each rounds as r (r.round_id)}
-            <option value={r.round_id}>{fmtRoundDate(r.closes_at)}</option>
+            <option value={r.round_id}>{fmtRoundDate(r.round_id)}</option>
           {/each}
         </select>
       {/if}
       {#if displayedNightStandings.length === 0}
-        <p class="lb-empty">{leagueBusy ? 'reading the war-drums…' : 'no duel yet — the first table posts after tonight\'s 20:00 CET'}</p>
+        <p class="lb-empty">{leagueBusy ? 'reading the war-drums…' : 'no duel yet — the first table posts after tonight\'s 22:00 CET'}</p>
       {:else}
         <p class="lg-caption">
           {selectedRoundId === null || selectedRoundId === rounds[0]?.round_id
             ? "last night's table"
-            : `${fmtRoundDate(rounds.find((r) => r.round_id === selectedRoundId)?.closes_at ?? '')}'s table`}
+            : `${fmtRoundDate(rounds.find((r) => r.round_id === selectedRoundId)?.round_id ?? '')}'s table`}
         </p>
         <ol class="lb-rows">
           {#each displayedNightStandings as row, i}

@@ -15,7 +15,8 @@
  * scoring of whatever is currently synced for the season — one round per
  * ride-date.
  */
-import { legalEntrants, scoreRound, type Lineup } from '../../src/pvp';
+import { legalEntrants, scoreRound, winPointsForDay, type Lineup } from '../../src/pvp';
+import { weekdayFor } from '../../src/shop';
 
 export const SUPABASE_URL = 'https://wvrllhiktnkvbpclmrpq.supabase.co';
 // Public, publishable anon key — same as packages/app/src/telemetry.ts. Read-only.
@@ -83,7 +84,14 @@ export function roundResultsFor(
     return { resultRows: [], scored: legal.length, dropped, skipped: true };
   }
 
-  const resultRows = scoreRound(legal).map((s) => ({
+  // roundId is `${seasonId}#${rideDate}` (see this module's doc comment);
+  // pull the ride-date back out to find which league day this round pays out
+  // for. A malformed/test roundId with no rideDate falls through weekdayFor
+  // to NaN, which winPointsForDay treats as the steady-state (day 3+) value.
+  const rideDate = roundId.slice(roundId.indexOf('#') + 1);
+  const winPoints = winPointsForDay(weekdayFor(rideDate));
+
+  const resultRows = scoreRound(legal, winPoints).map((s) => ({
     round_id: roundId,
     season_id: seasonId,
     device_id: s.id,
@@ -120,6 +128,23 @@ function serviceHeaders(key: string, extra: Record<string, string> = {}): Record
  * The cost is that a keyless `--dry` can no longer read. That's called out
  * explicitly below rather than surfacing as a bare 403.
  */
+/**
+ * Has this round already been scored and closed? Read-only, anon-readable
+ * (pvp_rounds grants anon select). Used to make the nightly job idempotent —
+ * two triggers landing for the same round_id (a backup schedule entry, a
+ * stray manual dispatch) must not re-score or double-post to Discord; only
+ * the first to close the round should count.
+ */
+export async function roundAlreadyClosed(roundId: string): Promise<boolean> {
+  const url =
+    `${SUPABASE_URL}/rest/v1/pvp_rounds?round_id=eq.${encodeURIComponent(roundId)}` +
+    `&status=eq.closed&select=round_id`;
+  const res = await fetch(url, { headers: anonHeaders() });
+  if (!res.ok) throw new Error(`pvp_rounds check failed: ${res.status} ${await res.text()}`);
+  const rows = (await res.json()) as unknown[];
+  return rows.length > 0;
+}
+
 export async function fetchBoards(seasonId: string, key: string | undefined): Promise<BoardRow[]> {
   const url =
     `${SUPABASE_URL}/rest/v1/pvp_boards?season_id=eq.${encodeURIComponent(seasonId)}` +

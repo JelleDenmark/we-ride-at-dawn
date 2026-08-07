@@ -67,6 +67,18 @@ export interface RoundStanding {
 }
 
 /**
+ * Win points for a league day (1=Monday..7=Sunday, `shop.ts`'s `weekdayFor`
+ * numbering — the league week resets on the same Monday as the shop season).
+ * The first two days of the week pay a lighter win to soften the swing while
+ * standings are still thin (day 1 has no history to protect); day 3 onward
+ * pays the full win. An invalid/unparseable day (e.g. a non-date roundId in a
+ * unit test) falls through to the full value rather than the discounted one.
+ */
+export function winPointsForDay(day: number): number {
+  return day >= 1 && day <= 2 ? 2 : 3;
+}
+
+/**
  * Scores one PvP round: all-vs-all round robin, every entrant duels every
  * OTHER entrant exactly once via `simulateDuel` (a duel is already seat-
  * symmetric — see `duel.ts`'s seat-fairness note — so unlike the flat-budget
@@ -74,10 +86,14 @@ export interface RoundStanding {
  * would just double-count a result `simulateDuel` guarantees is already
  * fair regardless of which side sat in seat A).
  *
- * Scoring is football-style match points — win 3, draw 1, loss 0, summed
- * across every duel a player plays — so the headline standing rewards
- * racking up wins over a whole round rather than one big stomp. The tiebreak
- * is survivor differential: for each of a player's duels, (their surviving
+ * Scoring is football-style match points — win `winPoints` (see
+ * `winPointsForDay`), draw 1, loss 0, summed across every duel a player
+ * plays — so the headline standing rewards racking up wins over a whole
+ * round rather than one big stomp. `winPoints` defaults to 3 (the steady-state
+ * value from day 3 on) so every existing caller/test that doesn't pass it is
+ * unaffected; the nightly job (`pvp-league.ts`) is the one caller that derives
+ * it per-round from the ride-date via `winPointsForDay`. The tiebreak is
+ * survivor differential: for each of a player's duels, (their surviving
  * total health − their opponent's surviving total health), summed across the
  * round. Health margin (not survivor count) is used because it's the same
  * neutral-margin quantity `DuelResult.healthA`/`healthB` already exists for
@@ -94,7 +110,7 @@ export interface RoundStanding {
  * a total order), never who actually beat whom — see the order-independence
  * test in pvp.test.ts.
  */
-export function scoreRound(entrants: LeagueEntrant[]): RoundStanding[] {
+export function scoreRound(entrants: LeagueEntrant[], winPoints = 3): RoundStanding[] {
   const n = entrants.length;
   const points = new Array<number>(n).fill(0);
   const wins = new Array<number>(n).fill(0);
@@ -109,11 +125,11 @@ export function scoreRound(entrants: LeagueEntrant[]): RoundStanding[] {
       survivorDiff[i] += diff;
       survivorDiff[j] -= diff;
       if (result.winner === 'a') {
-        points[i] += 3;
+        points[i] += winPoints;
         wins[i]++;
         losses[j]++;
       } else if (result.winner === 'b') {
-        points[j] += 3;
+        points[j] += winPoints;
         wins[j]++;
         losses[i]++;
       } else {

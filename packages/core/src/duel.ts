@@ -3,7 +3,7 @@ import { simulateCore, type BattleEvent, type UnitView } from './sim';
 
 /**
  * Outcome of a single symmetric board-vs-board duel — the PvP league's core
- * unit of play (the nightly 20:00 fight).
+ * unit of play (the nightly 22:00 fight).
  *
  * A duel is ONE wave: side A's board fought to the death against side B's,
  * both instantiated with full tiers, per-unit relics and team relics and no
