@@ -412,11 +412,21 @@
     nightStandings = await fetchStandingsForRound(roundId);
   }
 
-  function fmtRoundDate(closesAt: string): string {
-    return new Date(closesAt).toLocaleDateString(undefined, {
+  // Labels a round by its RIDE-date (the part of round_id after '#'), not by
+  // when it happened to close. A round scored past local midnight but before
+  // the 06:00 Copenhagen dawn rollover (see currentRideDate) still belongs to
+  // the PREVIOUS ride-day — formatting `closes_at` in the browser's local
+  // timezone got that wrong (e.g. a round that closed at 00:37 CEST showed as
+  // the next day). Anchoring the parse+format to UTC (T00:00:00Z in, timeZone
+  // 'UTC' out) means the plain YYYY-MM-DD round-id date reads back unchanged
+  // regardless of the viewer's own timezone offset.
+  function fmtRoundDate(roundId: string): string {
+    const rideDate = roundId.slice(roundId.lastIndexOf('#') + 1);
+    return new Date(`${rideDate}T00:00:00Z`).toLocaleDateString(undefined, {
       weekday: 'short',
       month: 'short',
       day: 'numeric',
+      timeZone: 'UTC',
     });
   }
 
@@ -1950,7 +1960,7 @@
           onchange={(e) => void selectRound(e.currentTarget.value)}
         >
           {#each rounds as r (r.round_id)}
-            <option value={r.round_id}>{fmtRoundDate(r.closes_at)}</option>
+            <option value={r.round_id}>{fmtRoundDate(r.round_id)}</option>
           {/each}
         </select>
       {/if}
@@ -1960,7 +1970,7 @@
         <p class="lg-caption">
           {selectedRoundId === null || selectedRoundId === rounds[0]?.round_id
             ? "last night's table"
-            : `${fmtRoundDate(rounds.find((r) => r.round_id === selectedRoundId)?.closes_at ?? '')}'s table`}
+            : `${fmtRoundDate(rounds.find((r) => r.round_id === selectedRoundId)?.round_id ?? '')}'s table`}
         </p>
         <ol class="lb-rows">
           {#each displayedNightStandings as row, i}
