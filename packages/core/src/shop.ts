@@ -3,6 +3,7 @@ import { xorshift128 } from './prng';
 import { UNIT_DEFS, type Lineup, type UnitDef, tierAttackMultiplier, tierHealthMultiplier } from './data/units';
 import { RELIC_DEFS, type RelicDef } from './data/relics';
 import { BOARD_CAP, COMBAT_CAP_BONUS } from './sim';
+import type { AnomalyDef } from './anomaly';
 
 export const DAILY_SCRAP = 24;
 export const REROLL_COST = 2;
@@ -396,10 +397,11 @@ export function rollOfferings(
   date: string,
   roll: number,
   ownedTeamRelics: readonly string[] = [],
-  day = 1
+  day = 1,
+  excludedUnitIds: readonly string[] = []
 ): ShopSlot[] {
   const rng = xorshift128(fnv1a(`${date}#shop#${roll}`));
-  const unitPool = shopUnitPoolForDay(day);
+  const unitPool = shopUnitPoolForDay(day).filter((u) => !excludedUnitIds.includes(u.id));
   const relicPool = SHOP_RELIC_POOL.filter(
     (r) => !(r.scope === 'team' && ownedTeamRelics.includes(r.id))
   );
@@ -413,8 +415,31 @@ export function rollOfferings(
   return slots;
 }
 
-export function newBuild(date: string, day = 1, ownedTeamRelics: readonly string[] = []): BuildState {
-  const slots = rollOfferings(date, 0, ownedTeamRelics, day);
+/**
+ * defIds excluded from the shop this roll under Grown Past Use (#165 Part 2
+ * follow-up): once any copy of a unit reaches `MAX_TIER` on board OR bench,
+ * the warren stops reinforcing it for the rest of the week — same
+ * live-re-derived-every-roll shape as the owned-team-relic filter above, just
+ * keyed on the player's own maxed units instead of owned relics. `[]` for any
+ * anomaly that doesn't set `shop.excludeMaxedUnits` (every one so far), so
+ * every existing call site stays byte-identical.
+ */
+function shopExclusionsFor(
+  anomaly: AnomalyDef | null | undefined,
+  units: readonly Pick<BoardUnit, 'defId' | 'tier'>[]
+): string[] {
+  if (!anomaly?.shop?.excludeMaxedUnits) return [];
+  return [...new Set(units.filter((u) => u.tier >= MAX_TIER).map((u) => u.defId))];
+}
+
+export function newBuild(
+  date: string,
+  day = 1,
+  ownedTeamRelics: readonly string[] = [],
+  excludedUnitIds: readonly string[] = [],
+  bonusBoardSlots = 0
+): BuildState {
+  const slots = rollOfferings(date, 0, ownedTeamRelics, day, excludedUnitIds);
   return {
     date,
     seasonId: seasonIdFor(date),
@@ -423,7 +448,7 @@ export function newBuild(date: string, day = 1, ownedTeamRelics: readonly string
     board: [],
     bench: [],
     teamRelicIds: [],
-    purchasedSlots: 0,
+    purchasedSlots: bonusBoardSlots,
     shop: { slots, frozen: slots.map(() => false), rolls: 0 },
   };
 }
@@ -432,10 +457,25 @@ export function newBuild(date: string, day = 1, ownedTeamRelics: readonly string
  * The build for the dawn after `build` rode. Within a 7-day expedition the
  * horde (roster, tiers, relics) carries forward with a fresh shop and scrap
  * stipend; after the final day the expedition ends and a fresh one begins.
+ *
+ * `anomaly` is optional and defaults to a clean week (omitted = byte-identical
+ * to before Grown Past Use existed). When it sets `shop.excludeMaxedUnits`,
+ * the maxed-unit exclusion carries over from the OUTGOING build's board/bench
+ * into the very first roll of the new day (not just future rerolls) — a
+ * player who capped a unit on day 3 shouldn't see it reappear on day 4's
+ * initial roll. `bonusBoardSlots` (the Trial's stated compensation) is only
+ * granted at a season boundary — the day-to-day continuation path always
+ * carries `purchasedSlots` forward from `build`, overwriting whatever
+ * `newBuild` set, so it can't be re-granted every dawn.
  */
-export function advanceAfterDawn(build: BuildState, nextDate: string): BuildState {
-  if (build.day >= SEASON_DAYS) return newBuild(nextDate, 1);
-  const next = newBuild(nextDate, build.day + 1, build.teamRelicIds);
+export function advanceAfterDawn(
+  build: BuildState,
+  nextDate: string,
+  anomaly?: AnomalyDef | null
+): BuildState {
+  if (build.day >= SEASON_DAYS) return newBuild(nextDate, 1, [], [], anomaly?.bonusBoardSlots ?? 0);
+  const excluded = shopExclusionsFor(anomaly, [...build.board, ...build.bench]);
+  const next = newBuild(nextDate, build.day + 1, build.teamRelicIds, excluded);
   next.board = build.board.map((u) => ({ ...u, relicIds: [...u.relicIds] }));
   next.bench = (build.bench ?? []).map((u) => ({ ...u, relicIds: [...u.relicIds] }));
   next.teamRelicIds = [...build.teamRelicIds];
@@ -650,12 +690,13 @@ export function sellRefund(unit: BoardUnit, day: number): number {
   return Math.max(1, Math.floor(def.cost / 2)) * unit.tier * unit.tier;
 }
 
-export function rerollShop(state: BuildState): ActionResult {
+export function rerollShop(state: BuildState, anomaly?: AnomalyDef | null): ActionResult {
   if (state.scrap < REROLL_COST) return fail('not enough scrap to reroll');
   const s = clone(state);
   s.scrap -= REROLL_COST;
   s.shop.rolls += 1;
-  const fresh = rollOfferings(s.date, s.shop.rolls, s.teamRelicIds, s.day);
+  const excluded = shopExclusionsFor(anomaly, [...s.board, ...s.bench]);
+  const fresh = rollOfferings(s.date, s.shop.rolls, s.teamRelicIds, s.day, excluded);
   s.shop.slots = s.shop.slots.map((old, i) =>
     s.shop.frozen[i] && old.kind !== 'empty' ? old : fresh[i]
   );
@@ -681,11 +722,12 @@ export function isShopDead(state: BuildState): boolean {
  * here — otherwise the next manual reroll would reuse the same roll number
  * and hand back an identical shop, silently wasting the player's scrap.
  * Non-empty frozen stalls (incl. relics) are preserved, same as rerollShop. */
-export function autoRerollShop(state: BuildState): ActionResult {
+export function autoRerollShop(state: BuildState, anomaly?: AnomalyDef | null): ActionResult {
   if (!isShopDead(state)) return { ok: false, reason: 'shop is not dead' };
   const s = clone(state);
   s.shop.rolls += 1;
-  const fresh = rollOfferings(s.date, s.shop.rolls, s.teamRelicIds, s.day);
+  const excluded = shopExclusionsFor(anomaly, [...s.board, ...s.bench]);
+  const fresh = rollOfferings(s.date, s.shop.rolls, s.teamRelicIds, s.day, excluded);
   s.shop.slots = s.shop.slots.map((old, i) =>
     s.shop.frozen[i] && old.kind !== 'empty' ? old : fresh[i]
   );

@@ -54,6 +54,7 @@ export {
   ANOMALY_FIRST_SEASON,
   type AnomalyDef,
   type GauntletOverrides,
+  type ShopOverrides,
 } from './anomaly';
 export { scoutReport, ARCHETYPE_LABEL, type ScoutReport, type ScoutHint } from './scout';
 export {

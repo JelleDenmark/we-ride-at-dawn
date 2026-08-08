@@ -219,11 +219,23 @@
     );
   }
 
+  /** This week's anomaly for an arbitrary date, or null on a clean week —
+   * the single place that derives it, so a shop call and a gauntlet call for
+   * the same date can never disagree about which anomaly is live. Hoisted
+   * above `build`'s own initialization below, which needs it too. */
+  const anomalyForDate = (date: string) => anomalyFor(seasonIdFor(date));
+
+  /** A brand-new expedition's build for `date`/`day`, with Grown Past Use's
+   * (or any future anomaly's) `bonusBoardSlots` compensation applied — the
+   * one place a fresh `newBuild` happens so no call site can forget it. */
+  const freshBuildFor = (date: string, day: number, ownedTeamRelics: readonly string[] = []) =>
+    newBuild(date, day, ownedTeamRelics, [], anomalyForDate(date)?.bonusBoardSlots ?? 0);
+
   // build.date is the current expedition day's date; the horde rides its
   // gauntlet every hour for scrap. Day is the ISO weekday (synchronized:
   // everyone shares a Monday→Sunday week).
   let build = $state<BuildState>(
-    loadPending() ?? newBuild(currentRideDate(), weekdayFor(currentRideDate()))
+    loadPending() ?? freshBuildFor(currentRideDate(), weekdayFor(currentRideDate()))
   );
   const storedBest = loadSeasonBest(seasonIdFor(currentRideDate()));
   let seasonBest = $state(storedBest.best);
@@ -254,13 +266,13 @@
    * re-sim derives the anomaly the same way, from the ride date.
    */
   const gauntletFor = (date: string, day: number) =>
-    generateGauntlet(date, day, undefined, anomalyFor(seasonIdFor(date)));
+    generateGauntlet(date, day, undefined, anomalyForDate(date));
 
   // The ride shows the daily gauntlet: the same waves all day, every day.
   const currentGauntlet = $derived(gauntletFor(build.date, build.day));
   const theme = $derived(currentGauntlet.theme);
   /** This week's anomaly, or null on a clean week. */
-  const anomaly = $derived(anomalyFor(seasonIdFor(build.date)));
+  const anomaly = $derived(anomalyForDate(build.date));
   /**
    * Next week's anomaly, revealed on the last day of the season — the return
    * hook that exists before push notifications do (season 6). Computed the
@@ -1018,7 +1030,7 @@
     // got stuck with no rats and only unaffordable relics. The free reroll
     // otherwise only fires reactively after a buy, so an already-dead shop
     // never self-heals; do it once on load. autoRerollShop no-ops unless dead.
-    const healed = autoRerollShop(build);
+    const healed = autoRerollShop(build, anomalyForDate(build.date));
     if (healed.ok) {
       build = healed.state;
       saveBuild(build);
@@ -1079,7 +1091,7 @@
       // mid-week joiner starts cold at the current day's difficulty. (A build
       // that's *ahead* — dev fast-forward — is left alone.)
       stopReplay();
-      build = newBuild(today, weekdayFor(today));
+      build = freshBuildFor(today, weekdayFor(today));
       saveBuild(build);
       lastIncomeHour = Math.floor(nowTick / HOUR_MS);
       saveLastIncomeHour(lastIncomeHour);
@@ -1097,7 +1109,7 @@
           lastRide = ride;
           submitRun({ rideDate: build.date, lineup, result: outcome.result, dev: CHANNEL === 'dev' });
         }
-        build = advanceAfterDawn(build, addDay(build.date));
+        build = advanceAfterDawn(build, addDay(build.date), anomalyForDate(build.date));
         advanced = true;
       }
     }
@@ -1206,7 +1218,7 @@
 
   function freshBuild() {
     stopReplay();
-    build = newBuild(build.date, build.day);
+    build = freshBuildFor(build.date, build.day);
     saveBuild(build);
     inspect = null;
     pendingRelic = null;
@@ -1226,7 +1238,11 @@
   function resetTestDate() {
     stopReplay();
     const today = currentRideDate();
-    const rebuilt = newBuild(today, weekdayFor(today), build.teamRelicIds);
+    const anomaly = anomalyForDate(today);
+    const excluded = anomaly?.shop?.excludeMaxedUnits
+      ? [...build.board, ...build.bench].filter((u) => u.tier >= MAX_TIER).map((u) => u.defId)
+      : [];
+    const rebuilt = newBuild(today, weekdayFor(today), build.teamRelicIds, excluded);
     build = {
       ...rebuilt,
       scrap: build.scrap,
@@ -1259,7 +1275,7 @@
       submitRun({ rideDate: build.date, lineup, result: outcome.result, dev: true });
     }
     stopReplay();
-    build = advanceAfterDawn(build, addDay(build.date));
+    build = advanceAfterDawn(build, addDay(build.date), anomalyForDate(build.date));
     saveBuild(build);
     inspect = null;
     pendingRelic = null;
@@ -1348,7 +1364,7 @@
    * buyRelic). */
   function applyAndAutoReroll(res: ActionResult): boolean {
     if (apply(res)) {
-      const autoRoll = autoRerollShop(build);
+      const autoRoll = autoRerollShop(build, anomalyForDate(build.date));
       if (autoRoll.ok) {
         build = autoRoll.state;
         saveBuild(build);
@@ -1786,7 +1802,7 @@
     </div>
     <div class="market-actions">
       <button
-        onclick={() => apply(rerollShop(build))}
+        onclick={() => apply(rerollShop(build, anomaly))}
         disabled={pendingRelic !== null || pendingSwap !== null}
       >↻ reroll · {REROLL_COST} scrap</button>
     </div>

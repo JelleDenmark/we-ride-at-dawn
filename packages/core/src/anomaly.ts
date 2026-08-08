@@ -71,6 +71,22 @@ export interface GauntletOverrides {
   waveUnitCap?: number;
 }
 
+/**
+ * Shop-side override — absent (`undefined`) for every anomaly through
+ * `two-warrens`. Grown Past Use (#165 Part 2 follow-up) is the first
+ * exception to the "anomalies only override `generateGauntlet`" rule from
+ * this file's header: it reaches into `rollOfferings` instead, so it carries
+ * zero `simulate`/compounding surface (ADR-0003 still holds — this never
+ * touches a unit's in-battle behavior) but is the first to touch the economy.
+ */
+export interface ShopOverrides {
+  /** Once any copy of a unit reaches `MAX_TIER` on board or bench, exclude
+   * it from the shop's unit pool for the rest of the week (`shop.ts`'s
+   * `shopExclusionsFor`, re-derived live every roll — same mechanism as the
+   * existing owned-team-relic filter). */
+  excludeMaxedUnits?: boolean;
+}
+
 export interface AnomalyDef {
   id: string;
   /** Shown on the shop banner and in the scout report. */
@@ -91,6 +107,17 @@ export interface AnomalyDef {
    */
   distorting: boolean;
   gauntlet: GauntletOverrides;
+  /** See `ShopOverrides`. Absent = no shop-side effect (every anomaly before
+   * Grown Past Use). */
+  shop?: ShopOverrides;
+  /**
+   * Extra board slots granted for the week, free — the stated Trial
+   * compensation (Twist/Trial split, posted to #165) for whatever tax the
+   * anomaly levies. 0/absent for every Twist (no cost, no compensation
+   * needed). Applied once, at the week's first `newBuild` — never re-granted
+   * per dawn, see `advanceAfterDawn`.
+   */
+  bonusBoardSlots?: number;
 }
 
 /**
@@ -171,6 +198,43 @@ export const ANOMALY_DEFS: Record<string, AnomalyDef> = {
     // Measured neutral: Δavg -0.14, ΔMAX 0.
     distorting: false,
     gauntlet: { primaryShare: 0.45, secondaryShare: 0.45, pivotWave: 1 },
+  },
+  'grown-past-use': {
+    id: 'grown-past-use',
+    name: 'Grown Past Use',
+    blurb: "A rat that's proven itself gets no reinforcements. The warren spends its scrap where it hasn't spoken yet.",
+    // A Trial, not a Twist (#165's Twist/Trial split): a real tax on whoever
+    // built around a strong tier-3 carry, so it ships with the stated
+    // same-week compensation below rather than reading as "just harder" —
+    // per the design-bank rule this issue's design-refresh comment set.
+    //
+    // `distorting` measures whether an ALREADY-MAXED board's depth ceiling
+    // moves against the CLEAN gauntlet (anomaly-guardrail.ts's method) — this
+    // anomaly sets no `gauntlet` override at all, so that measurement is
+    // trivially zero and `false` here is correct BY THAT DEFINITION, but it
+    // is not the number that matters for this entry. This anomaly's real
+    // cost lands entirely on which boards are BUILDABLE during the week, not
+    // on enemy composition, so the guardrail that actually speaks to it is a
+    // `balance:realistic`-shaped economy pass with the exclusion wired into
+    // the shop calls, not `balance:anomaly`. See
+    // `scripts/grown-past-use-reachability-probe.ts`: the exclusion makes any
+    // comp needing two tier-3 copies of the SAME defId (`original`,
+    // `press-kin-core` in both guardrail fixtures) structurally unreachable —
+    // a hard 12-base-copy ceiling against the 18 two tier-3s need, confirmed
+    // empirically, not a probability question. That's an intended
+    // consequence of the mechanic as specified, not a bug — those fixtures
+    // need a documented exception for anomaly weeks, not this anomaly needing
+    // a carve-out.
+    distorting: false,
+    gauntlet: {},
+    shop: { excludeMaxedUnits: true },
+    // Reuses `purchasedSlots` (an existing player-local upgrade, normally
+    // bought with scrap) rather than a scrap discount — same reasoning that
+    // made Rat of Wealth the safe v1 patron pick in the #165 thread: no new
+    // sync/anti-cheat surface, nothing to re-derive server-side beyond what
+    // `verify-scores` already ignores (the shop journey itself is never
+    // synced, only the final board).
+    bonusBoardSlots: 1,
   },
 };
 

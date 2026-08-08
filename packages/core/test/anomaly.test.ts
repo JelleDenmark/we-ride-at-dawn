@@ -78,9 +78,19 @@ describe('anomaly overrides actually change the week', () => {
   // needs to be a valid season day, not inside the live window.
   const date = '2026-08-05';
 
-  it('every anomaly produces a gauntlet different from the clean one', () => {
+  // Grown Past Use (#165 Part 2) is the first SHOP-side anomaly: it sets no
+  // `gauntlet` override at all, so `generateGauntlet` is byte-identical to a
+  // clean week under it, by design — its promise is enforced in the shop
+  // (see the "Grown Past Use" describe block below), not here. The two tests
+  // in this block are specifically about gauntlet reshaping, so they only
+  // apply to anomalies that set one.
+  const gauntletAnomalies = Object.values(ANOMALY_DEFS).filter(
+    (a) => Object.keys(a.gauntlet).length > 0
+  );
+
+  it('every gauntlet-shaping anomaly produces a gauntlet different from the clean one', () => {
     const cleanWaves = JSON.stringify(generateGauntlet(date, 3).waves);
-    for (const anomaly of Object.values(ANOMALY_DEFS)) {
+    for (const anomaly of gauntletAnomalies) {
       const under = generateGauntlet(date, 3, undefined, anomaly);
       expect(JSON.stringify(under.waves)).not.toBe(cleanWaves);
       expect(under.anomalyId).toBe(anomaly.id);
@@ -94,7 +104,7 @@ describe('anomaly overrides actually change the week', () => {
     // of 200 seasons — the app would have announced an anomaly and dealt a
     // clean week. An anomaly that sometimes does nothing is worse than no
     // anomaly, because the banner is a promise.
-    for (const anomaly of Object.values(ANOMALY_DEFS)) {
+    for (const anomaly of gauntletAnomalies) {
       let noopSeasons = 0;
       let changedWaves = 0;
       for (const s of SEASONS) {
