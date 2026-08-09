@@ -285,7 +285,7 @@ var UNIT_DEFS = {
     attack: 3,
     health: 6,
     cost: 6,
-    ability: { trigger: "startOfBattle", effect: { kind: "buffBehind", attack: 1, health: 1, all: true } },
+    ability: { trigger: "startOfBattle", effect: { kind: "buffBehind", attack: 2, health: 1, all: true } },
     tribe: "brute"
   },
   "dire-rat": {
@@ -313,7 +313,7 @@ var UNIT_DEFS = {
     attack: 3,
     health: 6,
     cost: 6,
-    ability: { trigger: "startOfBattle", effect: { kind: "buffBehind", attack: 1, health: 1, all: true } },
+    ability: { trigger: "startOfBattle", effect: { kind: "buffBehind", attack: 2, health: 1, all: true } },
     // unlockDay dropped (#149, 2026-07-25): MD Rattyfock is now the live twin
     // of this reskin pair, taking over Warren-Warden's old day-1-available
     // role — a straight swap, not a partial one.
@@ -446,7 +446,7 @@ var UNIT_DEFS = {
   "mbp-rat": {
     id: "mbp-rat",
     name: "MBP Rat",
-    attack: 3,
+    attack: 4,
     health: 1,
     cost: 6,
     ability: { trigger: "startOfWave", effect: { kind: "backlineDamage" } }
@@ -569,7 +569,7 @@ var UNIT_DEFS = {
     id: "squeak-sensei",
     name: "Squeak-Sensei",
     attack: 2,
-    health: 3,
+    health: 4,
     cost: 5,
     ability: { trigger: "allySummoned", effect: { kind: "buffSummoned", attack: 1, health: 1 } },
     tribe: "swarm"
@@ -1027,6 +1027,7 @@ function enemyAttackScale(waveIndex) {
   return 1 + waveIndex * ENEMY_ATTACK_SCALE_PER_WAVE;
 }
 var MIN_ATTACK_DAMAGE = 1;
+var POISON_DECAY_ENABLED = true;
 function simulate(lineup, gauntlet) {
   const { events, result } = simulateCore(lineup, { kind: "gauntlet", gauntlet });
   return { events, result };
@@ -1079,6 +1080,7 @@ function simulateCore(lineup, mode) {
       ability: def.ability,
       relics,
       poison: 0,
+      poisonFloor: 0,
       firstAttackDone: false,
       tailCharmUsed: false,
       // Team armor (Filth Totem) is a flat grant like team attack/health
@@ -1131,6 +1133,7 @@ function simulateCore(lineup, mode) {
   };
   const applyPoisonStacks = (target, stacks) => {
     target.poison += stacks;
+    target.poisonFloor = Math.max(target.poisonFloor, Math.ceil(stacks / 2));
     events.push({
       type: "poisonApplied",
       targetId: target.instanceId,
@@ -1372,6 +1375,7 @@ function simulateCore(lineup, mode) {
         corpse.raised = true;
         corpse.health = Math.min(reviveHpForTier(tier), corpse.maxHealth);
         corpse.poison = 0;
+        corpse.poisonFloor = 0;
         board.splice(index, 0, corpse);
         events.push({ type: "revive", side: source.side, index, unit: view(corpse) });
         break;
@@ -1566,6 +1570,9 @@ function simulateCore(lineup, mode) {
             const resisted = Math.max(0, unit.poison - poisonResistApplied[unit.side]);
             if (board === enemies) totalDamage += resisted;
             applyDamage(unit, resisted, "poison");
+            if (POISON_DECAY_ENABLED && unit.poison > unit.poisonFloor) {
+              unit.poison = Math.max(unit.poisonFloor, Math.ceil(unit.poison / 2));
+            }
           }
         }
       }
@@ -1576,7 +1583,10 @@ function simulateCore(lineup, mode) {
     if (enemies.length === 0) {
       wavesCleared++;
       events.push({ type: "waveClear", wave: w + 1 });
-      for (const unit of horde) unit.poison = 0;
+      for (const unit of horde) {
+        unit.poison = 0;
+        unit.poisonFloor = 0;
+      }
     }
   }
   const survivingHealth = horde.reduce((sum, u) => sum + u.health, 0);
@@ -1701,9 +1711,9 @@ function upcomingRetirements(day) {
     (a, b) => (a.retireDay ?? 0) - (b.retireDay ?? 0)
   );
 }
-function rollOfferings(date, roll, ownedTeamRelics = [], day = 1) {
+function rollOfferings(date, roll, ownedTeamRelics = [], day = 1, excludedUnitIds = []) {
   const rng = xorshift128(fnv1a(`${date}#shop#${roll}`));
-  const unitPool = shopUnitPoolForDay(day);
+  const unitPool = shopUnitPoolForDay(day).filter((u) => !excludedUnitIds.includes(u.id));
   const relicPool = SHOP_RELIC_POOL.filter(
     (r) => !(r.scope === "team" && ownedTeamRelics.includes(r.id))
   );
@@ -1716,8 +1726,12 @@ function rollOfferings(date, roll, ownedTeamRelics = [], day = 1) {
   }
   return slots;
 }
-function newBuild(date, day = 1, ownedTeamRelics = []) {
-  const slots = rollOfferings(date, 0, ownedTeamRelics, day);
+function shopExclusionsFor(anomaly, units) {
+  if (!anomaly?.shop?.excludeMaxedUnits) return [];
+  return [...new Set(units.filter((u) => u.tier >= MAX_TIER).map((u) => u.defId))];
+}
+function newBuild(date, day = 1, ownedTeamRelics = [], excludedUnitIds = [], bonusBoardSlots = 0) {
+  const slots = rollOfferings(date, 0, ownedTeamRelics, day, excludedUnitIds);
   return {
     date,
     seasonId: seasonIdFor(date),
@@ -1726,13 +1740,14 @@ function newBuild(date, day = 1, ownedTeamRelics = []) {
     board: [],
     bench: [],
     teamRelicIds: [],
-    purchasedSlots: 0,
+    purchasedSlots: bonusBoardSlots,
     shop: { slots, frozen: slots.map(() => false), rolls: 0 }
   };
 }
-function advanceAfterDawn(build, nextDate) {
-  if (build.day >= SEASON_DAYS) return newBuild(nextDate, 1);
-  const next = newBuild(nextDate, build.day + 1, build.teamRelicIds);
+function advanceAfterDawn(build, nextDate, anomaly) {
+  if (build.day >= SEASON_DAYS) return newBuild(nextDate, 1, [], [], anomaly?.bonusBoardSlots ?? 0);
+  const excluded = shopExclusionsFor(anomaly, [...build.board, ...build.bench]);
+  const next = newBuild(nextDate, build.day + 1, build.teamRelicIds, excluded);
   next.board = build.board.map((u) => ({ ...u, relicIds: [...u.relicIds] }));
   next.bench = (build.bench ?? []).map((u) => ({ ...u, relicIds: [...u.relicIds] }));
   next.teamRelicIds = [...build.teamRelicIds];
@@ -1859,12 +1874,13 @@ function sellRefund(unit, day) {
   }
   return Math.max(1, Math.floor(def.cost / 2)) * unit.tier * unit.tier;
 }
-function rerollShop(state) {
+function rerollShop(state, anomaly) {
   if (state.scrap < REROLL_COST) return fail("not enough scrap to reroll");
   const s = clone(state);
   s.scrap -= REROLL_COST;
   s.shop.rolls += 1;
-  const fresh = rollOfferings(s.date, s.shop.rolls, s.teamRelicIds, s.day);
+  const excluded = shopExclusionsFor(anomaly, [...s.board, ...s.bench]);
+  const fresh = rollOfferings(s.date, s.shop.rolls, s.teamRelicIds, s.day, excluded);
   s.shop.slots = s.shop.slots.map(
     (old, i) => s.shop.frozen[i] && old.kind !== "empty" ? old : fresh[i]
   );
@@ -1873,11 +1889,12 @@ function rerollShop(state) {
 function isShopDead(state) {
   return !state.shop.slots.some((slot) => slot.kind === "unit");
 }
-function autoRerollShop(state) {
+function autoRerollShop(state, anomaly) {
   if (!isShopDead(state)) return { ok: false, reason: "shop is not dead" };
   const s = clone(state);
   s.shop.rolls += 1;
-  const fresh = rollOfferings(s.date, s.shop.rolls, s.teamRelicIds, s.day);
+  const excluded = shopExclusionsFor(anomaly, [...s.board, ...s.bench]);
+  const fresh = rollOfferings(s.date, s.shop.rolls, s.teamRelicIds, s.day, excluded);
   s.shop.slots = s.shop.slots.map(
     (old, i) => s.shop.frozen[i] && old.kind !== "empty" ? old : fresh[i]
   );
@@ -2023,64 +2040,55 @@ function generateGauntlet(date, day = 1, hour, anomaly) {
 
 // packages/core/src/anomaly.ts
 var ANOMALY_DEFS = {
-  "one-warren": {
-    id: "one-warren",
-    name: "One Warren",
-    blurb: "One warren rides this week, and it has emptied itself into the dark.",
-    // Mono-theme week. A clean wave force-spends 60% of its budget on the
-    // primary and 25% on the secondary, with the remainder rolled free
-    // across all archetypes — so no season can ever be much more than 60%
-    // one thing. 0.9 is a shape the generator has never produced. WHICH
-    // archetype it commits to is still the season's own roll, per rule 2b,
-    // so this plays as a different puzzle each time it comes up.
-    // Measured neutral: Δavg +0.05..+0.24, ΔMAX 0..+1 across all three
-    // maxed comps (scripts/anomaly-guardrail.ts).
-    distorting: false,
-    gauntlet: { primaryShare: 0.9 }
-  },
-  "teeming-dark": {
-    id: "teeming-dark",
-    name: "Teeming Dark",
-    blurb: "The tunnels will not hold them all. They come anyway, one rank too deep.",
-    // WAVE_UNIT_CAP has been 5 for the whole life of the game, so this is
-    // the clearest "the rules moved" signal available without touching the
-    // sim. Front-clash means a 6th body is mostly queue depth rather than
-    // extra simultaneous damage, which is why one more rank costs a maxed
-    // board only about a wave and a half instead of collapsing it.
-    // Re-measured against the current roster (`balance:anomaly`, post
-    // unit-churn): Δavg -1.56..-1.65, ΔMAX -1 on two comps but -3 on
-    // press-kin-core — the worst comp decides, and -3 breaches the ±2
-    // threshold. Flipped from the original launch measurement (Δavg
-    // -1.2..-1.8, ΔMAX -1 flat, all inside threshold at the time). Still the
-    // only entry meaningfully HARDER than a clean week; held back with the
-    // other depth-distorting candidates until the season-6 board partition,
-    // per #165 Part 1 — not gated out of ANOMALY_DEFS today since nothing
-    // yet consumes this flag at runtime.
-    distorting: true,
-    gauntlet: { waveUnitCap: 6 }
-  },
-  "two-warrens": {
-    id: "two-warrens",
-    name: "Two Warrens",
-    blurb: "Two warrens ride together this week. Neither waits its turn.",
-    // The secondary normally musters from wave 4–7 at a 0.25 share against
-    // the primary's 0.6, so a clean week always opens single-archetype and
-    // never stops being primary-dominated. pivotWave 1 plus an even 0.45/0.45
-    // split makes the week genuinely two-headed from the first clash — the
-    // counter-building decision moves to wave 1, and neither archetype is the
-    // one you can afford to ignore.
+  "grown-past-use": {
+    id: "grown-past-use",
+    name: "Grown Past Use",
+    // This blurb is the ONLY player-facing explanation of the anomaly — there
+    // is no rules panel, no hint when an excluded unit stops appearing, and
+    // nothing else announces `bonusBoardSlots`. So it has to carry the trigger
+    // (★3), the duration (the week) and the compensation (the slot), not just
+    // atmosphere. The pure-flavour blurbs the removed launch trio used were
+    // fine for anomalies that only reshaped what you FOUGHT; this one changes
+    // what you can BUILD, and an unexplained unit vanishing from the shop
+    // reads as a bug. Rewritten 2026-08-09 (Jesper) — the original second
+    // clause ("the warren spends its scrap where it hasn't spoken yet") had an
+    // unresolvable pronoun, a metaphor with no in-game referent, and implied
+    // the player's scrap was redirected when only the shop's offer pool
+    // changes. Same class of copy bug as issue #50 (Ward-Weaver's ambiguous
+    // pronoun); keep future anomaly blurbs concrete for the same reason.
+    blurb: "Take a rat to \u26053 and the shop is done with its kind for the week. One extra slot to ride with \u2014 small comfort.",
+    // A Trial, not a Twist (#165's Twist/Trial split): a real tax on whoever
+    // built around a strong tier-3 carry, so it ships with the stated
+    // same-week compensation below rather than reading as "just harder" —
+    // per the design-bank rule this issue's design-refresh comment set.
     //
-    // The even split is load-bearing, not flavour. The first cut kept the
-    // primary at 0.6 and merely raised the secondary to 0.4, which measured
-    // as a NO-OP on 62 of 200 seasons: the secondary phase is bounded by what
-    // its archetype can afford out of the wave budget, not by its quota, so
-    // raising the quota alone frequently changes nothing and the week would
-    // have announced an anomaly that wasn't there. Lowering the PRIMARY is
-    // what actually frees the budget. Now 0/200 no-ops, 33.5 of 45 waves
-    // changed per season.
-    // Measured neutral: Δavg -0.14, ΔMAX 0.
+    // `distorting` measures whether an ALREADY-MAXED board's depth ceiling
+    // moves against the CLEAN gauntlet (anomaly-guardrail.ts's method) — this
+    // anomaly sets no `gauntlet` override at all, so that measurement is
+    // trivially zero and `false` here is correct BY THAT DEFINITION, but it
+    // is not the number that matters for this entry. This anomaly's real
+    // cost lands entirely on which boards are BUILDABLE during the week, not
+    // on enemy composition, so the guardrail that actually speaks to it is a
+    // `balance:realistic`-shaped economy pass with the exclusion wired into
+    // the shop calls, not `balance:anomaly`. See
+    // `scripts/grown-past-use-reachability-probe.ts`: the exclusion makes any
+    // comp needing two tier-3 copies of the SAME defId (`original`,
+    // `press-kin-core` in both guardrail fixtures) structurally unreachable —
+    // a hard 12-base-copy ceiling against the 18 two tier-3s need, confirmed
+    // empirically, not a probability question. That's an intended
+    // consequence of the mechanic as specified, not a bug — those fixtures
+    // need a documented exception for anomaly weeks, not this anomaly needing
+    // a carve-out.
     distorting: false,
-    gauntlet: { primaryShare: 0.45, secondaryShare: 0.45, pivotWave: 1 }
+    gauntlet: {},
+    shop: { excludeMaxedUnits: true },
+    // Reuses `purchasedSlots` (an existing player-local upgrade, normally
+    // bought with scrap) rather than a scrap discount — same reasoning that
+    // made Rat of Wealth the safe v1 patron pick in the #165 thread: no new
+    // sync/anti-cheat surface, nothing to re-derive server-side beyond what
+    // `verify-scores` already ignores (the shop journey itself is never
+    // synced, only the final board).
+    bonusBoardSlots: 1
   }
 };
 var ANOMALY_FIRST_SEASON = "2026-08-10";
@@ -2178,7 +2186,7 @@ function consolationScrap(losses, payoutPerLoss) {
   const n = Math.max(0, Math.floor(losses));
   return perLoss * n;
 }
-function scoreRound(entrants) {
+function scoreRound(entrants, winPoints = 3) {
   const n = entrants.length;
   const points = new Array(n).fill(0);
   const wins = new Array(n).fill(0);
@@ -2192,11 +2200,11 @@ function scoreRound(entrants) {
       survivorDiff[i] += diff;
       survivorDiff[j] -= diff;
       if (result.winner === "a") {
-        points[i] += 3;
+        points[i] += winPoints;
         wins[i]++;
         losses[j]++;
       } else if (result.winner === "b") {
-        points[j] += 3;
+        points[j] += winPoints;
         wins[j]++;
         losses[i]++;
       } else {

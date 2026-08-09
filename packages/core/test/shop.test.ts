@@ -40,6 +40,7 @@ import { RELIC_DEFS } from '../src/data/relics';
 import { simulate } from '../src/sim';
 import { generateGauntlet, difficultyForDay } from '../src/gauntlet';
 import { BOARD_CAP, COMBAT_CAP_BONUS } from '../src/sim';
+import { ANOMALY_DEFS } from '../src/anomaly';
 
 const unitSlot = (s: BuildState): number => s.shop.slots.findIndex((x) => x.kind === 'unit');
 const relicSlot = (s: BuildState): number => s.shop.slots.findIndex((x) => x.kind === 'relic');
@@ -1736,5 +1737,127 @@ describe('relic pool retirement (issue #156: Rusted Nail cut)', () => {
     const nailRefund = Math.max(1, Math.floor(nailCost / 2));
     const afterSell = must(sellUnit(s, 0)).state;
     expect(afterSell.scrap).toBe(20 + direRatRefund + nailRefund);
+  });
+});
+
+describe('Grown Past Use (#165 Part 2): shop-side anomaly', () => {
+  const GPU = ANOMALY_DEFS['grown-past-use'];
+
+  it('omitting the anomaly leaves every shop function byte-identical to before it existed', () => {
+    expect(rollOfferings('2026-08-10', 0, [], 3)).toEqual(
+      rollOfferings('2026-08-10', 0, [], 3, [])
+    );
+    expect(newBuild('2026-08-10', 3)).toEqual(newBuild('2026-08-10', 3, [], []));
+    const s = newBuild('2026-08-10', 3);
+    expect(must(rerollShop(s)).state).toEqual(must(rerollShop(s, null)).state);
+  });
+
+  it('rollOfferings excludes a defId passed in excludedUnitIds, and only that one', () => {
+    const withoutExclusion = rollOfferings('2026-08-10', 0, [], 3);
+    const excludedId = withoutExclusion.find((s) => s.kind === 'unit')!;
+    if (excludedId.kind !== 'unit') throw new Error('unreachable');
+    for (let roll = 0; roll < 50; roll++) {
+      const slots = rollOfferings('2026-08-10', roll, [], 3, [excludedId.defId]);
+      expect(slots.some((s) => s.kind === 'unit' && s.defId === excludedId.defId)).toBe(false);
+    }
+  });
+
+  it('a maxed board/bench unit is excluded from the very next reroll under Grown Past Use', () => {
+    let s: BuildState = { ...newBuild('2026-08-10', 3), board: [{ defId: 'dire-rat', tier: 3, relicIds: [] }] };
+    for (let i = 0; i < 100; i++) {
+      s = must(rerollShop({ ...s, scrap: 999 }, GPU)).state;
+      expect(s.shop.slots.some((slot) => slot.kind === 'unit' && slot.defId === 'dire-rat')).toBe(false);
+    }
+  });
+
+  it('a maxed bench unit (not just board) is excluded too', () => {
+    let s: BuildState = { ...newBuild('2026-08-10', 3), bench: [{ defId: 'dire-rat', tier: 3, relicIds: [] }] };
+    for (let i = 0; i < 100; i++) {
+      s = must(rerollShop({ ...s, scrap: 999 }, GPU)).state;
+      expect(s.shop.slots.some((slot) => slot.kind === 'unit' && slot.defId === 'dire-rat')).toBe(false);
+    }
+  });
+
+  it('a sub-tier-3 copy is NOT excluded — only MAX_TIER triggers it', () => {
+    let s: BuildState = { ...newBuild('2026-08-10', 3), board: [{ defId: 'dire-rat', tier: 2, relicIds: [] }] };
+    let sawIt = false;
+    for (let i = 0; i < 200 && !sawIt; i++) {
+      s = must(rerollShop({ ...s, scrap: 999 }, GPU)).state;
+      sawIt = s.shop.slots.some((slot) => slot.kind === 'unit' && slot.defId === 'dire-rat');
+    }
+    expect(sawIt).toBe(true);
+  });
+
+  it('without the anomaly, a maxed unit keeps appearing normally (no accidental global exclusion)', () => {
+    let s: BuildState = { ...newBuild('2026-08-10', 3), board: [{ defId: 'dire-rat', tier: 3, relicIds: [] }] };
+    let sawIt = false;
+    for (let i = 0; i < 200 && !sawIt; i++) {
+      s = must(rerollShop({ ...s, scrap: 999 })).state;
+      sawIt = s.shop.slots.some((slot) => slot.kind === 'unit' && slot.defId === 'dire-rat');
+    }
+    expect(sawIt).toBe(true);
+  });
+
+  it('autoRerollShop respects the same exclusion as rerollShop', () => {
+    const maxed: BuildState = { ...newBuild('2026-08-10', 3), board: [{ defId: 'dire-rat', tier: 3, relicIds: [] }] };
+    const dead = (s: BuildState): BuildState => ({
+      ...s,
+      shop: { ...s.shop, slots: s.shop.slots.map((slot) => (slot.kind === 'unit' ? { kind: 'empty' } : slot)) },
+    });
+    // autoRerollShop only fires on a dead shop, so re-kill the unit stalls
+    // before each call rather than chaining off the (now-alive) result. Vary
+    // the roll counter per iteration to sample independent rolls, not the
+    // same one 100 times.
+    for (let i = 0; i < 100; i++) {
+      const seeded = { ...dead(maxed), shop: { ...dead(maxed).shop, rolls: i } };
+      const s = must(autoRerollShop(seeded, GPU)).state;
+      expect(s.shop.slots.some((slot) => slot.kind === 'unit' && slot.defId === 'dire-rat')).toBe(false);
+    }
+  });
+
+  it('advanceAfterDawn carries the exclusion into the very first roll of the new day, not just future rerolls', () => {
+    const maxed: BuildState = { ...newBuild('2026-08-10', 3), board: [{ defId: 'dire-rat', tier: 3, relicIds: [] }] };
+    const dateAt = (n: number) =>
+      new Date(Date.parse('2026-08-11T12:00:00Z') + n * 86_400_000).toISOString().slice(0, 10);
+    // Sample many independent next-dates: the initial roll (roll=0) is what
+    // this test is about, so vary the date rather than rerolling.
+    for (let d = 0; d < 20; d++) {
+      const next = advanceAfterDawn(maxed, dateAt(d), GPU);
+      expect(next.shop.slots.some((slot) => slot.kind === 'unit' && slot.defId === 'dire-rat')).toBe(false);
+    }
+    // Without the anomaly, the same maxed board does NOT suppress dire-rat
+    // from the new day's roll — confirms the exclusion is anomaly-gated.
+    let sawIt = false;
+    for (let d = 0; d < 50 && !sawIt; d++) {
+      const next = advanceAfterDawn(maxed, dateAt(d));
+      sawIt = next.shop.slots.some((slot) => slot.kind === 'unit' && slot.defId === 'dire-rat');
+    }
+    expect(sawIt).toBe(true);
+  });
+
+  it('bonusBoardSlots is granted once at the week start, not re-granted every dawn', () => {
+    const day1 = newBuild('2026-08-10', 1, [], [], GPU.bonusBoardSlots);
+    expect(day1.purchasedSlots).toBe(1);
+
+    let build = day1;
+    for (let day = 1; day < SEASON_DAYS; day++) {
+      build = advanceAfterDawn(build, `2026-08-${11 + day - 1}`, GPU);
+      // purchasedSlots carries forward unchanged — advanceAfterDawn always
+      // overwrites whatever newBuild set with the outgoing build's own value.
+      expect(build.purchasedSlots).toBe(1);
+    }
+  });
+
+  it('without the anomaly, no bonus slot is granted', () => {
+    expect(newBuild('2026-08-10', 1).purchasedSlots).toBe(0);
+  });
+
+  it('sets no gauntlet override — the fight itself is byte-identical to a clean week', () => {
+    const under = generateGauntlet('2026-08-10', 3, undefined, GPU);
+    const clean = generateGauntlet('2026-08-10', 3);
+    expect(under.waves).toEqual(clean.waves);
+    expect(under.theme).toEqual(clean.theme);
+    expect(under.seed).toBe(clean.seed);
+    expect(under.anomalyId).toBe('grown-past-use'); // only the label differs
   });
 });

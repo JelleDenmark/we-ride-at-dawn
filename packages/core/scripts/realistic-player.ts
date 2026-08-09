@@ -85,7 +85,7 @@ import { UNIT_DEFS, type TimeOfDay } from '../src/data/units';
 import { RELIC_DEFS } from '../src/data/relics';
 
 // Optional weekly-anomaly A/B (issue #141):
-//   ANOMALY=one-warren npx tsx scripts/realistic-player.ts
+//   ANOMALY=grown-past-use npx tsx scripts/realistic-player.ts
 // runs the whole 16-season sim with that anomaly applied to every week. The
 // maxed-board guardrail answers "does this break the ceiling"; this answers
 // the question that actually decides whether an anomaly is worth shipping —
@@ -343,7 +343,7 @@ function spendLookahead(build: BuildState, g: Gauntlet, stats: SpendStats): Buil
     // Nothing improves the fight: fish. Free refresh first if the shop's
     // rat stalls are all bought out, then paid rerolls down to the floor.
     if (isShopDead(s)) {
-      const r = autoRerollShop(s);
+      const r = autoRerollShop(s, ANOMALY);
       if (r.ok) {
         s = r.state;
         continue;
@@ -354,7 +354,7 @@ function spendLookahead(build: BuildState, g: Gauntlet, stats: SpendStats): Buil
     // "deliberate investor" never actually reaches a slot price (the exact
     // starvation trap snowball.ts's step 2.5 comment describes for relics).
     if (rerolls < MAX_REROLLS_PER_HOUR && s.scrap - REROLL_COST >= Math.max(SPEND_FLOOR - 2, reserve)) {
-      const r = rerollShop(s);
+      const r = rerollShop(s, ANOMALY);
       if (r.ok) {
         s = r.state;
         rerolls++;
@@ -442,7 +442,7 @@ function spendGreedy(build: BuildState): BuildState {
     }
 
     if (rerolls < GREEDY_MAX_REROLLS && s.scrap > 1) {
-      const r = rerollShop(s);
+      const r = rerollShop(s, ANOMALY);
       if (r.ok) {
         s = r.state;
         rerolls++;
@@ -478,7 +478,7 @@ type Policy = (build: BuildState, g: Gauntlet, stats: SpendStats) => BuildState;
 
 function runWeek(startDate: string, policy: Policy): SeedRun {
   const stats: SpendStats = { rerolls: 0, actions: 0 };
-  let build = newBuild(startDate, 1);
+  let build = newBuild(startDate, 1, [], [], ANOMALY?.bonusBoardSlots ?? 0);
   build = policy(build, gauntletFor(build), stats);
 
   const samples: HourSample[] = [];
@@ -496,7 +496,7 @@ function runWeek(startDate: string, policy: Policy): SeedRun {
     build = policy(build, g, stats);
 
     if ((h + 1) % HOURS_PER_DAY === 0 && h + 1 < TOTAL_HOURS) {
-      build = advanceAfterDawn(build, addDay(build.date, build.day));
+      build = advanceAfterDawn(build, addDay(build.date, build.day), ANOMALY);
       build = policy(build, gauntletFor(build), stats);
     }
   }

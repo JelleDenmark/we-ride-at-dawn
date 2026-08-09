@@ -55,10 +55,9 @@ import { fnv1a } from './seed';
  * 3. **No carve-outs from the Compounding Law (ADR-0003).** #141 explicitly
  *    rejects candidates like "poison persists across waves this week." The
  *    horde is one persistent object across 45 waves; a weekly exemption from
- *    the cap rule is how you ship the next Warren-Warden. Note that every
- *    launch anomaly is a `generateGauntlet` override and touches `simulate`
- *    not at all — that is deliberate for v1, and it means the trio carries
- *    zero compounding surface by construction.
+ *    the cap rule is how you ship the next Warren-Warden. Note that no
+ *    anomaly here touches `simulate` — that is deliberate for v1, and it
+ *    means the pool carries zero compounding surface by construction.
  */
 export interface GauntletOverrides {
   /** Fraction of each wave's budget force-spent on the primary (base 0.6). */
@@ -69,6 +68,22 @@ export interface GauntletOverrides {
   pivotWave?: number;
   /** Bodies allowed in one wave (base `WAVE_UNIT_CAP` = 5). */
   waveUnitCap?: number;
+}
+
+/**
+ * Shop-side override — absent (`undefined`) for every anomaly through
+ * `two-warrens`. Grown Past Use (#165 Part 2 follow-up) is the first
+ * exception to the "anomalies only override `generateGauntlet`" rule from
+ * this file's header: it reaches into `rollOfferings` instead, so it carries
+ * zero `simulate`/compounding surface (ADR-0003 still holds — this never
+ * touches a unit's in-battle behavior) but is the first to touch the economy.
+ */
+export interface ShopOverrides {
+  /** Once any copy of a unit reaches `MAX_TIER` on board or bench, exclude
+   * it from the shop's unit pool for the rest of the week (`shop.ts`'s
+   * `shopExclusionsFor`, re-derived live every roll — same mechanism as the
+   * existing owned-team-relic filter). */
+  excludeMaxedUnits?: boolean;
 }
 
 export interface AnomalyDef {
@@ -91,14 +106,30 @@ export interface AnomalyDef {
    */
   distorting: boolean;
   gauntlet: GauntletOverrides;
+  /** See `ShopOverrides`. Absent = no shop-side effect (every anomaly before
+   * Grown Past Use). */
+  shop?: ShopOverrides;
+  /**
+   * Extra board slots granted for the week, free — the stated Trial
+   * compensation (Twist/Trial split, posted to #165) for whatever tax the
+   * anomaly levies. 0/absent for every Twist (no cost, no compensation
+   * needed). Applied once, at the week's first `newBuild` — never re-granted
+   * per dawn, see `advanceAfterDawn`.
+   */
+  bonusBoardSlots?: number;
 }
 
 /**
- * The launch trio. All three are pure `generateGauntlet` overrides — no
- * `simulate` change, no economy change, no new trigger — which is what makes
- * them the safe first cut per #141's "safe by construction" classification.
+ * `one-warren`, `teeming-dark`, and `two-warrens` (the original launch trio,
+ * all pure `generateGauntlet` overrides) were removed 2026-08-08: they read
+ * as "same game, different flavor text" in play, and Grown Past Use is the
+ * only entry that changes how the week is actually built (the board you can
+ * field) rather than just reshaping enemy wave composition. `ANOMALY_DEFS`
+ * having a single entry is intentional, not a placeholder — `anomalyFor`
+ * degenerates to "every season past `ANOMALY_FIRST_SEASON` draws Grown Past
+ * Use" as a result, which is correct.
  *
- * Deliberately NOT in v1:
+ * Deliberately NOT here:
  *   - Bounty Run / any scrap multiplier — #141 requires a fresh
  *     `npm run snowball` audit first; economy multipliers are the one
  *     category that can re-open the snowball question.
@@ -113,64 +144,55 @@ export interface AnomalyDef {
  * the middle re-maps which anomaly every future season draws. Append only.
  */
 export const ANOMALY_DEFS: Record<string, AnomalyDef> = {
-  'one-warren': {
-    id: 'one-warren',
-    name: 'One Warren',
-    blurb: 'One warren rides this week, and it has emptied itself into the dark.',
-    // Mono-theme week. A clean wave force-spends 60% of its budget on the
-    // primary and 25% on the secondary, with the remainder rolled free
-    // across all archetypes — so no season can ever be much more than 60%
-    // one thing. 0.9 is a shape the generator has never produced. WHICH
-    // archetype it commits to is still the season's own roll, per rule 2b,
-    // so this plays as a different puzzle each time it comes up.
-    // Measured neutral: Δavg +0.05..+0.24, ΔMAX 0..+1 across all three
-    // maxed comps (scripts/anomaly-guardrail.ts).
-    distorting: false,
-    gauntlet: { primaryShare: 0.9 },
-  },
-  'teeming-dark': {
-    id: 'teeming-dark',
-    name: 'Teeming Dark',
-    blurb: 'The tunnels will not hold them all. They come anyway, one rank too deep.',
-    // WAVE_UNIT_CAP has been 5 for the whole life of the game, so this is
-    // the clearest "the rules moved" signal available without touching the
-    // sim. Front-clash means a 6th body is mostly queue depth rather than
-    // extra simultaneous damage, which is why one more rank costs a maxed
-    // board only about a wave and a half instead of collapsing it.
-    // Re-measured against the current roster (`balance:anomaly`, post
-    // unit-churn): Δavg -1.56..-1.65, ΔMAX -1 on two comps but -3 on
-    // press-kin-core — the worst comp decides, and -3 breaches the ±2
-    // threshold. Flipped from the original launch measurement (Δavg
-    // -1.2..-1.8, ΔMAX -1 flat, all inside threshold at the time). Still the
-    // only entry meaningfully HARDER than a clean week; held back with the
-    // other depth-distorting candidates until the season-6 board partition,
-    // per #165 Part 1 — not gated out of ANOMALY_DEFS today since nothing
-    // yet consumes this flag at runtime.
-    distorting: true,
-    gauntlet: { waveUnitCap: 6 },
-  },
-  'two-warrens': {
-    id: 'two-warrens',
-    name: 'Two Warrens',
-    blurb: 'Two warrens ride together this week. Neither waits its turn.',
-    // The secondary normally musters from wave 4–7 at a 0.25 share against
-    // the primary's 0.6, so a clean week always opens single-archetype and
-    // never stops being primary-dominated. pivotWave 1 plus an even 0.45/0.45
-    // split makes the week genuinely two-headed from the first clash — the
-    // counter-building decision moves to wave 1, and neither archetype is the
-    // one you can afford to ignore.
+  'grown-past-use': {
+    id: 'grown-past-use',
+    name: 'Grown Past Use',
+    // This blurb is the ONLY player-facing explanation of the anomaly — there
+    // is no rules panel, no hint when an excluded unit stops appearing, and
+    // nothing else announces `bonusBoardSlots`. So it has to carry the trigger
+    // (★3), the duration (the week) and the compensation (the slot), not just
+    // atmosphere. The pure-flavour blurbs the removed launch trio used were
+    // fine for anomalies that only reshaped what you FOUGHT; this one changes
+    // what you can BUILD, and an unexplained unit vanishing from the shop
+    // reads as a bug. Rewritten 2026-08-09 (Jesper) — the original second
+    // clause ("the warren spends its scrap where it hasn't spoken yet") had an
+    // unresolvable pronoun, a metaphor with no in-game referent, and implied
+    // the player's scrap was redirected when only the shop's offer pool
+    // changes. Same class of copy bug as issue #50 (Ward-Weaver's ambiguous
+    // pronoun); keep future anomaly blurbs concrete for the same reason.
+    blurb: 'Take a rat to ★3 and the shop is done with its kind for the week. One extra slot to ride with — small comfort.',
+    // A Trial, not a Twist (#165's Twist/Trial split): a real tax on whoever
+    // built around a strong tier-3 carry, so it ships with the stated
+    // same-week compensation below rather than reading as "just harder" —
+    // per the design-bank rule this issue's design-refresh comment set.
     //
-    // The even split is load-bearing, not flavour. The first cut kept the
-    // primary at 0.6 and merely raised the secondary to 0.4, which measured
-    // as a NO-OP on 62 of 200 seasons: the secondary phase is bounded by what
-    // its archetype can afford out of the wave budget, not by its quota, so
-    // raising the quota alone frequently changes nothing and the week would
-    // have announced an anomaly that wasn't there. Lowering the PRIMARY is
-    // what actually frees the budget. Now 0/200 no-ops, 33.5 of 45 waves
-    // changed per season.
-    // Measured neutral: Δavg -0.14, ΔMAX 0.
+    // `distorting` measures whether an ALREADY-MAXED board's depth ceiling
+    // moves against the CLEAN gauntlet (anomaly-guardrail.ts's method) — this
+    // anomaly sets no `gauntlet` override at all, so that measurement is
+    // trivially zero and `false` here is correct BY THAT DEFINITION, but it
+    // is not the number that matters for this entry. This anomaly's real
+    // cost lands entirely on which boards are BUILDABLE during the week, not
+    // on enemy composition, so the guardrail that actually speaks to it is a
+    // `balance:realistic`-shaped economy pass with the exclusion wired into
+    // the shop calls, not `balance:anomaly`. See
+    // `scripts/grown-past-use-reachability-probe.ts`: the exclusion makes any
+    // comp needing two tier-3 copies of the SAME defId (`original`,
+    // `press-kin-core` in both guardrail fixtures) structurally unreachable —
+    // a hard 12-base-copy ceiling against the 18 two tier-3s need, confirmed
+    // empirically, not a probability question. That's an intended
+    // consequence of the mechanic as specified, not a bug — those fixtures
+    // need a documented exception for anomaly weeks, not this anomaly needing
+    // a carve-out.
     distorting: false,
-    gauntlet: { primaryShare: 0.45, secondaryShare: 0.45, pivotWave: 1 },
+    gauntlet: {},
+    shop: { excludeMaxedUnits: true },
+    // Reuses `purchasedSlots` (an existing player-local upgrade, normally
+    // bought with scrap) rather than a scrap discount — same reasoning that
+    // made Rat of Wealth the safe v1 patron pick in the #165 thread: no new
+    // sync/anti-cheat surface, nothing to re-derive server-side beyond what
+    // `verify-scores` already ignores (the shop journey itself is never
+    // synced, only the final board).
+    bonusBoardSlots: 1,
   },
 };
 

@@ -1116,7 +1116,7 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     // attack is linear, fixes the early-game "does nothing itself" feel
     // without touching the part of the kit that already tops the tier list.
     id: 'warren-warden', name: 'Warren-Warden', attack: 3, health: 6, cost: 6,
-    ability: { trigger: 'startOfBattle', effect: { kind: 'buffBehind', attack: 1, health: 1, all: true } },
+    ability: { trigger: 'startOfBattle', effect: { kind: 'buffBehind', attack: 2, health: 1, all: true } },
     tribe: 'brute',
   },
   'dire-rat': {
@@ -1136,7 +1136,7 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     // compatibility — see shop.ts) stays numerically identical to its live
     // twin. Not un-retired; do not add back to the shop pool here.
     id: 'md-rattyfock', name: 'MD Rattyfock', attack: 3, health: 6, cost: 6,
-    ability: { trigger: 'startOfBattle', effect: { kind: 'buffBehind', attack: 1, health: 1, all: true } },
+    ability: { trigger: 'startOfBattle', effect: { kind: 'buffBehind', attack: 2, health: 1, all: true } },
     // unlockDay dropped (#149, 2026-07-25): MD Rattyfock is now the live twin
     // of this reskin pair, taking over Warren-Warden's old day-1-available
     // role — a straight swap, not a partial one.
@@ -1243,7 +1243,7 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   // the art (see mbp-rat.svg). Stats/ability are a byte-for-byte carryover,
   // not a fresh tune — balance sign-off already covers Slink-Rat's numbers.
   'mbp-rat': {
-    id: 'mbp-rat', name: 'MBP Rat', attack: 3, health: 1, cost: 6,
+    id: 'mbp-rat', name: 'MBP Rat', attack: 4, health: 1, cost: 6,
     ability: { trigger: 'startOfWave', effect: { kind: 'backlineDamage' } },
   },
   // Issue #110: single-unit fusion of the Dawn-Runt/Dusk-Runt pair above —
@@ -1350,7 +1350,7 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   // comment above for why that targeting choice IS the compounding-law
   // safety, and don't move it onto a persistent unit without a hard cap.
   'squeak-sensei': {
-    id: 'squeak-sensei', name: 'Squeak-Sensei', attack: 2, health: 3, cost: 5,
+    id: 'squeak-sensei', name: 'Squeak-Sensei', attack: 2, health: 4, cost: 5,
     ability: { trigger: 'allySummoned', effect: { kind: 'buffSummoned', attack: 1, health: 1 } },
     tribe: 'swarm',
   },

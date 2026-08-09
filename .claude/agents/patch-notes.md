@@ -40,6 +40,8 @@ The game's voice is grimy, terse, and lowercase-leaning. Rats are expendable. Th
 
 Write for a player, not an engineer:
 - **Lead with what changed for them**, not the internals. "Two Bone-Priests could raise each other forever" beats "the `fallen` array was re-populated on death".
+- **Never print an internal reference.** No issue numbers, commit SHAs, PR links, branch names, file paths, or internal codenames — not in the title, body, or footer. Players read a changelog, not a tracker. (Jesper's call, 2026-08-09.) Trace every claim to a commit in your own notes; just don't ship the citation.
+- **Never describe content the player never experienced.** Before naming something as removed, retired, or replaced, check whether it actually ran a live season on prod — not merely whether it existed in the repo. Content cut on `dev`, or removed before its first live week, does not exist from the reader's seat, and framing a change as "replaces X" makes them feel they missed something that was never there. This flips the framing of whole sections: a system's first live week is a **debut**, not a swap, no matter how much churn preceded it in git. (Jesper's call, 2026-08-09.)
 - Name the units, relics and numbers players recognise. A depth number is worth a paragraph of prose.
 - Be honest when something was broken and topped the leaderboard. This community found the last bug for us; treat them as collaborators, not an audience to manage.
 - Short. A patch note is read on a phone between rides. Three to six bullets.
@@ -63,6 +65,52 @@ A Discord embed. Structure:
 ```
 
 `color` 5793266 matches the existing feedback panel. Use `•` bullets (Discord renders `-` lists inconsistently on mobile). Keep the description under ~1500 characters.
+
+### Structure (League-of-Legends-style, Jesper's call 2026-08-09)
+
+Model the layout on a game patch note, not a prose announcement — it should be
+skimmable in one thumb-scroll:
+
+1. **One framing line.** What this patch is about, in a sentence.
+2. **New systems / headline feature first**, under a bold ALL-CAPS heading.
+3. **Then mode or economy changes**, grouped by where the player meets them
+   (`PVP LEAGUE`, `THE DRAINS`, …).
+4. **Then a tuning block** — `BUFFS`, `NERFS`, `ADJUSTMENTS` as separate
+   headings, so a player can find their own rats instantly.
+
+For tuning, state the numbers as an explicit **before ⇒ after** pair, unit name
+bolded:
+
+```
+• **MBP Rat** — attack: 3 ⇒ **4**
+• **Warren-Warden & MD Rattyfock** — line buff: +1/+1 ⇒ **+2/+1**
+```
+
+A number pair is more legible than prose and lets a player check their own
+board without interpreting a sentence. Give **one short intent line per group**
+(why this batch of buffs happened), not a justification per bullet — per-bullet
+rationale is how a patch note turns into an essay. Mechanics that are still
+open design questions stay qualitative: describe the felt change, omit the
+formula.
+
+## Images / unit art
+
+If a post includes unit art, it must render **inline as a picture in the message**, not as a bare file attachment the reader has to click to open.
+
+- Source art lives as SVG (`packages/app/src/replay/art/<unit-id>.svg`). Discord does **not** preview SVGs inline — it shows them as a generic file/download link. Never post the raw `.svg`.
+- Convert to PNG first, e.g.:
+  ```bash
+  npx --yes resvg-cli --fit-width 512 packages/app/src/replay/art/<unit-id>.svg /tmp/art/<unit-id>.png
+  ```
+- **Windows-curl path gotcha:** the `curl` on this machine is a native Windows build (`x86_64-w64-mingw32`) — it cannot open MSYS/git-bash POSIX paths like `/tmp/art/foo.png`. Pass Windows-style paths instead, e.g. `C:/Users/jespe/AppData/Local/Temp/art/foo.png`.
+- To keep the picture and its blurb in the *same* message (not a separate image-only message), embed it: upload the PNG as a multipart file and reference it from the embed with `"image": {"url": "attachment://<filename>.png"}`, where `<filename>.png` matches the multipart field's filename exactly. One embed per unit works well — each gets its own title/description/image, all in one Discord message. Example curl shape:
+  ```bash
+  curl -sS -X POST "https://discord.com/api/v10/channels/${CHANNEL_ID}/messages" \
+    -H "Authorization: Bot ${DISCORD_BOT_TOKEN}" \
+    -H "User-Agent: DiscordBot (...)" \
+    -F 'payload_json={"embeds":[{"title":"...","description":"...","image":{"url":"attachment://dire-rat.png"}}]};type=application/json' \
+    -F "files[0]=@C:/path/to/dire-rat.png"
+  ```
 
 ## When you finish
 

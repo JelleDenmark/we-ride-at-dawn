@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { anomalyFor, ANOMALY_DEFS, ANOMALY_FIRST_SEASON } from '../src/anomaly';
-import { generateGauntlet, WAVE_UNIT_CAP } from '../src/gauntlet';
+import { generateGauntlet } from '../src/gauntlet';
 
 /** Mondays, walking forward from a given one. */
 const mondaysFrom = (start: string, count: number): string[] =>
@@ -11,8 +11,6 @@ const mondaysFrom = (start: string, count: number): string[] =>
   });
 
 const SEASONS = mondaysFrom(ANOMALY_FIRST_SEASON, 40);
-const maxWaveSize = (waves: { units: unknown[] }[]) =>
-  waves.reduce((m, w) => Math.max(m, w.units.length), 0);
 
 describe('anomalyFor', () => {
   it('is a pure function of the season id', () => {
@@ -37,10 +35,12 @@ describe('anomalyFor', () => {
     expect(drawn).toEqual(new Set(Object.keys(ANOMALY_DEFS)));
   });
 
-  it('does not hand out the same anomaly every week', () => {
-    const firstFive = SEASONS.slice(0, 5).map((s) => anomalyFor(s)?.id);
-    expect(new Set(firstFive).size).toBeGreaterThan(1);
-  });
+  // With a single-entry pool (only Grown Past Use remains, 2026-08-08 —
+  // one-warren/teeming-dark/two-warrens removed for not sufficiently
+  // changing how the week plays out), every season past
+  // ANOMALY_FIRST_SEASON draws the same anomaly by construction. That is
+  // correct, not a bug; the old "does not hand out the same anomaly every
+  // week" check no longer applies to a pool of one.
 });
 
 // The single most important regression check in the anomaly work: a clean
@@ -78,9 +78,19 @@ describe('anomaly overrides actually change the week', () => {
   // needs to be a valid season day, not inside the live window.
   const date = '2026-08-05';
 
-  it('every anomaly produces a gauntlet different from the clean one', () => {
+  // Grown Past Use (#165 Part 2) is the first SHOP-side anomaly: it sets no
+  // `gauntlet` override at all, so `generateGauntlet` is byte-identical to a
+  // clean week under it, by design — its promise is enforced in the shop
+  // (see the "Grown Past Use" describe block below), not here. The two tests
+  // in this block are specifically about gauntlet reshaping, so they only
+  // apply to anomalies that set one.
+  const gauntletAnomalies = Object.values(ANOMALY_DEFS).filter(
+    (a) => Object.keys(a.gauntlet).length > 0
+  );
+
+  it('every gauntlet-shaping anomaly produces a gauntlet different from the clean one', () => {
     const cleanWaves = JSON.stringify(generateGauntlet(date, 3).waves);
-    for (const anomaly of Object.values(ANOMALY_DEFS)) {
+    for (const anomaly of gauntletAnomalies) {
       const under = generateGauntlet(date, 3, undefined, anomaly);
       expect(JSON.stringify(under.waves)).not.toBe(cleanWaves);
       expect(under.anomalyId).toBe(anomaly.id);
@@ -94,7 +104,7 @@ describe('anomaly overrides actually change the week', () => {
     // of 200 seasons — the app would have announced an anomaly and dealt a
     // clean week. An anomaly that sometimes does nothing is worse than no
     // anomaly, because the banner is a promise.
-    for (const anomaly of Object.values(ANOMALY_DEFS)) {
+    for (const anomaly of gauntletAnomalies) {
       let noopSeasons = 0;
       let changedWaves = 0;
       for (const s of SEASONS) {
@@ -128,42 +138,6 @@ describe('anomaly overrides actually change the week', () => {
         expect(theme.primary).not.toBe(theme.secondary);
       }
     }
-  });
-
-  it('One Warren commits the week to the season’s own primary', () => {
-    // Checked across seasons, not one date: the whole point is that the
-    // archetype it commits to varies with the season's roll.
-    for (const s of SEASONS.slice(0, 12)) {
-      const g = generateGauntlet(s, 3, undefined, ANOMALY_DEFS['one-warren']);
-      const all = g.waves.flatMap((w) => w.units);
-      const share = all.filter((u) => u.archetype === g.theme.primary).length / all.length;
-      const cleanAll = generateGauntlet(s, 3).waves.flatMap((w) => w.units);
-      const cleanShare =
-        cleanAll.filter((u) => u.archetype === g.theme.primary).length / cleanAll.length;
-      expect(share).toBeGreaterThan(cleanShare);
-      expect(share).toBeGreaterThan(0.7);
-    }
-  });
-
-  it('Teeming Dark raises the per-wave body cap by exactly one', () => {
-    const clean = generateGauntlet(date, 3);
-    const teeming = generateGauntlet(date, 3, undefined, ANOMALY_DEFS['teeming-dark']);
-    expect(maxWaveSize(clean.waves)).toBe(WAVE_UNIT_CAP);
-    expect(maxWaveSize(teeming.waves)).toBe(WAVE_UNIT_CAP + 1);
-  });
-
-  it('Two Warrens musters the secondary from the very first wave', () => {
-    const anomaly = ANOMALY_DEFS['two-warrens'];
-    const g = generateGauntlet(date, 3, undefined, anomaly);
-    expect(g.theme.pivotWave).toBe(1);
-    // Clean weeks always open single-archetype (pivot rolls 4–7); this week
-    // must not.
-    const clean = generateGauntlet(date, 3);
-    expect(clean.theme.pivotWave).toBeGreaterThanOrEqual(4);
-    const earlySecondary = g.waves
-      .slice(0, 3)
-      .some((w) => w.units.some((u) => u.archetype === g.theme.secondary));
-    expect(earlySecondary).toBe(true);
   });
 
   it('leaves the wave count and the season seed alone', () => {
