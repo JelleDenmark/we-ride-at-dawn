@@ -1,0 +1,8 @@
+{
+  "embeds": [{
+    "title": "v0.8.0 — the rules start moving",
+    "description": "Until now every week ran the same rules. Not anymore.\n\n**NEW — WEEKLY ANOMALIES**\nEvery season now rides under one rule that bends the whole week. This week:\n\n**Grown Past Use**\nTake a rat to **★3** and the shop is done with its kind for the week — no more copies, on board or bench.\nYou ride with **+1 board slot**, free, all week. Small comfort.\n\n**PVP LEAGUE**\n• Nightly duel: **20:00 ⇒ 22:00 CET**\n• Win value: **3 ⇒ 2 points** the week's first two nights, back to 3 from the third — the table shouldn't be decided before it's warm.\n• Poison now fades as a fight drags instead of biting at full strength forever. The longest duels feel it most. Merging a poison rat still scales; resist still can't cancel it outright.\n• Duel replays now end on **VICTORY / DEFEAT / DRAW**.\n\n**BUFFS**\n• **Warren-Warden & MD Rattyfock** — line buff: +1/+1 ⇒ **+2/+1**\n• **MBP Rat** — attack: 3 ⇒ **4**\n• **Squeak-Sensei** — health: 3 ⇒ **4**\n• **Grave-Leech** — health: 6 ⇒ **7**\n• **Gutter-Acolyte** — health: 3 ⇒ **4**",
+    "color": 5793266,
+    "footer": { "text": "we ride at dawn · season resets monday 06:00 CET" }
+  }]
+}
