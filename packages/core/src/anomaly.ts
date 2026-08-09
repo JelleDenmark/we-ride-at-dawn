@@ -147,7 +147,20 @@ export const ANOMALY_DEFS: Record<string, AnomalyDef> = {
   'grown-past-use': {
     id: 'grown-past-use',
     name: 'Grown Past Use',
-    blurb: "A rat that's proven itself gets no reinforcements. The warren spends its scrap where it hasn't spoken yet.",
+    // This blurb is the ONLY player-facing explanation of the anomaly — there
+    // is no rules panel, no hint when an excluded unit stops appearing, and
+    // nothing else announces `bonusBoardSlots`. So it has to carry the trigger
+    // (★3), the duration (the week) and the compensation (the slot), not just
+    // atmosphere. The pure-flavour blurbs the removed launch trio used were
+    // fine for anomalies that only reshaped what you FOUGHT; this one changes
+    // what you can BUILD, and an unexplained unit vanishing from the shop
+    // reads as a bug. Rewritten 2026-08-09 (Jesper) — the original second
+    // clause ("the warren spends its scrap where it hasn't spoken yet") had an
+    // unresolvable pronoun, a metaphor with no in-game referent, and implied
+    // the player's scrap was redirected when only the shop's offer pool
+    // changes. Same class of copy bug as issue #50 (Ward-Weaver's ambiguous
+    // pronoun); keep future anomaly blurbs concrete for the same reason.
+    blurb: 'Take a rat to ★3 and the shop is done with its kind for the week. One extra slot to ride with — small comfort.',
     // A Trial, not a Twist (#165's Twist/Trial split): a real tax on whoever
     // built around a strong tier-3 carry, so it ships with the stated
     // same-week compensation below rather than reading as "just harder" —
