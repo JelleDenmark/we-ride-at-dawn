@@ -2040,65 +2040,6 @@ function generateGauntlet(date, day = 1, hour, anomaly) {
 
 // packages/core/src/anomaly.ts
 var ANOMALY_DEFS = {
-  "one-warren": {
-    id: "one-warren",
-    name: "One Warren",
-    blurb: "One warren rides this week, and it has emptied itself into the dark.",
-    // Mono-theme week. A clean wave force-spends 60% of its budget on the
-    // primary and 25% on the secondary, with the remainder rolled free
-    // across all archetypes — so no season can ever be much more than 60%
-    // one thing. 0.9 is a shape the generator has never produced. WHICH
-    // archetype it commits to is still the season's own roll, per rule 2b,
-    // so this plays as a different puzzle each time it comes up.
-    // Measured neutral: Δavg +0.05..+0.24, ΔMAX 0..+1 across all three
-    // maxed comps (scripts/anomaly-guardrail.ts).
-    distorting: false,
-    gauntlet: { primaryShare: 0.9 }
-  },
-  "teeming-dark": {
-    id: "teeming-dark",
-    name: "Teeming Dark",
-    blurb: "The tunnels will not hold them all. They come anyway, one rank too deep.",
-    // WAVE_UNIT_CAP has been 5 for the whole life of the game, so this is
-    // the clearest "the rules moved" signal available without touching the
-    // sim. Front-clash means a 6th body is mostly queue depth rather than
-    // extra simultaneous damage, which is why one more rank costs a maxed
-    // board only about a wave and a half instead of collapsing it.
-    // Re-measured against the current roster (`balance:anomaly`, post
-    // unit-churn): Δavg -1.56..-1.65, ΔMAX -1 on two comps but -3 on
-    // press-kin-core — the worst comp decides, and -3 breaches the ±2
-    // threshold. Flipped from the original launch measurement (Δavg
-    // -1.2..-1.8, ΔMAX -1 flat, all inside threshold at the time). Still the
-    // only entry meaningfully HARDER than a clean week; held back with the
-    // other depth-distorting candidates until the season-6 board partition,
-    // per #165 Part 1 — not gated out of ANOMALY_DEFS today since nothing
-    // yet consumes this flag at runtime.
-    distorting: true,
-    gauntlet: { waveUnitCap: 6 }
-  },
-  "two-warrens": {
-    id: "two-warrens",
-    name: "Two Warrens",
-    blurb: "Two warrens ride together this week. Neither waits its turn.",
-    // The secondary normally musters from wave 4–7 at a 0.25 share against
-    // the primary's 0.6, so a clean week always opens single-archetype and
-    // never stops being primary-dominated. pivotWave 1 plus an even 0.45/0.45
-    // split makes the week genuinely two-headed from the first clash — the
-    // counter-building decision moves to wave 1, and neither archetype is the
-    // one you can afford to ignore.
-    //
-    // The even split is load-bearing, not flavour. The first cut kept the
-    // primary at 0.6 and merely raised the secondary to 0.4, which measured
-    // as a NO-OP on 62 of 200 seasons: the secondary phase is bounded by what
-    // its archetype can afford out of the wave budget, not by its quota, so
-    // raising the quota alone frequently changes nothing and the week would
-    // have announced an anomaly that wasn't there. Lowering the PRIMARY is
-    // what actually frees the budget. Now 0/200 no-ops, 33.5 of 45 waves
-    // changed per season.
-    // Measured neutral: Δavg -0.14, ΔMAX 0.
-    distorting: false,
-    gauntlet: { primaryShare: 0.45, secondaryShare: 0.45, pivotWave: 1 }
-  },
   "grown-past-use": {
     id: "grown-past-use",
     name: "Grown Past Use",

@@ -85,7 +85,7 @@ import { UNIT_DEFS, type TimeOfDay } from '../src/data/units';
 import { RELIC_DEFS } from '../src/data/relics';
 
 // Optional weekly-anomaly A/B (issue #141):
-//   ANOMALY=one-warren npx tsx scripts/realistic-player.ts
+//   ANOMALY=grown-past-use npx tsx scripts/realistic-player.ts
 // runs the whole 16-season sim with that anomaly applied to every week. The
 // maxed-board guardrail answers "does this break the ceiling"; this answers
 // the question that actually decides whether an anomaly is worth shipping —
