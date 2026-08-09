@@ -1,0 +1,24 @@
+{
+  "content": "**the drains open wider tomorrow.** day gate 2 unlocks three new rats — all three drop into your shop after 06:00 CET. scrap up.",
+  "embeds": [
+    {
+      "title": "🛡️ Dire-Rat — 4/5, cost 8",
+      "description": "shrugs off 2 damage from every hit it takes — poison still gets through. plant it up front and let the drains waste their swings.",
+      "color": 5793266,
+      "image": { "url": "attachment://dire-rat.png" }
+    },
+    {
+      "title": "🩺 MD Rattyfock — 2/6, cost 6",
+      "description": "a reskin of Warren-Warden, raised in RatKing's name — season 1's champion, riding the rat that got them there. same battle-start buff to the line behind it, dialed back: fires once now, not every wave like the legend did.",
+      "color": 5793266,
+      "image": { "url": "attachment://md-rattyfock.png" }
+    },
+    {
+      "title": "🧵 Ward-Weaver — 1/3, cost 6",
+      "description": "wards the front of the line each wave — blocks the first hit outright (★2 blocks 2, ★3 blocks 3), then resets clean next wave.\n\nthree picks, three jobs: one eats hits, one starts the fight ahead, one no-sells the first blow. day 2, the shop gets honest.",
+      "color": 5793266,
+      "image": { "url": "attachment://ward-weaver.png" },
+      "footer": { "text": "we ride at dawn · day gate 2 unlocks 06:00 CET" }
+    }
+  ]
+}
