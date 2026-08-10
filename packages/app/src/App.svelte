@@ -394,12 +394,12 @@
   // Which rival's board the scout panel is expanded to, by player_id (null =
   // collapsed). One at a time keeps the panel phone-sized.
   let scoutedGhost = $state<string | null>(null);
-  // DESIGN PREVIEW toggle (not a shipped feature): lets us compare "basic"
-  // scouting (aggregate rat count + star total only, via `scoutSummary`)
-  // against today's "deep" scouting (exact roster, via `ghostUnits`) on real
-  // synced boards, side by side. Whichever way this gets decided, "deep"
-  // stays useful later as what an accurate-scouting boon would unlock.
-  let scoutLevel = $state<'basic' | 'deep'>('basic');
+  // Scouting shows only the aggregate (rat count + star total, via
+  // `scoutSummary`) — the exact-roster "deep" rendering below (`ghostUnits`,
+  // the expand-to-chips branch) is kept wired but unreachable, ready to
+  // resurface later as what an accurate-scouting boon unlocks. Flip this
+  // constant to 'deep' (or reintroduce a toggle) to bring it back.
+  const scoutLevel: 'basic' | 'deep' = 'basic';
 
   // Season-long totals (issue #157) alongside the existing single-night view
   // and the restored depth board (issue #171), shown as tabs so the panel's
@@ -2084,21 +2084,7 @@
     {/if}
 
     <div class="scout">
-      <div class="scout-head">
-        <p class="lg-caption">scout tonight's rivals · last synced boards</p>
-        <div class="scout-toggle" role="group" aria-label="scouting detail (preview)">
-          <button
-            type="button"
-            class:active={scoutLevel === 'basic'}
-            onclick={() => (scoutLevel = 'basic')}
-          >basic</button>
-          <button
-            type="button"
-            class:active={scoutLevel === 'deep'}
-            onclick={() => (scoutLevel = 'deep')}
-          >deep</button>
-        </div>
-      </div>
+      <p class="lg-caption">scout tonight's rivals · last synced boards</p>
       {#if ghosts.length === 0}
         <p class="lb-empty">{leagueBusy ? 'scouting the drains…' : 'no rivals synced yet this week'}</p>
       {:else}
@@ -3937,40 +3923,6 @@
 
   .scout {
     margin-top: 4px;
-  }
-
-  .scout-head {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 8px;
-  }
-
-  .scout-toggle {
-    display: flex;
-    flex: 0 0 auto;
-    gap: 2px;
-    padding: 2px;
-    background: var(--surface-sunk);
-    border: 1px solid var(--edge-faint);
-    border-radius: 999px;
-  }
-
-  .scout-toggle button {
-    padding: 2px 8px;
-    font-family: inherit;
-    font-size: 11px;
-    color: var(--ink-dim);
-    background: none;
-    border: none;
-    border-radius: 999px;
-    cursor: pointer;
-  }
-
-  .scout-toggle button.active {
-    color: var(--ink-bright);
-    background: var(--surface);
-    box-shadow: 0 1px 0 var(--tarnish);
   }
 
   .scout-list {
