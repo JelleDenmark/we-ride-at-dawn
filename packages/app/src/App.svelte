@@ -644,6 +644,21 @@
   // matching the mechanic) before being removed entirely. If a unit ever
   // needs a description again, extend this function, not `UnitDef` — one
   // generator, one place to keep in sync with sim.ts.
+  //
+  // CONVENTION (ADR-0008, added after the 2026-08-10 Gutter Gourmand report):
+  // the generic path below builds every sentence as
+  // `${TRIGGER_WHEN[trigger]} it ${what}${when}.` — the trigger's literal
+  // firing cadence glued onto the effect. That's only honest when the effect
+  // fires EVERY time its trigger condition is met. The moment an effect
+  // gates its own firing tighter than that (fire-once, phase-based, capped,
+  // or conditioned on board state the trigger name doesn't capture), the
+  // generic preamble overpromises a recurrence that never happens. When that's
+  // true, skip the switch below and add a bespoke `if (e.kind === '…') return
+  // …` branch above it instead — lead with what actually happens, not the
+  // trigger frame. `chargeWhileBenched`, `poisonResist`, `blockFrontHits`,
+  // `distributeStatsOnFaint`, and `teamBuffByWave` all do this already; treat
+  // it as the default question to ask before wiring a NEW effect kind through
+  // the generic switch, not just a fix applied after the fact.
 
   // Shared per-star blurb builder: `mult(t)` is the per-tier stat multiplier,
   // which differs by effect (the 3x `tierAttackMultiplier` curve for fire-once
@@ -768,6 +783,21 @@
       // number already says it's partial.
       return `Wards the whole ${team} against poison, blunting every tick by ${poisonResistForTier(1)} (★2 ${poisonResistForTier(2)} · ★3 ${poisonResistForTier(3)}), capped at ${POISON_RESIST_CAP} across multiple casters.`;
     }
+    if (e.kind === 'teamBuffByWave') {
+      // Bespoke sentence (not the generic trigger/template below): the
+      // generic `${TRIGGER_WHEN['startOfWave']} it ${what}` shape reads "At
+      // the start of every wave, it grants..." — true of the TRIGGER, but
+      // false of the EFFECT. `source.waveBuffPhase` (see sim.ts's
+      // `teamBuffByWave` case) fires this at most twice ever per unit
+      // instance, not every wave; the generic preamble told players to
+      // expect a recurring per-wave grant that never comes (reported
+      // 2026-08-10 against Gutter Gourmand — "nothing happens at the start
+      // of every wave"). Same class of fix as chargeWhileBenched/
+      // poisonResist/blockFrontHits above: when an effect gates its own
+      // firing tighter than its trigger's literal cadence, lead with what
+      // actually happens instead of the trigger frame.
+      return `Grants the whole ${team} ${buffScale(e.early.attack, e.early.health)} on its first wave, plus ${buffScale(e.late.attack, e.late.health)} more from wave ${e.switchWave} onward — both one-time and permanent for the rest of the ride.`;
+    }
     if (e.kind === 'backlineDamage') {
       // Merge scaling grows target count, not per-hit damage (issue #86
       // follow-up) — see `backlineTargetsForTier`'s doc comment in
@@ -862,9 +892,6 @@
         break;
       case 'poisonAllEnemies':
         what = `rots every ${foe} in the wave with ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) — ignores armor, clears when the wave falls, capped across multiple casters`;
-        break;
-      case 'teamBuffByWave':
-        what = `grants the whole ${team} ${buffScale(e.early.attack, e.early.health)} on its first wave, plus ${buffScale(e.late.attack, e.late.health)} more from wave ${e.switchWave} onward — both permanent for the rest of the ride`;
         break;
       case 'buffSummoned':
         // [1, 3, 5] per-star curve (2026-07-25 bump) — the trigger repeats
