@@ -615,6 +615,11 @@
   // ENEMY_POOL, not UNIT_DEFS — abilitySentence's summon case needs both.
   const ENEMY_DEFS: Record<string, UnitDef> = Object.fromEntries(ENEMY_POOL.map((e) => [e.id, e]));
 
+  // `allyFaint`/`allySummoned` hardcode "rat" here rather than taking `own`
+  // — no enemy currently has either trigger, but `abilitySentence` renders
+  // for both sides (issue #146), so this table alone would read backwards on
+  // an enemy card the day one does. `triggerText` below overrides both with
+  // the side-correct `own` before ever falling back to this table.
   const TRIGGER_WHEN: Record<string, string> = {
     startOfBattle: 'At the start of the ride,',
     startOfWave: 'At the start of every wave,',
@@ -772,7 +777,12 @@
       // Bespoke sentence (not the generic template below): the shared-budget
       // caveat (issue #131) doesn't fit the `${TRIGGER_WHEN} it ${what}` shape
       // without an awkward bolt-on clause, same reasoning as chargeWhileBenched.
-      return `When it faints, splits its current attack and max health evenly across the surviving horde (any remainder goes to the frontmost survivors first). All your Pack-Callers draw from one shared pool for this, spent across the ride.`;
+      // "the surviving ${team}" / "every ${def.name} on this side" rather than
+      // a hardcoded "horde"/"your Pack-Callers" (only Pack-Caller uses this
+      // kind today, but the sim's own budget is already keyed by `source.side`
+      // generically — see the `distributeStatsOnFaint` case in sim.ts — so
+      // nothing here should assume horde-only either).
+      return `When it faints, splits its current attack and max health evenly across the surviving ${team} (any remainder goes to the frontmost survivors first). Every ${def.name} on this side draws from one shared pool for this, spent across the ride.`;
     }
     if (e.kind === 'poisonResist') {
       // Bespoke sentence (not the generic trigger template below): it's a
@@ -920,11 +930,18 @@
       : '';
     // startOfBattle reads "at the start of the ride" for the persistent horde
     // (fires once), but enemies are re-instantiated every wave, so for them it
-    // fires each wave — say so (issue #146 finding #2).
+    // fires each wave — say so (issue #146 finding #2). allyFaint/allySummoned
+    // get the same side-override treatment, but for the "rat" hardcoded into
+    // TRIGGER_WHEN rather than the cadence — no enemy has either trigger yet,
+    // but nothing should have to remember to fix this table when one does.
     const triggerText =
       isEnemy && def.ability.trigger === 'startOfBattle'
         ? 'At the start of each wave,'
-        : TRIGGER_WHEN[def.ability.trigger];
+        : def.ability.trigger === 'allyFaint'
+          ? `Whenever a friendly ${own} faints,`
+          : def.ability.trigger === 'allySummoned'
+            ? `Whenever a friendly ${own} is summoned,`
+            : TRIGGER_WHEN[def.ability.trigger];
     const abilityPart = `${triggerText} it ${what}${when}.`;
     return armorSentence ? `${abilityPart} ${armorSentence}` : abilityPart;
   }
