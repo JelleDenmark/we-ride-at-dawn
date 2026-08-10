@@ -10,7 +10,7 @@ The game just changed shape. Enemy toughness now **scales with wave depth** (`he
 
 - **Attack finally matters** (the goal of the change), but throughput needs *payoff*: cleave/overkill-carry/execute/on-kill relics let attack builds scale multiplicatively the way swarm already does via summons.
 - **⚠️ Poison is the next dominant strategy.** Poison is flat-per-tick and **depth-independent**, so as foes get tankier it scales *relatively better* the deeper you go. **Two independent agents flagged this unprompted.** The counter-tech (a poison-*immune* `warded` archetype, anti-poison enemies) is the single highest-leverage content addition — it stops plague from trivializing the sponges and makes attack relics genuinely mandatory. **This is the first thing to verify against the balance sim.**
-- **Depth is sacred and singular.** Because the leaderboard is one number on a synchronized shared seed, every system must protect it: meta-progression may add *options/identity/lore*, **never stats**; anomalies must be classified depth-neutral vs depth-distorting; the all-time board must exclude distorting weeks.
+- **Depth is sacred and singular.** Because the leaderboard is one number on a synchronized shared seed, every system must protect it: meta-progression may add *options/identity/lore*, **never stats**; anomalies must be classified depth-neutral vs depth-distorting; the all-time board must exclude distorting weeks. — _Half-superseded 2026-08-10 (ADR-0007): the "never stats" rule stands, but depth stopped being the singular metric when the nightly PvP league took over scoring, and anomalies are no longer gated on depth-neutrality. See the Comparability firewall section below._
 
 ### Convergent ideas (multiple agents proposed independently)
 - **All-time / personal-best leaderboard** alongside the weekly one (relics agent, seasons agent, retention agent) — the safest big retention lever; separate table, cannot corrupt the weekly board.
@@ -192,7 +192,7 @@ _(Verbatim design output from each panel agent, lightly formatted. Names/stats a
 
 ## Seasons, Anomalies & Live-Ops
 
-**Design thesis.** The engine already hands us a fair, globally synchronized shared puzzle; the staleness risk is that only the theme (4 archetypes × secondary × pivot) changes week to week. A weekly **anomaly** is one deterministic modifier derived from `seasonId` (not the date), applied identically to all seven days for everyone — a pure `anomalyFor(seasonId)` layered on the pipeline, never RNG. It reshapes optimal play without breaking fairness. Hard constraint: protect max-depth comparability — classify each anomaly depth-neutral vs depth-distorting.
+**Design thesis.** The engine already hands us a fair, globally synchronized shared puzzle; the staleness risk is that only the theme (4 archetypes × secondary × pivot) changes week to week. A weekly **anomaly** is one deterministic modifier derived from `seasonId` (not the date), applied identically to all seven days for everyone — a pure `anomalyFor(seasonId)` layered on the pipeline, never RNG. It reshapes optimal play without breaking fairness. ~~Hard constraint: protect max-depth comparability — classify each anomaly depth-neutral vs depth-distorting.~~ _Retired 2026-08-10 (ADR-0007) — the constraint is now the playability floor and the income coupling, not depth comparability._
 
 ### Anomaly catalog
 _Effort: **C** = client-only pure function; **C+cfg** = wants a season-config table; **B** = backend/board change._
@@ -220,16 +220,20 @@ All pure functions of `seasonId`; golden-log tests extend with anomaly-on fixtur
 - **Pre-season teaser:** Sunday banner computed from `anomalyFor(seasonId+7d)` — "Next week: Iron Vigil."
 
 ### Alternate boards
-- Global weekly (exists) — depth-neutral anomalies ride it unchanged.
-- **Per-week Anomaly board** for depth-distorting anomalies — tag the `season_id` (schema PK already `(season_id, device_id)`, dev already prefixes). Firewall against polluting all-time.
+- Global weekly (exists) — every anomaly rides it unchanged since ADR-0007; the nightly PvP league is the scoring frame and absorbs a week-wide difficulty shift.
+- **Per-week Anomaly board** — no longer a prerequisite for shipping a distorting anomaly (that was the retired firewall's gate). Still the right shape *if* the ranked depth board comes back (#172), and `AnomalyDef.distorting` is the flag it would partition on.
 - **All-time / personal-best** — clean (non-anomaly) weeks only.
 - **Weekly Kills board** — same rows sorted by `enemiesDefeated` (already stored). Query-only.
 - Friend/private boards — orthogonal; anomalies need no change.
 
-### Comparability firewall
-Classify up front: *depth-neutral* (Plague, Iron Vigil, Swarm Tide, Brute Vanguard, Bounty reward) ride the global + all-time board; *depth-distorting* (Long Dark, Sudden Death, Warlord's Gambit, Archetype Lock) are walled into per-week partitions and excluded from all-time. Never let a distorting week write the global frame.
+### Comparability firewall — RETIRED 2026-08-10 (ADR-0007)
+> **Superseded.** This section originally read: *"Classify up front: depth-neutral (Plague, Iron Vigil, Swarm Tide, Brute Vanguard, Bounty reward) ride the global + all-time board; depth-distorting (Long Dark, Sudden Death, Warlord's Gambit, Archetype Lock) are walled into per-week partitions and excluded from all-time. Never let a distorting week write the global frame."*
+>
+> The firewall protected max-depth comparability on a global cross-week board. Depth is saturated (6 of 6 riders maxed the 2026-07-27 season by day 3, #163) and the nightly PvP league (#154/#157) is the scoring metric now, with PvE as a funding track. PvP settles between players *inside* one week, so a week-wide difficulty shift is symmetric and self-normalizes. In practice the ±2-wave rule was a ship gate that admitted only composition reshuffles — and all three that shipped were deleted on 2026-08-08 for being too small to notice.
+>
+> `AnomalyDef.distorting` survives as a **label**, not permission: it is what a restored depth board (#172) would partition on. The gates now are the **playability floor** (`balance:realistic`, not the maxed-board fixture) and the **income coupling** (depth-proportional income per ADR-0002 means a harder week shrinks the PvP board everyone can field). ADR-0003's compounding law is untouched. Archetype Lock stays shelved, but on the variance argument — a forced archetype plays the same every time it comes up — not the difficulty one.
 
-**Top 3:** (1) `anomalyFor(seasonId)` machinery + rotating schedule, first 4 weeks clean. (2) Iron Vigil + Plague Week + Bounty Run launch trio (depth-neutral, zero fairness debt). (3) Per-week board partitioning + Sunday pre-season teaser.
+**Top 3 (as written 2026-07-06; outcome noted 2026-08-10):** (1) `anomalyFor(seasonId)` machinery + rotating schedule — ✅ shipped, live from season 2026-08-10. (2) ~~Iron Vigil + Plague Week + Bounty Run launch trio (depth-neutral, zero fairness debt)~~ — the depth-neutral trio that actually shipped (One Warren / Teeming Dark / Two Warrens) was deleted 2026-08-08 for being too small to notice; "zero fairness debt" turned out to also mean "zero impact", which is what ADR-0007 responds to. (3) Per-week board partitioning — no longer a prerequisite; Sunday pre-season teaser ✅ shipped (`nextAnomaly` in `App.svelte`).
 
 ---
 
