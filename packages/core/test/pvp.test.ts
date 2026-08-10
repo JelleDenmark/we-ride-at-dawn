@@ -4,6 +4,7 @@ import {
   validateBoard,
   legalEntrants,
   consolationScrap,
+  scoutSummary,
   LOSS_CONSOLATION_DEFAULT,
   winPointsForDay,
 } from '../src/pvp';
@@ -291,5 +292,26 @@ describe('consolationScrap — loss-consolation payout', () => {
     expect(consolationScrap(2.9, 6)).toBe(12); // 2 losses * 6
     expect(consolationScrap(3, 6.9)).toBe(18); // 3 losses * 6
     expect(Number.isInteger(consolationScrap(3, 6))).toBe(true);
+  });
+});
+
+describe('scoutSummary — basic-scout aggregate signal', () => {
+  it('counts bodies and sums star tiers, defaulting an absent tier to 1', () => {
+    expect(scoutSummary(triRat)).toEqual({ unitCount: 3, totalStars: 3 });
+    expect(
+      scoutSummary(board([{ defId: 'dire-rat', tier: 2 }, { defId: 'dire-rat', tier: 3 }]))
+    ).toEqual({ unitCount: 2, totalStars: 5 });
+  });
+
+  it('an empty board reads as zero, not an error', () => {
+    expect(scoutSummary(board([]))).toEqual({ unitCount: 0, totalStars: 0 });
+  });
+
+  it('two boards with the same aggregate can still hide different comps (the whole point)', () => {
+    // Same body count and same star total, but one lopsided ★1+★3 vs. two
+    // even ★2s — exactly the ambiguity a basic scout is meant to leave in.
+    const a = board([{ defId: 'dire-rat', tier: 1 }, { defId: 'dire-rat', tier: 3 }]);
+    const b = board([{ defId: 'dire-rat', tier: 2 }, { defId: 'dire-rat', tier: 2 }]);
+    expect(scoutSummary(a)).toEqual(scoutSummary(b));
   });
 });

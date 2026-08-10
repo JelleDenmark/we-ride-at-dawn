@@ -53,6 +53,24 @@ export interface LeagueEntrant {
   board: Lineup;
 }
 
+/** Aggregate, name-free read of a board — the "basic scout" signal: how big
+ * and how invested a rival's horde is, without giving away the exact
+ * composition a full board dump would. `totalStars` sums each unit's tier
+ * (default 1), so a bench of merged ★2/★3 rats reads as heavier than the
+ * same body count of ★1s. */
+export interface ScoutSummary {
+  unitCount: number;
+  totalStars: number;
+}
+
+export function scoutSummary(board: Lineup): ScoutSummary {
+  const units = board.units ?? [];
+  return {
+    unitCount: units.length,
+    totalStars: units.reduce((sum, u) => sum + (u.tier ?? 1), 0),
+  };
+}
+
 /**
  * One entrant's result for a scored round. `points` is the football-style
  * match score (see `scoreRound`); `survivorDiff` is the tiebreak.

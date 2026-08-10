@@ -127,7 +127,9 @@ export {
   validateBoard,
   legalEntrants,
   consolationScrap,
+  scoutSummary,
   LOSS_CONSOLATION_DEFAULT,
   type LeagueEntrant,
   type RoundStanding,
+  type ScoutSummary,
 } from './pvp';
