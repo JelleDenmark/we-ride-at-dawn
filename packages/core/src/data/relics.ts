@@ -41,6 +41,19 @@ export interface RelicDef {
   /** On faint, deal this much damage to every enemy (Weeping Boil). */
   onFaintDamageAll?: number;
   /**
+   * That faint nova also ignores armor outright — same straight-through,
+   * skips-MIN_ATTACK_DAMAGE-too treatment as Glass Shard's `firstHitIgnoresArmor`
+   * (issue #156's `applyDamage` `ignoreArmor` param in sim.ts). Weeping Boil's
+   * armor-break buff (2026-08-10): it only ever fires once per unit instance,
+   * so unlike Glass Shard's every-wave alpha strike this doesn't repeat —
+   * it's a one-time farewell nova, and against a stacked Ward-Weaver board
+   * (armor rework note: additive/uncapped) it was landing at the
+   * MIN_ATTACK_DAMAGE floor regardless of its actual damage number, which
+   * made the relic read as dead weight in exactly the matchup it should
+   * counter.
+   */
+  onFaintIgnoresArmor?: boolean;
+  /**
    * Flat armor against 'attack' damage only (Filth Totem's rework, issue
    * #156) — same `UnitDef.damageReduction` mechanism Ward-Weaver grants
    * (`sim.ts`'s `applyDamage`), just team-scoped instead of unit-scoped.
@@ -105,7 +118,7 @@ export const RELIC_DEFS: Record<string, RelicDef> = {
   },
   'weeping-boil': {
     id: 'weeping-boil', name: 'Weeping Boil', scope: 'unit', cost: 4, family: 'offence',
-    desc: 'faint: 2 dmg, all foes', onFaintDamageAll: 2,
+    desc: 'faint: 2 dmg, all foes, ignores armor', onFaintDamageAll: 2, onFaintIgnoresArmor: true,
   },
   // SEASON-4 JOINT-TUNING FLAG (issue #135): Grave-Leech gives sustain a
   // unit-side home, and this relic was the game's only heal before it — a

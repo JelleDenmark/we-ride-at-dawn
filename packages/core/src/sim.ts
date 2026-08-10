@@ -1220,7 +1220,7 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
       for (const relic of dead.relics) {
         if (!relic.onFaintDamageAll) continue;
         events.push({ type: 'relicProc', targetId: dead.instanceId, relicId: relic.id, name: relic.name });
-        for (const foe of [...opposing(dead.side)]) applyDamage(foe, relic.onFaintDamageAll, 'attack');
+        for (const foe of [...opposing(dead.side)]) applyDamage(foe, relic.onFaintDamageAll, 'attack', relic.onFaintIgnoresArmor);
       }
       for (const ally of [...deadBoard]) {
         if (ally.ability?.trigger === 'allyFaint' && ally.health > 0) applyEffect(ally, deadBoard.indexOf(ally), false);
