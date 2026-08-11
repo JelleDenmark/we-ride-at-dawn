@@ -715,6 +715,21 @@
     return buffScaleWith(attack, health, buffSummonedForTier);
   }
 
+  /**
+   * Poison decay (2026-08-07 PvP rework — `POISON_DECAY_ENABLED` in sim.ts,
+   * shipped to curb Moe's PvP duel share without touching her PvE numbers).
+   * Every poison-applying effect decays the exact same way in the tick loop,
+   * so this is written once here rather than copy-pasted into the four
+   * `poison*` cases below: halves after dealing damage each tick, settling
+   * at a floor tied to the single biggest dose this target has ever taken —
+   * NOT a universal constant. See `poisonFloor`'s doc comment in sim.ts for
+   * why a flat floor was rejected (it let a lone Gutter-Acolyte eventually
+   * zero even a ★3 Moe, and made merging a poison caster pointless — every
+   * tier converged to the same long-fight total).
+   */
+  const POISON_DECAY_CLAUSE =
+    'decays by half each tick it deals damage, bottoming out at a floor set by its own strongest dose';
+
   function abilitySentence(def: UnitDef | undefined, side: 'horde' | 'enemy' = 'horde'): string {
     // Takes the def directly (not an id + UNIT_DEFS lookup) so it works for
     // both rats and enemies — enemies live in ENEMY_POOL, a separate array
@@ -874,16 +889,20 @@
         what = `passes its OWN current attack to the ${own} behind it, plus a bonus for how deep into the ride it fell (capped at ${e.waveBonusCapMultiplier}× its own attack) — from the last slot there is no one behind, and the whole payout is lost`;
         break;
       case 'poisonFrontEnemy':
-        what = `applies ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) to the frontmost ${foe} — clears when the wave falls`;
+        what = `applies ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) to the frontmost ${foe} — ${POISON_DECAY_CLAUSE}, and clears entirely when the wave falls`;
         break;
       case 'poisonLastEnemy':
-        what = `applies ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) to the ${foe} at the back of the line — clears when the wave falls, capped across multiple casters`;
+        what = `applies ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) to the ${foe} at the back of the line — ${POISON_DECAY_CLAUSE}, clears entirely when the wave falls, capped across multiple casters`;
         break;
       case 'poisonTarget':
         // Flat `stacks * tier`, NOT poisonStacksForTier — mirrors sim.ts's
         // (flagged-but-live) exemption for this one effect, so the numbers
-        // shown match what the sim actually applies.
-        what = `applies ${e.stacks} poison (★2 ${e.stacks * 2} · ★3 ${e.stacks * 3}) to whatever it just struck`;
+        // shown match what the sim actually applies. "clears entirely when
+        // the wave falls" added alongside the decay clause (was missing
+        // before even though the mechanic was always there — waveClear's
+        // antidote loop clears every horde-side poison source alike, not
+        // just poisonFrontEnemy's).
+        what = `applies ${e.stacks} poison (★2 ${e.stacks * 2} · ★3 ${e.stacks * 3}) to whatever it just struck — ${POISON_DECAY_CLAUSE}, and clears entirely when the wave falls`;
         break;
       case 'gainStats':
         what = `gains ${gainStatsScale(e.attack, e.health)}`;
@@ -908,7 +927,7 @@
         what = `grants ${buffScale(e.attack, e.health)} to the whole ${team}, itself included`;
         break;
       case 'poisonAllEnemies':
-        what = `rots every ${foe} in the wave with ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) — ignores armor, clears when the wave falls, capped across multiple casters`;
+        what = `rots every ${foe} in the wave with ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) — ignores armor, ${POISON_DECAY_CLAUSE}, clears entirely when the wave falls, capped across multiple casters`;
         break;
       case 'buffSummoned':
         // [1, 3, 5] per-star curve (2026-07-25 bump) — the trigger repeats
