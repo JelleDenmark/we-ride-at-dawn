@@ -1,0 +1,12 @@
+{
+  "embeds": [
+    {
+      "title": "🧪 poison decay — worked examples (Draughtsman Moe)",
+      "description": "Following up on the decay note above — here's exactly what a solo Draughtsman Moe (or Blight-Witch) does to one target, no resist in the mix.\n\n**★1** — 1 stack, floor 1\n```\ntick    1  2  3  4  5 ...\ndamage  1  1  1  1  1   (flat forever)\n```\n**★2** — 3 stacks, floor 2\n```\ntick    1  2  3  4  5 ...\ndamage  3  2  2  2  2   (flat from tick 2)\n```\n**★3** — 5 stacks, floor 3\n```\ntick    1  2  3  4  5 ...\ndamage  5  3  3  3  3   (flat from tick 2)\n```\nRunning totals over the first 10 ticks: **10 / 21 / 32**. Poison ignores armor outright — these numbers land no matter what the target's wearing. `poisonAllEnemies` hits every enemy in the wave with this same sequence independently, and it all resets clean next wave.",
+      "color": 5793266,
+      "footer": {
+        "text": "we ride at dawn · season resets monday 06:00 CET"
+      }
+    }
+  ]
+}
