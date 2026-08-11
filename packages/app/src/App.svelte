@@ -248,6 +248,22 @@
   // only climbs, resets with seasonBest. Leaderboard tiebreak under depth.
   let seasonKills = $state(loadSeasonKills(build.seasonId));
   let rideLog = $state<RideLogEntry[]>(loadRideLog(build.seasonId));
+  // Repair seasonBest if it desynced from rideLog (issue #180) — a silently
+  // failed localStorage write can leave seasonBest stuck below a depth that
+  // rideLog already shows as completed. seasonBestSnapshot is deliberately
+  // cleared (not guessed) here: rideLog entries don't carry the lineup that
+  // rode, so submitBest's existing "no snapshot -> unverifiable, not cheating"
+  // fallback (see submitBest below) is the correct honest behavior, rather
+  // than pairing the repaired depth with a stale/wrong lineup snapshot.
+  if (rideLog.length > 0) {
+    const loggedDeepest = rideLog.reduce((a, r) => (r.depth > a.depth ? r : a));
+    if (loggedDeepest.depth > seasonBest) {
+      seasonBest = loggedDeepest.depth;
+      seasonBestHour = loggedDeepest.hour;
+      seasonBestSnapshot = undefined;
+      saveSeasonBest(build.seasonId, seasonBest, seasonBestHour, undefined);
+    }
+  }
   let lastRide = $state<LastRide | null>(loadLastRide());
   let lastIncomeHour = $state<number>(loadLastIncomeHour() ?? Math.floor(Date.now() / HOUR_MS));
   let awaySummary = $state<{ rides: number; scrap: number } | null>(null);
