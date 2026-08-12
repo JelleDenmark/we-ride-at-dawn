@@ -165,7 +165,12 @@ describe('boon safety', () => {
     expect(validateBoard(lineup('dire-rat')).ok).toBe(true);
   });
 
-  it('refuses the decoy body as a submitted board entry', () => {
-    expect(validateBoard(lineup(DECOY_DEF_ID)).ok).toBe(false);
+  it('accepts the decoy body on a submitted board, and that is fine', () => {
+    // Gutter Runt is a retired cost-2 rat, not a cost-0 summon body, so the
+    // structural validator passes it. Recorded rather than guarded:
+    // validateBoard checks legality and not affordability by design, so a
+    // hand-edited payload could already field eight star-3 rats — a free 1/1
+    // is not the hole worth plugging here.
+    expect(validateBoard(lineup(DECOY_DEF_ID)).ok).toBe(true);
   });
 });

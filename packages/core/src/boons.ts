@@ -326,8 +326,23 @@ export function isBoonOffered(rideDate: string, boonId: string | null | undefine
   return boonsFor(rideDate).some((b) => b.id === boonId);
 }
 
-/** The body A Body First shoves to the front. Cost 0, abilityless. */
-export const DECOY_DEF_ID = 'boon-runt';
+/**
+ * The body A Body First shoves to the front.
+ *
+ * Gutter Runt rather than a bespoke def: it is already exactly 1/1 and
+ * abilityless, it already has art, and it was retired from the shop pool
+ * outright (issue #109, `retireDay: 1`) — so nobody can buy one, and seeing
+ * one lead a line is itself a signal that something unusual happened. Reusing
+ * a retired rat as the body the warren throws away is also the truer reading
+ * of the boon than minting a new rat for the job.
+ *
+ * Note this is a cost-2 unit, so unlike a cost-0 summon body `validateBoard`
+ * will ACCEPT it on a submitted board. That is not a new hole: the validator
+ * deliberately checks structural legality and not affordability (see its doc
+ * comment), so a hand-edited payload could already field eight ★3 rats. A
+ * free 1/1 is not the exploit worth closing.
+ */
+export const DECOY_DEF_ID = 'gutter-runt';
 
 /**
  * Which side an effect reads. Self-effects touch the picker's own board;

@@ -1004,16 +1004,6 @@ export interface Lineup {
  */
 export const UNIT_DEFS: Record<string, UnitDef> = {
   pup: { id: 'pup', name: 'Pup', attack: 1, health: 1, cost: 0, tribe: 'runt' },
-  // The body A Body First shoves to the front (issue #184). Cost 0, so
-  // SHOP_UNIT_POOL's `u.cost > 0` filter keeps it un-rollable and
-  // un-browsable automatically, and `validateBoard` refuses it as a submitted
-  // board entry — it can only ever arrive by way of the boon.
-  //
-  // A distinct def rather than reusing `pup`: pup is Rat-Piper's summon and
-  // carries that scaling relationship, and a decoy showing up as the same
-  // rat as a Piper summon would make the replay lie about where a body came
-  // from. Deliberately abilityless — this thing exists to die first.
-  'boon-runt': { id: 'boon-runt', name: 'Runt', attack: 1, health: 1, cost: 0, tribe: 'runt' },
   'gutter-runt': {
     id: 'gutter-runt', name: 'Gutter Runt', attack: 1, health: 1, cost: 2,
     tribe: 'runt',
