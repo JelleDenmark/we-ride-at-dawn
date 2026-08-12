@@ -21,6 +21,7 @@
   import {
     currentRideDate,
     isBoonOffered,
+    boonsFor,
     dailySeed,
     generateGauntlet,
     anomalyFor,
@@ -458,6 +459,22 @@
     saveBoonPick(build.seasonId, rideDate, boonId);
     void submitPvpBoon({ seasonId: build.seasonId, rideDate, boonId });
   }
+
+  // Today's three, derived from the ride-date — identical for every player,
+  // never stored, never rerolled. Empty while the system is dormant, which is
+  // what keeps the whole panel out of the DOM rather than rendering an empty
+  // shell.
+  const todaysBoons = $derived(boonsFor(currentRideDate()));
+
+  // Has tonight's round already been fought? Rounds close at 22:00 but the
+  // ride-date does not roll until 06:00, so there are eight hours where the
+  // player's "today" belongs to a round that is already scored — the same seam
+  // behind the 2026-07-21 no-rides-overnight bug. Picking in that window would
+  // land on a closed round and quietly do nothing, so the cards go inert and
+  // say so instead.
+  const boonRoundClosed = $derived(
+    rounds.some((r) => r.round_id.slice(r.round_id.lastIndexOf('#') + 1) === currentRideDate())
+  );
 
   // Season-long totals (issue #157) alongside the existing single-night view
   // and the restored depth board (issue #171), shown as tabs so the panel's
@@ -2060,6 +2077,40 @@
     <p class="lg-blurb">
       Your horde duels every rival's at <strong>22:00 CET</strong> — one board does both jobs, riding the drains for scrap by day and fighting the duel at night. Points: <strong>win 2 · draw 1 · loss 0</strong> the first two days, <strong>win 3</strong> after — against each rival, summed. Monday wipes the table.
     </p>
+
+    {#if todaysBoons.length > 0}
+      <div class="boons">
+        <p class="lg-caption">dawn's offer · one rat's favour, until the next dawn</p>
+        <ul class="boon-list">
+          {#each todaysBoons as b (b.id)}
+            {@const chosen = myBoon === b.id}
+            <li>
+              <button
+                class="boon-card"
+                class:chosen
+                aria-pressed={chosen}
+                disabled={boonRoundClosed}
+                onclick={() => pickBoon(chosen ? null : b.id)}
+              >
+                <span class="boon-head">
+                  <span class="boon-name">{b.name}</span>
+                  {#if chosen}<span class="boon-tag">chosen</span>{/if}
+                </span>
+                <span class="boon-blurb">{b.blurb}</span>
+              </button>
+            </li>
+          {/each}
+        </ul>
+        <p class="boon-foot">
+          {boonRoundClosed
+            ? 'tonight’s ride is done — the next offer comes at dawn'
+            : myBoon === null
+              ? 'take one, or ride without — change it until 22:00'
+              : 'change it until the ride, 22:00'}
+        </p>
+        <p class="boon-foot boon-foot-dim">no rival sees your choice until the duel is fought</p>
+      </div>
+    {/if}
 
     <div class="lg-tabs" role="tablist">
       <button
@@ -4007,6 +4058,94 @@
     border-top: 1px solid var(--edge-faint);
     font-size: 13px;
     color: var(--ink-soft);
+  }
+
+  .boons {
+    margin: 10px 0 4px;
+  }
+
+  .boon-list {
+    list-style: none;
+    margin: 6px 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  /* Stacked, never a three-across row: at phone width three columns give ~100px
+     each and tap targets below the 44px floor. */
+  .boon-card {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: 100%;
+    min-height: 44px;
+    padding: 9px 10px;
+    font-family: inherit;
+    text-align: left;
+    background: var(--surface);
+    border: 1px solid var(--edge-faint);
+    border-radius: 8px;
+    color: var(--ink);
+    cursor: pointer;
+  }
+
+  .boon-card.chosen {
+    background: var(--surface-raised);
+    border-color: var(--brass);
+  }
+
+  .boon-card:disabled {
+    cursor: default;
+    border-color: var(--edge-faint);
+    color: var(--ink-dim);
+  }
+
+  .boon-head {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+
+  .boon-name {
+    font-size: 14px;
+    color: var(--ink-bright);
+  }
+
+  .boon-card:disabled .boon-name {
+    color: var(--ink-dim);
+  }
+
+  .boon-tag {
+    margin-left: auto;
+    flex: 0 0 auto;
+    font-size: 10px;
+    color: var(--brass);
+    border: 1px solid var(--edge);
+    border-radius: 4px;
+    padding: 1px 5px;
+  }
+
+  .boon-blurb {
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--ink-soft);
+  }
+
+  .boon-card:disabled .boon-blurb {
+    color: var(--ink-faint);
+  }
+
+  .boon-foot {
+    margin: 8px 0 0;
+    font-size: 11px;
+    color: var(--ink-dim);
+  }
+
+  .boon-foot-dim {
+    margin-top: 3px;
+    color: var(--ink-faint);
   }
 
   .scout {
