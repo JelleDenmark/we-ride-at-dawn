@@ -398,21 +398,28 @@ function moveUnit(lineup: Lineup, from: number, to: number): Lineup {
  * Indices are positions in the board AFTER that step ran, so a renderer can
  * point at the rat it is talking about.
  */
+export type BoonNoteDetail =
+  | { kind: 'move'; defId: string; from: number; to: number }
+  | { kind: 'insert'; defId: string; index: number }
+  | { kind: 'stat'; defId: string; index: number; attack: number; health: number }
+  | { kind: 'silence'; defId: string; index: number };
+
 export type BoonNote = {
   /** Which seat's pick caused this. */
   by: 'a' | 'b';
   boonId: string;
   /** Which seat's board it changed — the same seat for a self effect. */
   target: 'a' | 'b';
-} & (
-  | { kind: 'move'; defId: string; from: number; to: number }
-  | { kind: 'insert'; defId: string; index: number }
-  | { kind: 'stat'; defId: string; index: number; attack: number; health: number }
-  | { kind: 'silence'; defId: string; index: number }
-);
+} & BoonNoteDetail;
+
+// The detail union is named rather than inlined because the transforms below
+// return it on its own, and `Omit<BoonNote, ...>` cannot express that: Omit
+// over a union collapses it to the keys every member shares, silently
+// discarding `index`, `from` and `to`. That compiles clean under vitest and
+// vite (both strip types without checking them) and only fails under `tsc`.
 
 /** Apply one boon to the board of the player who picked it. */
-function applySelf(lineup: Lineup, e: BoonEffect): { lineup: Lineup; note?: Omit<BoonNote, 'by' | 'boonId' | 'target'> } {
+function applySelf(lineup: Lineup, e: BoonEffect): { lineup: Lineup; note?: BoonNoteDetail } {
   const last = lineup.units.length - 1;
   switch (e.kind) {
     case 'frontHealth': {
@@ -454,7 +461,7 @@ function applySelf(lineup: Lineup, e: BoonEffect): { lineup: Lineup; note?: Omit
 }
 
 /** Apply one boon to the board of the player who did NOT pick it. */
-function applyOpponent(lineup: Lineup, e: BoonEffect): { lineup: Lineup; note?: Omit<BoonNote, 'by' | 'boonId' | 'target'> } {
+function applyOpponent(lineup: Lineup, e: BoonEffect): { lineup: Lineup; note?: BoonNoteDetail } {
   const last = lineup.units.length - 1;
   switch (e.kind) {
     case 'sapBackAttack': {
@@ -524,7 +531,7 @@ export function boardsForDuel(
     by: 'a' | 'b',
     boonId: string | null,
     target: 'a' | 'b',
-    note: Omit<BoonNote, 'by' | 'boonId' | 'target'> | undefined
+    note: BoonNoteDetail | undefined
   ): void => {
     if (note) notes.push({ ...note, by, boonId: boonId ?? '', target } as BoonNote);
   };
