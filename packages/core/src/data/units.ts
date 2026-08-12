@@ -962,6 +962,19 @@ export interface Lineup {
   units: LineupUnit[];
   teamRelicIds?: string[];
   /**
+   * Board-level daily boon grants (issue #184), written by `boardsForDuel`
+   * after validation and by nothing else. Same security posture as
+   * `LineupUnit`'s `boonAttack`/`boonHealth`/`boonSilenced`: `validateBoard`
+   * refuses a submitted board carrying either, because this type IS the sync
+   * payload.
+   *
+   * These two are the only boons that cannot be a pre-sim transform — they are
+   * runtime behaviour, not a rearranged board — so unlike every other boon
+   * they are read by `simulateCore` itself.
+   */
+  boonBlockHits?: number;
+  boonEcho?: boolean;
+  /**
    * How many bodies this side may hold *during combat*, summons included.
    * Callers building from a `BuildState` (see `lineupFromBuild`/
    * `combatCapForBuild` in shop.ts) set this to `units.length + 2` — always

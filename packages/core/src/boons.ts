@@ -442,8 +442,13 @@ function applySelf(lineup: Lineup, e: BoonEffect): { lineup: Lineup; note?: Omit
         note: { kind: 'insert', defId: DECOY_DEF_ID, index: 0 },
       };
     }
+    case 'blockHits':
+      return { lineup: { ...lineup, boonBlockHits: (lineup.boonBlockHits ?? 0) + e.hits } };
+    case 'echoFirstSummon':
+      return { lineup: { ...lineup, boonEcho: true } };
     default:
-      // deepScout is client-only; blockHits and echoFirstSummon are phase 5.
+      // deepScout is the only boon with no sim surface at all — it changes
+      // what the app renders, never what the fight does.
       return { lineup };
   }
 }

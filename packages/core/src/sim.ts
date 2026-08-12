@@ -712,6 +712,27 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
     board.splice(index, 0, summoned);
     events.push({ type: 'summon', side, index, unit: view(summoned) });
     fireAllySummoned(summoned);
+
+    // Echo (issue #184): the FIRST body this side summons arrives twice.
+    //
+    // Hooked here rather than at the `summon` effect so it covers every summon
+    // path — `summon`, `summonScaledPup`, `maintainSummons` — while leaving
+    // `revive` alone, which reaches the board by a different route entirely.
+    //
+    // Compounding-law shape (ADR-0003): the flag is consumed BEFORE the extra
+    // spawn, so the echo can never echo itself, and once spent it stays spent
+    // for the whole battle no matter how many more bodies arrive. It is a
+    // ONE-TIME effect, not a repeating trigger — which is the distinction the
+    // law actually turns on. There is a canary in compounding-law.test.ts.
+    //
+    // The extra body goes through this same function, so it is bound by
+    // `capOf(side)` like any other summon. That matters: the summon cap is a
+    // body ceiling the enemy scaling is coupled to (#105/#148), and a boon
+    // that bypassed it would be a far bigger change than it looks.
+    if (!echoSpent[side] && boonEchoFor(side)) {
+      echoSpent[side] = true;
+      spawn(def, index, side, owner, tier, relicIds);
+    }
     return true;
   };
 
@@ -1318,6 +1339,21 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
   let blockCharges: Record<Side, number> = { horde: 0, gauntlet: 0 };
 
   /**
+   * Has each side's Echo boon (issue #184) already fired? Per BATTLE, not per
+   * wave — a duel is one wave anyway, and boons are duel-only, so there is no
+   * reset hook for this by design.
+   */
+  const echoSpent: Record<Side, boolean> = { horde: false, gauntlet: false };
+
+  /** Which board carries a given side's boon grants: the horde is the lineup
+   * that was passed in, the gauntlet side is the duel opponent (and in
+   * gauntlet mode there is no opponent board, so no boons — boons are
+   * PvP-only, and this is the line that enforces it). */
+  const boonBoardFor = (side: Side): Lineup | undefined =>
+    side === 'horde' ? lineup : mode.kind === 'duel' ? mode.opponent : undefined;
+  const boonEchoFor = (side: Side): boolean => boonBoardFor(side)?.boonEcho === true;
+
+  /**
    * Total `poisonAllEnemies` stacks already dispensed this wave, keyed by the
    * CASTER's side (issue #116). Reset to 0 every wave (below), then each
    * poison-all caster's contribution is capped so the running total never
@@ -1461,6 +1497,18 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
 
     fireEntryTriggers(horde);
     fireEntryTriggers(enemies);
+
+    // Guardian (issue #184) tops up the block pool AFTER the entry triggers
+    // that would otherwise set it. Additive rather than `Math.max`, unlike
+    // `blockFrontHits`: that cap-not-sum rule exists to stop a STACK of
+    // casters, and a boon cannot be stacked with itself — one pick per player.
+    // Adding also keeps the grant honest if a `blockFrontHits` unit is ever
+    // shipped again, instead of the two silently swallowing each other.
+    for (const side of ['horde', 'gauntlet'] as const) {
+      const hits = boonBoardFor(side)?.boonBlockHits ?? 0;
+      if (hits > 0) blockCharges[side] += hits;
+    }
+
     resolveDeaths();
 
     let ticks = 0;

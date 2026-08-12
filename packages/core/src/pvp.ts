@@ -271,6 +271,11 @@ export function validateBoard(board: Lineup): { ok: true } | { ok: false; reason
     }
   }
 
+  // Board-level boon grants, same door as the per-unit ones above.
+  if (board.boonBlockHits !== undefined || board.boonEcho !== undefined) {
+    return { ok: false, reason: 'board carries a boon grant' };
+  }
+
   const teamRelicIds = board.teamRelicIds ?? [];
   const seenTeamRelics = new Set<string>();
   for (const relicId of teamRelicIds) {
