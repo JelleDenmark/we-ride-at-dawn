@@ -59,6 +59,78 @@ export async function submitPvpBoard(args: {
   }
 }
 
+/**
+ * Set (or clear) this device's boon pick for a ride-date (issue #184).
+ *
+ * Pass `null` to clear — not picking is a legal state that means no boon, and
+ * a player who changes their mind back to nothing should be able to say so.
+ *
+ * Keyed on the RIDE-date (`currentRideDate`, the 06:00 rollover), never the
+ * wall-clock date. Between 22:00 and 06:00 the round has already been scored
+ * while the ride-date has not yet rolled, so a pick made in that window lands
+ * on a round that is already closed — harmless, because the job reads picks
+ * once at scoring time and never re-scores, but it is why the caller must pass
+ * a ride-date rather than anything derived from the clock.
+ *
+ * Fire-and-forget, same posture as `submitPvpBoard`: a failed write leaves the
+ * previous pick standing and never blocks play.
+ *
+ * Unlike the board, this does NOT go into `pvp_boards` — the pick is secret
+ * until the round is scored, and that table is anon-readable. It has its own
+ * table with no anon read at all.
+ */
+export async function submitPvpBoon(args: {
+  seasonId: string;
+  rideDate: string;
+  boonId: string | null;
+}): Promise<void> {
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/rpc/submit_pvp_boon`, {
+      method: 'POST',
+      headers: { ...HEADERS, Prefer: 'return=minimal' },
+      body: JSON.stringify({
+        p_season: boardSeason(args.seasonId),
+        p_ride_date: args.rideDate,
+        p_device: deviceId(),
+        p_boon: args.boonId,
+      }),
+      keepalive: true,
+    });
+  } catch {
+    // Offline or server down — the locally-held pick still shows in the UI and
+    // the last successful write stands for tonight's round.
+  }
+}
+
+/**
+ * Read back THIS device's own pick for a ride-date. Returns null for no pick,
+ * and also null on any failure — a read error is indistinguishable from "no
+ * pick" to the caller by design, because both mean the same thing to the UI.
+ *
+ * Only needed when local state is gone (a reinstall, a cleared cache, a second
+ * load of the same device). Nobody can read anyone else's pick: the RPC is
+ * scoped to a single (season, ride_date, device) triple and returns a scalar,
+ * so it cannot be walked to enumerate rivals.
+ */
+export async function fetchMyPvpBoon(seasonId: string, rideDate: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/my_pvp_boon`, {
+      method: 'POST',
+      headers: HEADERS,
+      body: JSON.stringify({
+        p_season: boardSeason(seasonId),
+        p_ride_date: rideDate,
+        p_device: deviceId(),
+      }),
+    });
+    if (!res.ok) return null;
+    const value = (await res.json()) as string | null;
+    return typeof value === 'string' && value !== '' ? value : null;
+  } catch {
+    return null;
+  }
+}
+
 /** One row of a single night's league standings, as written by the nightly job. */
 export interface StandingRow extends RoundStanding {
   name: string;
@@ -70,6 +142,17 @@ export interface StandingRow extends RoundStanding {
    * `null` for rounds scored before the snapshot column existed — those just
    * can't be replayed. */
   board: Lineup | null;
+  /**
+   * The boon this player fielded that night, or `null` for no pick — and also
+   * `null` for every round scored before boons existed (issue #184).
+   *
+   * This is where a pick becomes public. Picks are unreadable while the round
+   * is live, by design, and surface here once it has been scored and nothing
+   * can be countered any more. The duel replay reads it to show what each side
+   * brought; treat a null as "rode without one", which is a legal state rather
+   * than missing data.
+   */
+  boon_id: string | null;
 }
 
 /** One closed round for a season, for the "which night" picker. */
@@ -105,7 +188,7 @@ async function fetchRoundRows(roundId: string): Promise<StandingRow[]> {
   const res = await fetch(
     `${SUPABASE_URL}/rest/v1/pvp_results_public` +
       `?round_id=eq.${encodeURIComponent(roundId)}` +
-      `&select=round_id,player_id,name,points,wins,draws,losses,survivor_diff,board` +
+      `&select=round_id,player_id,name,points,wins,draws,losses,survivor_diff,board,boon_id` +
       `&order=points.desc,survivor_diff.desc,name.asc`,
     { headers: HEADERS }
   );
@@ -120,6 +203,7 @@ async function fetchRoundRows(roundId: string): Promise<StandingRow[]> {
     losses: number;
     survivor_diff: number;
     board: Lineup | null;
+    boon_id: string | null;
   }>;
   // Warm the digest before handing rows to callers that use `isMe` — it's
   // synchronous and this is the last await before they get the data.
@@ -136,6 +220,9 @@ async function fetchRoundRows(roundId: string): Promise<StandingRow[]> {
     survivorDiff: r.survivor_diff,
     id: r.player_id,
     board: r.board,
+    // Null for a player who rode without one, and for every round scored
+    // before the column existed — the replay treats both the same way.
+    boon_id: r.boon_id ?? null,
   }));
 }
 

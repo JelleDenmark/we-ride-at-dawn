@@ -161,3 +161,57 @@ as $function$
 $function$;
 
 grant execute on function public.my_pvp_boon(text, text, uuid) to anon;
+
+-- ---------------------------------------------------------------------
+-- pvp_results.boon_id — the reveal.
+--
+-- The pick is secret in pvp_boon_picks while the round is live and becomes
+-- public HERE, once it has been scored and can no longer be countered. This
+-- column is what the duel replay reads to show what each side brought.
+--
+-- Snapshotted for the same reason pvp_results.board already is: pvp_boon_picks
+-- is live state a player can change the instant the round closes, so the only
+-- trustworthy record of what was actually fielded is the copy taken at scoring
+-- time. Nullable because not picking is a legal state meaning no boon
+-- (#184 rule 7) — never an auto-pick.
+--
+-- ORDERING: this must be applied BEFORE the nightly job that writes it ships.
+-- roundResultsFor emits boon_id on every result row (explicitly null when
+-- there is no pick), and PostgREST rejects the whole bulk insert if the column
+-- does not exist — which would fail the round, not just the boon.
+-- ---------------------------------------------------------------------
+alter table public.pvp_results add column if not exists boon_id text;
+
+-- Republish the read view with the new column. Clients read
+-- pvp_results_public, never the base table — anon lost select on pvp_results
+-- when device_id was hidden (2026-08-01-hide-device-id.sql), so a column added
+-- only to the base table is invisible to the app.
+--
+-- This is a full re-issue of the view definition from that migration, plus
+-- boon_id. `create or replace view` cannot add a column to an existing view
+-- (42P16 — replace may only append if the leading column list is unchanged,
+-- and Postgres rejects the shape change), so drop-then-create is the honest
+-- path, same as that migration used. The grant must be re-issued too: dropping
+-- a view drops its grants with it.
+--
+-- security_invoker = false is load-bearing and must stay: the view reads a
+-- base table anon cannot select, so it has to run as its owner.
+drop view if exists public.pvp_results_public;
+create view public.pvp_results_public
+with (security_invoker = false) as
+select
+  encode(sha256(convert_to('wrad:' || r.device_id::text, 'UTF8')), 'hex') as player_id,
+  r.round_id,
+  r.season_id,
+  r.name,
+  r.points,
+  r.wins,
+  r.draws,
+  r.losses,
+  r.survivor_diff,
+  r.updated_at,
+  r.board,
+  r.boon_id
+from public.pvp_results r;
+
+grant select on public.pvp_results_public to anon;
