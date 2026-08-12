@@ -248,8 +248,12 @@ export function validateBoard(board: Lineup): { ok: true } | { ok: false; reason
     // `boonHealth: 999` straight into `pvp_boards` and field it every night —
     // the fields live on `LineupUnit` for the sim's benefit, and this is the
     // door that keeps them out of the sync path (issue #184).
-    if (u.boonAttack !== undefined || u.boonHealth !== undefined) {
-      return { ok: false, reason: `unit "${u.defId}" carries a boon stat grant` };
+    if (
+      u.boonAttack !== undefined ||
+      u.boonHealth !== undefined ||
+      u.boonSilenced !== undefined
+    ) {
+      return { ok: false, reason: `unit "${u.defId}" carries a boon grant` };
     }
 
     const relicIds = u.relicIds ?? [];

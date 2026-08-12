@@ -942,6 +942,20 @@ export interface LineupUnit {
    */
   boonAttack?: number;
   boonHealth?: number;
+  /**
+   * Set by the Silence boon: this unit fights with its ABILITY stripped and
+   * everything else intact. Same security note as the stat grants above — it
+   * is written by `boardsForDuel` after validation, and `validateBoard`
+   * refuses a submitted board carrying it.
+   *
+   * Relics are deliberately untouched. A silenced rat keeps Marrow-Snap,
+   * keeps Glass Shard, and keeps Weeping Boil — that last one is a RELIC
+   * rather than a unit ability, so a silenced carrier still detonates on
+   * death. What silence actually reaches is the def's own `ability`: the
+   * startOfBattle/startOfWave buffs, and unit faint triggers like
+   * Brood-Mother's death-summon and Bone-Priest's revive.
+   */
+  boonSilenced?: boolean;
 }
 
 export interface Lineup {

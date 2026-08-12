@@ -67,6 +67,7 @@ export {
   BOON_FIRST_DATE,
   type BoonDef,
   type BoonEffect,
+  type BoonNote,
 } from './boons';
 export { scoutReport, ARCHETYPE_LABEL, type ScoutReport, type ScoutHint } from './scout';
 export {

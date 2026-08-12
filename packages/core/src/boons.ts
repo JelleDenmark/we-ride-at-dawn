@@ -383,41 +383,103 @@ function moveUnit(lineup: Lineup, from: number, to: number): Lineup {
   return { ...lineup, units };
 }
 
+/**
+ * What a boon did to a board, in enough detail for the duel replay to SHOW it
+ * rather than merely name it.
+ *
+ * Pre-sim transforms emit no `BattleEvent`s — that is the whole point, and it
+ * is what keeps boons out of `simulateCore` — so without this the replay has
+ * no way to explain itself. It renders the board as already-rearranged, which
+ * reads as the player having placed their rats that way, and a stripped
+ * ability reads as nothing at all. These notes let the replay play a scripted
+ * pre-battle beat off the transform's own account of itself, before the event
+ * log begins, with the sim still untouched.
+ *
+ * Indices are positions in the board AFTER that step ran, so a renderer can
+ * point at the rat it is talking about.
+ */
+export type BoonNote = {
+  /** Which seat's pick caused this. */
+  by: 'a' | 'b';
+  boonId: string;
+  /** Which seat's board it changed — the same seat for a self effect. */
+  target: 'a' | 'b';
+} & (
+  | { kind: 'move'; defId: string; from: number; to: number }
+  | { kind: 'insert'; defId: string; index: number }
+  | { kind: 'stat'; defId: string; index: number; attack: number; health: number }
+  | { kind: 'silence'; defId: string; index: number }
+);
+
 /** Apply one boon to the board of the player who picked it. */
-function applySelf(lineup: Lineup, e: BoonEffect): Lineup {
+function applySelf(lineup: Lineup, e: BoonEffect): { lineup: Lineup; note?: Omit<BoonNote, 'by' | 'boonId' | 'target'> } {
   const last = lineup.units.length - 1;
   switch (e.kind) {
-    case 'frontHealth':
-      return patchUnit(lineup, 0, (u) => ({ ...u, boonHealth: (u.boonHealth ?? 0) + e.amount }));
-    case 'backAttack':
-      return patchUnit(lineup, last, (u) => ({ ...u, boonAttack: (u.boonAttack ?? 0) + e.amount }));
+    case 'frontHealth': {
+      if (lineup.units.length === 0) return { lineup };
+      const out = patchUnit(lineup, 0, (u) => ({ ...u, boonHealth: (u.boonHealth ?? 0) + e.amount }));
+      return {
+        lineup: out,
+        note: { kind: 'stat', defId: out.units[0].defId, index: 0, attack: 0, health: e.amount },
+      };
+    }
+    case 'backAttack': {
+      if (last < 0) return { lineup };
+      const out = patchUnit(lineup, last, (u) => ({ ...u, boonAttack: (u.boonAttack ?? 0) + e.amount }));
+      return {
+        lineup: out,
+        note: { kind: 'stat', defId: out.units[last].defId, index: last, attack: e.amount, health: 0 },
+      };
+    }
     case 'decoyFront': {
       // The decoy must not eat a combat-cap slot, or the boon is dead weight
       // on a full board — which is most boards by midweek. Each duel side
       // carries its own cap (see simulateCore), so raising this one by exactly
       // the body we added keeps the picker's real capacity untouched.
       const cap = (lineup.combatCap ?? BOARD_CAP) + 1;
-      return { ...lineup, units: [{ defId: DECOY_DEF_ID }, ...lineup.units], combatCap: cap };
+      return {
+        lineup: { ...lineup, units: [{ defId: DECOY_DEF_ID }, ...lineup.units], combatCap: cap },
+        note: { kind: 'insert', defId: DECOY_DEF_ID, index: 0 },
+      };
     }
     default:
       // deepScout is client-only; blockHits and echoFirstSummon are phase 5.
-      return lineup;
+      return { lineup };
   }
 }
 
 /** Apply one boon to the board of the player who did NOT pick it. */
-function applyOpponent(lineup: Lineup, e: BoonEffect): Lineup {
+function applyOpponent(lineup: Lineup, e: BoonEffect): { lineup: Lineup; note?: Omit<BoonNote, 'by' | 'boonId' | 'target'> } {
   const last = lineup.units.length - 1;
   switch (e.kind) {
-    case 'sapBackAttack':
-      return patchUnit(lineup, last, (u) => ({ ...u, boonAttack: (u.boonAttack ?? 0) - e.amount }));
-    case 'dragBackToFront':
-      return moveUnit(lineup, last, 0);
-    case 'buryFrontToBack':
-      return moveUnit(lineup, 0, last);
+    case 'sapBackAttack': {
+      if (last < 0) return { lineup };
+      const out = patchUnit(lineup, last, (u) => ({ ...u, boonAttack: (u.boonAttack ?? 0) - e.amount }));
+      return {
+        lineup: out,
+        note: { kind: 'stat', defId: out.units[last].defId, index: last, attack: -e.amount, health: 0 },
+      };
+    }
+    case 'silenceFront': {
+      if (lineup.units.length === 0) return { lineup };
+      const out = patchUnit(lineup, 0, (u) => ({ ...u, boonSilenced: true }));
+      return {
+        lineup: out,
+        note: { kind: 'silence', defId: out.units[0].defId, index: 0 },
+      };
+    }
+    case 'dragBackToFront': {
+      if (lineup.units.length < 2) return { lineup };
+      const defId = lineup.units[last].defId;
+      return { lineup: moveUnit(lineup, last, 0), note: { kind: 'move', defId, from: last, to: 0 } };
+    }
+    case 'buryFrontToBack': {
+      if (lineup.units.length < 2) return { lineup };
+      const defId = lineup.units[0].defId;
+      return { lineup: moveUnit(lineup, 0, last), note: { kind: 'move', defId, from: 0, to: last } };
+    }
     default:
-      // silenceFront is phase 3.
-      return lineup;
+      return { lineup };
   }
 }
 
@@ -448,13 +510,45 @@ export function boardsForDuel(
   a: Lineup,
   boonA: BoonEffect | null | undefined,
   b: Lineup,
-  boonB: BoonEffect | null | undefined
-): { a: Lineup; b: Lineup } {
-  let outA = boonA && isSelfEffect(boonA) ? applySelf(a, boonA) : a;
-  let outB = boonB && isSelfEffect(boonB) ? applySelf(b, boonB) : b;
-  if (boonA && !isSelfEffect(boonA)) outB = applyOpponent(outB, boonA);
-  if (boonB && !isSelfEffect(boonB)) outA = applyOpponent(outA, boonB);
-  return { a: outA, b: outB };
+  boonB: BoonEffect | null | undefined,
+  idA: string | null = null,
+  idB: string | null = null
+): { a: Lineup; b: Lineup; notes: BoonNote[] } {
+  const notes: BoonNote[] = [];
+  const record = (
+    by: 'a' | 'b',
+    boonId: string | null,
+    target: 'a' | 'b',
+    note: Omit<BoonNote, 'by' | 'boonId' | 'target'> | undefined
+  ): void => {
+    if (note) notes.push({ ...note, by, boonId: boonId ?? '', target } as BoonNote);
+  };
+
+  let outA = a;
+  let outB = b;
+
+  if (boonA && isSelfEffect(boonA)) {
+    const r = applySelf(outA, boonA);
+    outA = r.lineup;
+    record('a', idA, 'a', r.note);
+  }
+  if (boonB && isSelfEffect(boonB)) {
+    const r = applySelf(outB, boonB);
+    outB = r.lineup;
+    record('b', idB, 'b', r.note);
+  }
+  if (boonA && !isSelfEffect(boonA)) {
+    const r = applyOpponent(outB, boonA);
+    outB = r.lineup;
+    record('a', idA, 'b', r.note);
+  }
+  if (boonB && !isSelfEffect(boonB)) {
+    const r = applyOpponent(outA, boonB);
+    outA = r.lineup;
+    record('b', idB, 'a', r.note);
+  }
+
+  return { a: outA, b: outB, notes };
 }
 
 /** The effect a boon id names, or null for no pick / an unknown id. */

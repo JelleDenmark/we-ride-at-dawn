@@ -472,7 +472,14 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
    * Floored at 0 so a negative grant (Blunt) dulls a rat rather than
    * inverting it into something that heals on contact.
    */
-  const applyBoonStats = (u: BattleUnit, entry: LineupUnit): BattleUnit => {
+  const applyBoonGrants = (u: BattleUnit, entry: LineupUnit): BattleUnit => {
+    // Silence strips the def's ability and nothing else. Every trigger site in
+    // this file reads the INSTANCE's `ability` rather than `UNIT_DEFS[...]`,
+    // so clearing it here is complete — entry triggers, faint, afterAttack and
+    // the allySummoned/allyFaint witnesses all go quiet together. `relics` is
+    // untouched on purpose: a silenced rat still carries Weeping Boil, which
+    // is a relic and detonates regardless.
+    if (entry.boonSilenced) u.ability = undefined;
     const a = entry.boonAttack ?? 0;
     const h = entry.boonHealth ?? 0;
     if (a !== 0) {
@@ -498,7 +505,7 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
 
   const horde: BattleUnit[] = lineup.units
     .slice(0, BOARD_CAP)
-    .map((u) => applyBoonStats(instantiate(UNIT_DEFS[u.defId], 'horde', u.relicIds, u.tier ?? 1), u));
+    .map((u) => applyBoonGrants(instantiate(UNIT_DEFS[u.defId], 'horde', u.relicIds, u.tier ?? 1), u));
   let enemies: BattleUnit[] = [];
   const fallen: Record<Side, BattleUnit[]> = { horde: [], gauntlet: [] };
 
@@ -1417,7 +1424,7 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
             mode.opponent.units
               .slice(0, BOARD_CAP)
               .map((u) =>
-                applyBoonStats(
+                applyBoonGrants(
                   instantiate(UNIT_DEFS[u.defId], 'gauntlet', u.relicIds, u.tier ?? 1),
                   u
                 )
