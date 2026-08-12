@@ -93,7 +93,7 @@ trims to the backmost only.
 |---|---|---|
 | **Drag** | The opponent's `units[n-1]` moves to their `units[0]` | pre-sim lineup write |
 | **Buried** | The opponent's `units[0]` moves to their `units[n-1]` | pre-sim lineup write |
-| **A Body First** | A 1/1 body is inserted at the front of your own line | pre-sim lineup write |
+| **A Body First** | A retired Gutter Runt is inserted at the front of your own line | pre-sim lineup write |
 | **Silence** | The opponent's `units[0]` loses its ability for the duel | pre-sim instantiate flag |
 | **Bulwark** | +X health on your `units[0]` | pre-sim stat write |
 | **Blunt** | −X attack on the opponent's `units[n-1]` | pre-sim stat write |
@@ -244,6 +244,48 @@ no-rides-overnight bug. Most likely the same screen with the cards inert and the
 swapped to a countdown, but it needs designing.
 
 ---
+
+## Showing a boon in the replay
+
+A boon is invisible unless something is built to show it, and the reason is
+structural rather than an oversight: pre-sim transforms emit no `BattleEvent`s.
+That is the property the whole safety argument rests on — boons never enter
+`simulateCore`, so ADR-0003 has nothing to bite. But the replay renders the
+event log, and the log begins after the boards have already been rearranged.
+
+Left alone, each boon fails differently, and one of them fails badly:
+
+- **Drag / Buried** are not merely invisible, they are misleading. The opening
+  board render shows the post-transform order, so a viewer sees MBP Rat leading
+  and concludes the player placed it there.
+- **Silence** is the worst case: nothing on screen differs except an absence.
+- **Bulwark / Rearguard / Blunt** show a rat with stats its def does not have,
+  with no stated cause.
+- **A Body First** shows a body that was not bought. The Gutter Runt swap helps
+  here by accident — a retired rat nobody can buy is itself a hint.
+
+Three options were weighed. **Naming the boon in the banner** is free and keeps
+the sim untouched, but it tells you a drag happened without showing which rat
+moved. **Emitting real events** would animate properly, but only by teaching
+`simulateCore` about boons, which spends the exact property that makes them
+safe. Neither is worth it.
+
+What shipped is the third: `boardsForDuel` returns **its own account of what it
+did** — moved this defId from index 2 to index 0 on that side, silenced this
+one, granted this much to that one — surfaced as `DuelResult.boonNotes`. The
+replay plays it as a scripted pre-battle beat before the log begins. The
+transform stays pure, the sim stays ignorant, and the replay shows the movement
+rather than a label.
+
+Indices describe the board as it stood when that step ran, which matters when
+both sides picked: a decoy shifts its own line before the opponent's drag reads
+it, so the drag note reports the shifted index. Getting that wrong would point
+the replay at the wrong rat.
+
+**Still needed for Silence specifically.** A pre-battle beat that flashes past
+does not carry an absence for the whole fight. The silenced rat needs a marker
+on the board render itself, or the viewer forgets by the third clash and just
+sees a rat that never did anything.
 
 ## Open
 
