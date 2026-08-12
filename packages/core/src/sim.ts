@@ -1,4 +1,4 @@
-import type { Side, UnitDef, Ability, Lineup } from './data/units';
+import type { Side, UnitDef, Ability, Lineup, LineupUnit } from './data/units';
 import { UNIT_DEFS, tierAttackMultiplier, tierHealthMultiplier, reviveHpForTier, blockHitsForTier, poisonStacksForTier, cellarCoilChargeCapForTier, backlineTargetsForTier, wardArmorForTier, buffSummonedForTier, poisonResistForTier, POISON_RESIST_CAP } from './data/units';
 import { ENEMY_POOL } from './data/enemies';
 import { RELIC_DEFS, type RelicDef } from './data/relics';
@@ -459,6 +459,33 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
     };
   };
 
+  /**
+   * Apply a daily boon's flat stat grant (issue #184) to a freshly
+   * instantiated unit. Written onto the LineupUnit by `boardsForDuel` BEFORE
+   * the sim runs, never by a client — `validateBoard` refuses a submitted
+   * board carrying either field.
+   *
+   * Attack goes to both `attack` and `attackBuffs`, exactly as the engine's
+   * own `buff()` helper does: the clash reads `attack`, the backline-damage
+   * path reads `attackBuffs` and never `attack`, so writing one without the
+   * other would make the grant silently miss half the boards it exists for.
+   * Floored at 0 so a negative grant (Blunt) dulls a rat rather than
+   * inverting it into something that heals on contact.
+   */
+  const applyBoonStats = (u: BattleUnit, entry: LineupUnit): BattleUnit => {
+    const a = entry.boonAttack ?? 0;
+    const h = entry.boonHealth ?? 0;
+    if (a !== 0) {
+      u.attack = Math.max(0, u.attack + a);
+      u.attackBuffs += a;
+    }
+    if (h !== 0) {
+      u.health += h;
+      u.maxHealth += h;
+    }
+    return u;
+  };
+
   const view = (u: BattleUnit): UnitView => ({
     instanceId: u.instanceId,
     defId: u.defId,
@@ -471,7 +498,7 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
 
   const horde: BattleUnit[] = lineup.units
     .slice(0, BOARD_CAP)
-    .map((u) => instantiate(UNIT_DEFS[u.defId], 'horde', u.relicIds, u.tier ?? 1));
+    .map((u) => applyBoonStats(instantiate(UNIT_DEFS[u.defId], 'horde', u.relicIds, u.tier ?? 1), u));
   let enemies: BattleUnit[] = [];
   const fallen: Record<Side, BattleUnit[]> = { horde: [], gauntlet: [] };
 
@@ -1389,7 +1416,12 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
           () =>
             mode.opponent.units
               .slice(0, BOARD_CAP)
-              .map((u) => instantiate(UNIT_DEFS[u.defId], 'gauntlet', u.relicIds, u.tier ?? 1)),
+              .map((u) =>
+                applyBoonStats(
+                  instantiate(UNIT_DEFS[u.defId], 'gauntlet', u.relicIds, u.tier ?? 1),
+                  u
+                )
+              ),
         ];
 
   for (let w = 0; w < enemyWaves.length && horde.length > 0; w++) {

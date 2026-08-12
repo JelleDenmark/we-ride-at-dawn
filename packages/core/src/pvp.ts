@@ -51,6 +51,14 @@ export function consolationScrap(losses: number, payoutPerLoss: number): number 
 export interface LeagueEntrant {
   id: string;
   board: Lineup;
+  /**
+   * This entrant's daily boon pick for the round, or null/absent for no pick
+   * (issue #184). Already validated against the day's derived menu by the
+   * nightly job before it reaches here — `scoreRound` trusts it and does not
+   * re-check, because re-deriving the menu needs a ride-date this function
+   * deliberately does not take.
+   */
+  boon?: string | null;
 }
 
 /** Aggregate, name-free read of a board — the "basic scout" signal: how big
@@ -138,7 +146,12 @@ export function scoreRound(entrants: LeagueEntrant[], winPoints = 3): RoundStand
 
   for (let i = 0; i < n; i++) {
     for (let j = i + 1; j < n; j++) {
-      const { result } = simulateDuel(entrants[i].board, entrants[j].board);
+      const { result } = simulateDuel(
+        entrants[i].board,
+        entrants[j].board,
+        entrants[i].boon ?? null,
+        entrants[j].boon ?? null
+      );
       const diff = result.healthA - result.healthB;
       survivorDiff[i] += diff;
       survivorDiff[j] -= diff;
@@ -227,6 +240,16 @@ export function validateBoard(board: Lineup): { ok: true } | { ok: false; reason
     const tier = u.tier ?? 1;
     if (!Number.isInteger(tier) || tier < 1 || tier > MAX_TIER) {
       return { ok: false, reason: `unit "${u.defId}" has invalid tier ${tier}` };
+    }
+
+    // Boon stat grants are written by `boardsForDuel` AFTER validation and by
+    // nothing else, so their presence on a SUBMITTED board means the payload
+    // was hand-edited. Without this check a client could sync
+    // `boonHealth: 999` straight into `pvp_boards` and field it every night —
+    // the fields live on `LineupUnit` for the sim's benefit, and this is the
+    // door that keeps them out of the sync path (issue #184).
+    if (u.boonAttack !== undefined || u.boonHealth !== undefined) {
+      return { ok: false, reason: `unit "${u.defId}" carries a boon stat grant` };
     }
 
     const relicIds = u.relicIds ?? [];

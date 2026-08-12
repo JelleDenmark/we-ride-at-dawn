@@ -1,5 +1,6 @@
 import type { Lineup } from './data/units';
 import { simulateCore, type BattleEvent, type UnitView } from './sim';
+import { boardsForDuel, boonEffect } from './boons';
 
 /**
  * Outcome of a single symmetric board-vs-board duel — the PvP league's core
@@ -49,9 +50,24 @@ export interface DuelResult {
  */
 export function simulateDuel(
   a: Lineup,
-  b: Lineup
+  b: Lineup,
+  boonA: string | null = null,
+  boonB: string | null = null
 ): { events: BattleEvent[]; result: DuelResult } {
-  const { events, result, enemySurvivors } = simulateCore(a, { kind: 'duel', opponent: b });
+  // Daily boons (issue #184). Default null on both, so every existing caller,
+  // golden log and determinism hash is byte-identical to before boons existed
+  // — a duel with no picks resolves exactly as it always did.
+  //
+  // Taking ids rather than effects is deliberate: the replay reads `boon_id`
+  // straight off a stored result row and hands it here unchanged, so the
+  // client re-runs the identical fight the nightly job scored. An unknown id
+  // resolves to no boon rather than throwing, which keeps a round scored under
+  // a newer pool replayable by an older client.
+  const boards = boardsForDuel(a, boonEffect(boonA), b, boonEffect(boonB));
+  const { events, result, enemySurvivors } = simulateCore(boards.a, {
+    kind: 'duel',
+    opponent: boards.b,
+  });
   const survivorsA = result.survivors;
   const survivorsB = enemySurvivors;
   const healthA = survivorsA.reduce((s, u) => s + u.health, 0);

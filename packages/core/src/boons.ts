@@ -1,5 +1,7 @@
 import { xorshift128 } from './prng';
 import { fnv1a } from './seed';
+import { BOARD_CAP } from './sim';
+import type { Lineup, LineupUnit } from './data/units';
 
 /**
  * Daily PvP boons (issue #184, design bank in `docs/design/boons.md`).
@@ -87,7 +89,7 @@ export type BoonEffect =
    * own — see `simulateCore`'s cap split), or the boon is dead weight on a
    * full board, which is most boards by midweek.
    */
-  | { kind: 'decoyFront'; attack: number; health: number }
+  | { kind: 'decoyFront' }
   /**
    * opponent — their `units[0]` loses its ABILITY for the duel. Relics are
    * untouched: a silenced rat keeps Marrow-Snap, keeps Glass Shard, and keeps
@@ -217,7 +219,7 @@ export const BOON_DEFS: Record<string, BoonDef> = {
     id: 'a-body-first',
     name: 'A Body First',
     blurb: 'A runt takes the front of your line. It dies first, so nothing better does.',
-    effect: { kind: 'decoyFront', attack: 1, health: 1 },
+    effect: { kind: 'decoyFront' },
   },
   silence: {
     id: 'silence',
@@ -322,4 +324,126 @@ export function boonsFor(rideDate: string): BoonDef[] {
 export function isBoonOffered(rideDate: string, boonId: string | null | undefined): boolean {
   if (boonId === null || boonId === undefined) return true;
   return boonsFor(rideDate).some((b) => b.id === boonId);
+}
+
+/** The body A Body First shoves to the front. Cost 0, abilityless. */
+export const DECOY_DEF_ID = 'boon-runt';
+
+/**
+ * Which side an effect reads. Self-effects touch the picker's own board;
+ * opponent-effects touch the board across the table.
+ */
+function isSelfEffect(e: BoonEffect): boolean {
+  switch (e.kind) {
+    case 'dragBackToFront':
+    case 'buryFrontToBack':
+    case 'silenceFront':
+    case 'sapBackAttack':
+      return false;
+    default:
+      return true;
+  }
+}
+
+/** Shallow-copies the entry at `index` and hands it to `patch`. Never mutates
+ * the caller's Lineup — `scoreRound` reuses the same board object across every
+ * duel of a round, so an in-place write would leak a boon into the next fight. */
+function patchUnit(
+  lineup: Lineup,
+  index: number,
+  patch: (u: LineupUnit) => LineupUnit
+): Lineup {
+  const units = lineup.units.slice();
+  if (index < 0 || index >= units.length) return lineup;
+  units[index] = patch({ ...units[index] });
+  return { ...lineup, units };
+}
+
+/** Moves the unit at `from` to `to`, preserving the order of everything else. */
+function moveUnit(lineup: Lineup, from: number, to: number): Lineup {
+  const units = lineup.units.slice();
+  if (units.length < 2) return lineup;
+  const [moved] = units.splice(from, 1);
+  units.splice(to, 0, moved);
+  return { ...lineup, units };
+}
+
+/** Apply one boon to the board of the player who picked it. */
+function applySelf(lineup: Lineup, e: BoonEffect): Lineup {
+  const last = lineup.units.length - 1;
+  switch (e.kind) {
+    case 'frontHealth':
+      return patchUnit(lineup, 0, (u) => ({ ...u, boonHealth: (u.boonHealth ?? 0) + e.amount }));
+    case 'backAttack':
+      return patchUnit(lineup, last, (u) => ({ ...u, boonAttack: (u.boonAttack ?? 0) + e.amount }));
+    case 'decoyFront': {
+      // The decoy must not eat a combat-cap slot, or the boon is dead weight
+      // on a full board — which is most boards by midweek. Each duel side
+      // carries its own cap (see simulateCore), so raising this one by exactly
+      // the body we added keeps the picker's real capacity untouched.
+      const cap = (lineup.combatCap ?? BOARD_CAP) + 1;
+      return { ...lineup, units: [{ defId: DECOY_DEF_ID }, ...lineup.units], combatCap: cap };
+    }
+    default:
+      // deepScout is client-only; blockHits and echoFirstSummon are phase 5.
+      return lineup;
+  }
+}
+
+/** Apply one boon to the board of the player who did NOT pick it. */
+function applyOpponent(lineup: Lineup, e: BoonEffect): Lineup {
+  const last = lineup.units.length - 1;
+  switch (e.kind) {
+    case 'sapBackAttack':
+      return patchUnit(lineup, last, (u) => ({ ...u, boonAttack: (u.boonAttack ?? 0) - e.amount }));
+    case 'dragBackToFront':
+      return moveUnit(lineup, last, 0);
+    case 'buryFrontToBack':
+      return moveUnit(lineup, 0, last);
+    default:
+      // silenceFront is phase 3.
+      return lineup;
+  }
+}
+
+/**
+ * Resolve both boards for a duel, applying each side's boon. THE one place the
+ * ordering rule lives — every caller goes through here so the client replay and
+ * the nightly job cannot disagree about what a fight looked like.
+ *
+ * Order, per #184 rule 2:
+ *   1. each side's SELF effect on its own board;
+ *   2. each side's OPPONENT effect on the other board.
+ *
+ * Buffs therefore land before any displacement, which is what makes a
+ * displacement able to push a buffed rat off the front without ever erasing
+ * the buff — the grant rides on the unit, not on the slot. A board takes at
+ * most one opponent effect (its opponent holds one boon), so step 2 has no
+ * internal ordering to resolve.
+ *
+ * Every read is a SNAPSHOT of the board as submitted (rule 3): `units[0]` and
+ * `units[n - 1]` are resolved against the line as it stands when that step
+ * runs, never against whoever happens to be front once the fight is moving.
+ *
+ * Pure — inputs are never mutated. That matters because `scoreRound` reuses
+ * one board object across every duel of a round-robin, so an in-place write
+ * would leak a boon into the next fight.
+ */
+export function boardsForDuel(
+  a: Lineup,
+  boonA: BoonEffect | null | undefined,
+  b: Lineup,
+  boonB: BoonEffect | null | undefined
+): { a: Lineup; b: Lineup } {
+  let outA = boonA && isSelfEffect(boonA) ? applySelf(a, boonA) : a;
+  let outB = boonB && isSelfEffect(boonB) ? applySelf(b, boonB) : b;
+  if (boonA && !isSelfEffect(boonA)) outB = applyOpponent(outB, boonA);
+  if (boonB && !isSelfEffect(boonB)) outA = applyOpponent(outA, boonB);
+  return { a: outA, b: outB };
+}
+
+/** The effect a boon id names, or null for no pick / an unknown id. */
+export function boonEffect(boonId: string | null | undefined): BoonEffect | null {
+  if (!boonId) return null;
+  return BOON_DEFS[boonId]?.effect ?? null;
 }

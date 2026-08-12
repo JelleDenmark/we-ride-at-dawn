@@ -144,7 +144,12 @@ export function roundResultsFor(
     else rejectedPicks.push({ device_id: p.device_id, boon_id: p.boon_id });
   }
 
-  const resultRows = scoreRound(legal, winPoints).map((s) => ({
+  // Hand the validated picks to the scorer so the duels actually fight with
+  // them. `legal` came from `legalEntrants`, which preserves input order and
+  // carries no boon, so re-attach by id rather than by position.
+  const legalWithBoons = legal.map((e) => ({ ...e, boon: boonById.get(e.id) ?? null }));
+
+  const resultRows = scoreRound(legalWithBoons, winPoints).map((s) => ({
     round_id: roundId,
     season_id: seasonId,
     device_id: s.id,

@@ -922,6 +922,26 @@ export interface LineupUnit {
   defId: string;
   tier?: number;
   relicIds?: string[];
+  /**
+   * Flat attack/health added by a DAILY BOON only (issue #184), applied at
+   * instantiate on top of the tier and relic maths.
+   *
+   * SECURITY: these are written by `boardsForDuel` after a board has already
+   * been validated, and by nothing else. They must NEVER appear on a board a
+   * client submits — a player could otherwise sync `boonHealth: 999` straight
+   * into `pvp_boards` and field it every night. `validateBoard` rejects any
+   * submitted unit carrying either field, which is what makes it safe to have
+   * them on the same type the sync payload uses.
+   *
+   * Attack applies to BOTH the clash total and `attackBuffs`, mirroring the
+   * engine's own `buff()` helper — the backline-damage path reads
+   * `attackBuffs` and never `attack`, so writing only the latter would make a
+   * boon silently miss a backline attacker, which is the board shape
+   * Rearguard most obviously exists for. `boonAttack` may be negative (Blunt);
+   * the resulting attack is floored at 0 rather than allowed to invert.
+   */
+  boonAttack?: number;
+  boonHealth?: number;
 }
 
 export interface Lineup {
@@ -984,6 +1004,16 @@ export interface Lineup {
  */
 export const UNIT_DEFS: Record<string, UnitDef> = {
   pup: { id: 'pup', name: 'Pup', attack: 1, health: 1, cost: 0, tribe: 'runt' },
+  // The body A Body First shoves to the front (issue #184). Cost 0, so
+  // SHOP_UNIT_POOL's `u.cost > 0` filter keeps it un-rollable and
+  // un-browsable automatically, and `validateBoard` refuses it as a submitted
+  // board entry — it can only ever arrive by way of the boon.
+  //
+  // A distinct def rather than reusing `pup`: pup is Rat-Piper's summon and
+  // carries that scaling relationship, and a decoy showing up as the same
+  // rat as a Piper summon would make the replay lie about where a body came
+  // from. Deliberately abilityless — this thing exists to die first.
+  'boon-runt': { id: 'boon-runt', name: 'Runt', attack: 1, health: 1, cost: 0, tribe: 'runt' },
   'gutter-runt': {
     id: 'gutter-runt', name: 'Gutter Runt', attack: 1, health: 1, cost: 2,
     tribe: 'runt',

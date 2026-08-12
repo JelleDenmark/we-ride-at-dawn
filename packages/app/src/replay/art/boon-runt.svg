@@ -1,0 +1,13 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <!-- Boon-Runt: the body "A Body First" shoves to the front. Same small
+       silhouette as Pup, hunched lower and turned away from the fight — it is
+       not here to win, it is here to be hit first. Warm ramp, same palette. -->
+  <path d="M24 51 Q14 50 16 42 Q16 38 20 37" fill="none" stroke="#5e3120" stroke-width="2.4" stroke-linecap="round"/>
+  <path d="M23 51 C20 45 24 37 33 36 C39 35.5 43 38.5 46 42 L52 46 C53.2 46.8 52.4 48 51.2 48 L45 48.5 C42 52.6 36 54.5 30.5 54.5 C26 54.5 24 53.6 23 51 Z" fill="#7d4429" stroke="#201209" stroke-width="1.5" stroke-linejoin="round"/>
+  <circle cx="36.5" cy="35" r="4" fill="#7d4429" stroke="#201209" stroke-width="1.5"/>
+  <circle cx="36.5" cy="35" r="1.8" fill="#a9694f"/>
+  <circle cx="43.2" cy="42" r="1.7" fill="#201209"/>
+  <circle cx="51.4" cy="46.6" r="1.2" fill="#a9694f"/>
+  <rect x="27" y="53" width="4" height="5" rx="1.6" fill="#5e3120"/>
+  <rect x="38" y="52" width="4" height="6" rx="1.6" fill="#5e3120"/>
+</svg>

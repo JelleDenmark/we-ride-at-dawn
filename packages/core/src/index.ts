@@ -59,6 +59,9 @@ export {
 export {
   boonsFor,
   isBoonOffered,
+  boardsForDuel,
+  boonEffect,
+  DECOY_DEF_ID,
   BOON_DEFS,
   BOONS_PER_DAY,
   BOON_FIRST_DATE,
