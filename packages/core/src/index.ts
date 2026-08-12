@@ -56,6 +56,15 @@ export {
   type GauntletOverrides,
   type ShopOverrides,
 } from './anomaly';
+export {
+  boonsFor,
+  isBoonOffered,
+  BOON_DEFS,
+  BOONS_PER_DAY,
+  BOON_FIRST_DATE,
+  type BoonDef,
+  type BoonEffect,
+} from './boons';
 export { scoutReport, ARCHETYPE_LABEL, type ScoutReport, type ScoutHint } from './scout';
 export {
   newBuild,
