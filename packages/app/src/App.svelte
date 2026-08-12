@@ -20,6 +20,7 @@
   import { onMount } from 'svelte';
   import {
     currentRideDate,
+    isBoonOffered,
     dailySeed,
     generateGauntlet,
     anomalyFor,
@@ -110,6 +111,8 @@
     saveInstallNudgeDismissed,
     saveConsolationCredited,
     loadConsolationCredited,
+    saveBoonPick,
+    loadBoonPick,
     type RideLogEntry,
     type LastRide,
   } from './persistence';
@@ -122,6 +125,8 @@
   import { submitScore, fetchTop, fetchRank, defaultName, isMe, type BoardRow } from './leaderboard';
   import {
     submitPvpBoard,
+    submitPvpBoon,
+    fetchMyPvpBoon,
     fetchLatestStandings,
     fetchStandingsForRound,
     fetchSeasonStandings,
@@ -410,12 +415,49 @@
   // Which rival's board the scout panel is expanded to, by player_id (null =
   // collapsed). One at a time keeps the panel phone-sized.
   let scoutedGhost = $state<string | null>(null);
-  // Scouting shows only the aggregate (rat count + star total, via
-  // `scoutSummary`) — the exact-roster "deep" rendering below (`ghostUnits`,
-  // the expand-to-chips branch) is kept wired but unreachable, ready to
-  // resurface later as what an accurate-scouting boon unlocks. Flip this
-  // constant to 'deep' (or reintroduce a toggle) to bring it back.
-  const scoutLevel: 'basic' | 'deep' = 'basic';
+  // This device's daily boon pick for the current ride-date (issue #184), or
+  // null for no pick — which is a legal state meaning no boon, never an
+  // auto-pick. Read from localStorage on load and reconciled against the
+  // server on every league refresh, because a local write can fail silently
+  // (#180) and a reinstall loses it outright.
+  //
+  // Nothing SETS this yet: the choice screen is phase 6. Until then the boon
+  // path is complete but unreachable, which is the same dormancy
+  // `BOON_FIRST_DATE` enforces on the offer itself.
+  let myBoon = $state<string | null>(
+    loadBoonPick(build.seasonId, currentRideDate())
+  );
+
+  // Deep scouting is a boon, not a setting (issue #178, folded into #184).
+  // Basic scouting — rat count + star total via `scoutSummary` — stays the
+  // default for everyone; picking Deep Scout swaps in the exact-roster
+  // rendering below (`ghostUnits`, the expand-to-chips branch), which has been
+  // wired and dormant behind a hardcoded constant since ce62eaa.
+  //
+  // Gated on `isBoonOffered` rather than on the pick alone, for two reasons
+  // that both matter: while boons are dormant no date offers anything, so this
+  // cannot turn on early even if a pick is somehow present; and a stale pick
+  // from a previous day can never grant today's scouting, since the menu it
+  // was drawn from is a pure function of the ride-date.
+  const scoutLevel = $derived<'basic' | 'deep'>(
+    myBoon === 'deep-scout' && isBoonOffered(currentRideDate(), myBoon) ? 'deep' : 'basic'
+  );
+
+  /**
+   * Record a boon pick: locally first so the UI is instant, then to the server.
+   * Pass null to clear — changing your mind back to nothing is a legal move.
+   *
+   * Safe to call repeatedly right up to the 22:00 round: the pick is secret
+   * until the round is scored, and the nightly job reads whatever stands at
+   * that moment. Wired ahead of the choice screen (phase 6) so the screen only
+   * has to render.
+   */
+  function pickBoon(boonId: string | null): void {
+    const rideDate = currentRideDate();
+    myBoon = boonId;
+    saveBoonPick(build.seasonId, rideDate, boonId);
+    void submitPvpBoon({ seasonId: build.seasonId, rideDate, boonId });
+  }
 
   // Season-long totals (issue #157) alongside the existing single-night view
   // and the restored depth board (issue #171), shown as tabs so the panel's
@@ -540,7 +582,8 @@
   async function refreshLeague() {
     leagueBusy = true;
     try {
-      const [rows, season, roundList, gh, cfg, depthBoard, rank] = await Promise.all([
+      const rideDate = currentRideDate();
+      const [rows, season, roundList, gh, cfg, depthBoard, rank, serverBoon] = await Promise.all([
         fetchLatestStandings(build.seasonId),
         fetchSeasonStandings(build.seasonId),
         fetchRounds(build.seasonId),
@@ -548,7 +591,17 @@
         fetchLeagueConfig(),
         fetchTop(build.seasonId, 20),
         fetchRank(build.seasonId, seasonBest, seasonKills),
+        fetchMyPvpBoon(build.seasonId, rideDate),
       ]);
+      // The server copy of the pick wins when we have nothing locally — a
+      // reinstall, a cleared cache, or a silently-failed localStorage write
+      // (#180). It does NOT overwrite a local pick: a fetch that returns null
+      // is indistinguishable from a read failure by design, so letting it win
+      // would clear a good pick every time the network hiccuped.
+      if (myBoon === null && serverBoon !== null) {
+        myBoon = serverBoon;
+        saveBoonPick(build.seasonId, rideDate, serverBoon);
+      }
       standings = rows;
       seasonStandings = season;
       rounds = roundList;
