@@ -4,26 +4,22 @@ name: WRAD PvP nightly round
 # week (prod + dev channels), runs the all-vs-all round robin, writes the
 # standings to pvp_results. See packages/core/scripts/run-league-round.ts.
 #
-# Two triggers:
-#   * schedule — one entry, 19:38 UTC (≈ 21:38 Copenhagen in summer CEST,
-#     20:38 in winter CET), 22min before the advertised 22:00/21:00 CET duel
-#     time. GitHub cron can't do timezones; the ±1h DST drift is fine for a
-#     friend-group evening slot, and the runner derives the correct league
-#     day from the 06:00 Copenhagen rollover regardless.
-#     This used to be TWO entries (19:38 + 19:53) because a single `schedule`
-#     trigger proved unreliable: the first two nights ran ~66min late
-#     (19:06/19:07 UTC instead of 18:00 — GitHub's docs warn schedule events
-#     queue behind everyone else's at "high load" times, including the top of
-#     every hour), and on 2026-08-04 the 17:53 entry didn't fire at all (had
-#     to be dispatched manually). Per issue #185, the primary trigger has
-#     since moved to Supabase `pg_cron`/`pg_net` (job `wrad-pvp-nightly-
-#     trigger`, same 19:38 UTC time), which calls this workflow's
-#     `workflow_dispatch` API directly — Postgres runs the timer instead of
-#     GitHub's shared event queue, the actual point of failure. This single
-#     `schedule` entry stays only as a second independent backup;
-#     run-league-round.ts (roundAlreadyClosed) makes re-running a no-op if an
-#     earlier trigger already landed, so it can't double-score or
-#     double-post to Discord.
+# One trigger, one fallback:
+#   * workflow_dispatch is fired on schedule by Supabase `pg_cron`/`pg_net`
+#     (job `wrad-pvp-nightly-trigger`, issue #185) at 19:38 UTC (≈ 21:38
+#     Copenhagen in summer CEST, 20:38 in winter CET), 22min before the
+#     advertised 22:00/21:00 CET duel time. GitHub cron can't do timezones;
+#     the ±1h DST drift is fine for a friend-group evening slot, and the
+#     runner derives the correct league day from the 06:00 Copenhagen
+#     rollover regardless.
+#     This used to be a GitHub Actions `schedule:` trigger (at one point TWO
+#     entries, 19:38 + 19:53) because GitHub's own schedule queue proved
+#     unreliable here: the first two nights ran ~66min late (19:06/19:07 UTC
+#     instead of 18:00 — GitHub's docs warn schedule events queue behind
+#     everyone else's at "high load" times, including the top of every
+#     hour), and on 2026-08-04 the 17:53 entry didn't fire at all (had to be
+#     dispatched manually). Per issue #185, the trigger now lives entirely in
+#     Postgres instead, which isn't subject to that shared queue.
 #     The trigger stays BEFORE the advertised 22:00 slot, not after: this is
 #     an idle game, and scoring a few minutes *past* the deadline rewards
 #     whoever's actively watching the clock to dump fresh scrap into their
@@ -31,16 +27,14 @@ name: WRAD PvP nightly round
 #     incentive the game wants. Landing before 22:00 means the round is
 #     already locked by the time players expect it to run — no clock-sniping
 #     window to camp.
-#   * workflow_dispatch — the manual "Run workflow" button. Phone-friendly
-#     (GitHub mobile/web) and doubles as the dev trigger: click it to score
-#     the current boards on demand instead of waiting for the evening. Also
-#     the fallback of last resort if both the pg_cron and schedule triggers
-#     miss — safe to click any time, any number of times, for the same
-#     reason the backup schedule entry is safe: roundAlreadyClosed makes a
-#     second trigger for an already-closed round a no-op.
+#   * The "Run workflow" button (this same workflow_dispatch trigger) is also
+#     the manual fallback of last resort if pg_cron misses a night — phone-
+#     friendly (GitHub mobile/web), safe to click any time, any number of
+#     times: roundAlreadyClosed makes a second trigger for an already-closed
+#     round a no-op. If pg_cron ever misses, that's the signal to
+#     investigate Postgres's own cron reliability, not to re-add a GitHub
+#     schedule entry as a band-aid.
 on:
-  schedule:
-    - cron: '38 19 * * *'
   workflow_dispatch:
     inputs:
       dry:
