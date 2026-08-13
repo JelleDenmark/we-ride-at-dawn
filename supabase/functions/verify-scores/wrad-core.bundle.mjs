@@ -211,27 +211,34 @@ var UNIT_DEFS = {
     ability: { trigger: "startOfWave", effect: { kind: "poisonAllEnemies" } },
     tribe: "plague"
   },
-  // Season-3 prestige tribute (issue #115): Draughtsman Moe reskins
-  // Blight-Witch's exact kit/stats to honor RatMoe, the season-2 champion who
-  // maxed depth 45 on a 3× Blight-Witch poison-swarm. Same reskin precedent as
-  // MD Rattyfock (Warren-Warden) — the base `blight-witch` def stays in
-  // UNIT_DEFS for golden logs/replays, but is removed from the purchasable pool
-  // (see SHOP_UNIT_POOL in shop.ts) so the poison-all kit is only offered under
-  // the prestige name. Stays `plague`-tribe so it supports the archetype he
-  // pioneered and pairs with the reworked Plague-Bearer (#112, poisons the
-  // back): Moe rots wide, Bearer rots deep. Balance of the shared poison-all
-  // kit is tracked in #116 — tune the kit there, since Moe IS that kit.
+  // Season-3 prestige tribute (issue #115): Draughtsman Moe originally
+  // reskinned Blight-Witch's exact kit/stats to honor RatMoe, the season-2
+  // champion who maxed depth 45 on a 3× Blight-Witch poison-swarm — same
+  // body (attack/health/cost), same tribe, same reskin precedent as MD
+  // Rattyfock (Warren-Warden). The base `blight-witch` def stays in
+  // UNIT_DEFS for golden logs/replays, but is removed from the purchasable
+  // pool (see SHOP_UNIT_POOL in shop.ts) so this is the only way to field
+  // that archetype's plague-3/health-3/cost-8 body, and pairs with the
+  // reworked Plague-Bearer (#112, poisons the back).
+  //
+  // 2026-08-13 REWORK: the ABILITY split off `poisonAllEnemies` — see
+  // `poisonFrontEnemyWhileAlive`'s doc comment for the full PvP-overtuning
+  // history and why decay was reverted in favor of this. Body stats,
+  // day-2 gate, and tribe are unchanged; only the kit moved, so Moe no
+  // longer numerically mirrors Blight-Witch and #116's "tune the shared kit
+  // there, since Moe IS that kit" note is now stale history, not current.
   "draughtsman-moe": {
     id: "draughtsman-moe",
     name: "Draughtsman Moe",
     attack: 3,
     health: 3,
     cost: 8,
-    ability: { trigger: "startOfWave", effect: { kind: "poisonAllEnemies" } },
+    ability: { trigger: "whileAlive", effect: { kind: "poisonFrontEnemyWhileAlive" } },
     tribe: "plague",
     // Day-2 gate added (Jesper, 2026-08-01) — a deliberate departure from the
     // "day-1, matching Blight-Witch" precedent noted above; holds the
-    // poison-all prestige pick back one day this season.
+    // poison-all prestige pick back one day this season. Kept as-is through
+    // the 2026-08-13 kit rework.
     unlockDay: 2
   },
   gnawer: {
@@ -690,6 +697,7 @@ var EFFECT_FAMILY = {
   poisonLastEnemy: "poison",
   poisonTarget: "poison",
   poisonAllEnemies: "poison",
+  poisonFrontEnemyWhileAlive: "poison",
   blockFrontHits: "defence",
   grantArmor: "defence",
   poisonResist: "defence",
@@ -715,6 +723,7 @@ var EFFECT_KEYWORD = {
   poisonLastEnemy: "poison",
   poisonTarget: "poison",
   poisonAllEnemies: "poison",
+  poisonFrontEnemyWhileAlive: "poison",
   blockFrontHits: "block",
   grantArmor: "armor",
   poisonResist: "ward",
@@ -820,8 +829,9 @@ var RELIC_DEFS = {
     scope: "unit",
     cost: 4,
     family: "offence",
-    desc: "faint: 2 dmg, all foes",
-    onFaintDamageAll: 2
+    desc: "faint: 2 dmg, all foes, ignores armor",
+    onFaintDamageAll: 2,
+    onFaintIgnoresArmor: true
   },
   // SEASON-4 JOINT-TUNING FLAG (issue #135): Grave-Leech gives sustain a
   // unit-side home, and this relic was the game's only heal before it — a
@@ -1027,7 +1037,6 @@ function enemyAttackScale(waveIndex) {
   return 1 + waveIndex * ENEMY_ATTACK_SCALE_PER_WAVE;
 }
 var MIN_ATTACK_DAMAGE = 1;
-var POISON_DECAY_ENABLED = true;
 function simulate(lineup, gauntlet) {
   const { events, result } = simulateCore(lineup, { kind: "gauntlet", gauntlet });
   return { events, result };
@@ -1080,7 +1089,6 @@ function simulateCore(lineup, mode) {
       ability: def.ability,
       relics,
       poison: 0,
-      poisonFloor: 0,
       firstAttackDone: false,
       tailCharmUsed: false,
       // Team armor (Filth Totem) is a flat grant like team attack/health
@@ -1094,6 +1102,20 @@ function simulateCore(lineup, mode) {
       attackBuffs: 0
     };
   };
+  const applyBoonGrants = (u, entry) => {
+    if (entry.boonSilenced) u.ability = void 0;
+    const a = entry.boonAttack ?? 0;
+    const h = entry.boonHealth ?? 0;
+    if (a !== 0) {
+      u.attack = Math.max(0, u.attack + a);
+      u.attackBuffs += a;
+    }
+    if (h !== 0) {
+      u.health += h;
+      u.maxHealth += h;
+    }
+    return u;
+  };
   const view = (u) => ({
     instanceId: u.instanceId,
     defId: u.defId,
@@ -1103,7 +1125,7 @@ function simulateCore(lineup, mode) {
     tier: u.tier,
     side: u.side
   });
-  const horde = lineup.units.slice(0, BOARD_CAP).map((u) => instantiate(UNIT_DEFS[u.defId], "horde", u.relicIds, u.tier ?? 1));
+  const horde = lineup.units.slice(0, BOARD_CAP).map((u) => applyBoonGrants(instantiate(UNIT_DEFS[u.defId], "horde", u.relicIds, u.tier ?? 1), u));
   let enemies = [];
   const fallen = { horde: [], gauntlet: [] };
   const boardOf = (side) => side === "horde" ? horde : enemies;
@@ -1133,7 +1155,6 @@ function simulateCore(lineup, mode) {
   };
   const applyPoisonStacks = (target, stacks) => {
     target.poison += stacks;
-    target.poisonFloor = Math.max(target.poisonFloor, Math.ceil(stacks / 2));
     events.push({
       type: "poisonApplied",
       targetId: target.instanceId,
@@ -1197,6 +1218,10 @@ function simulateCore(lineup, mode) {
     board.splice(index, 0, summoned);
     events.push({ type: "summon", side, index, unit: view(summoned) });
     fireAllySummoned(summoned);
+    if (!echoSpent[side] && boonEchoFor(side)) {
+      echoSpent[side] = true;
+      spawn(def, index, side, owner, tier, relicIds);
+    }
     return true;
   };
   const applyEffect = (source, index, removed) => {
@@ -1325,6 +1350,21 @@ function simulateCore(lineup, mode) {
         }
         break;
       }
+      case "poisonFrontEnemyWhileAlive": {
+        const target = opposing(source.side)[0];
+        const level = poisonStacksForTier(tier);
+        if (target && target.health > 0 && target.poison < level) {
+          const delta = level - target.poison;
+          target.poison = level;
+          events.push({
+            type: "poisonApplied",
+            targetId: target.instanceId,
+            stacks: delta,
+            totalStacks: target.poison
+          });
+        }
+        break;
+      }
       case "gainStats": {
         buff(source, effect.attack * tier, effect.health * tier);
         break;
@@ -1375,7 +1415,6 @@ function simulateCore(lineup, mode) {
         corpse.raised = true;
         corpse.health = Math.min(reviveHpForTier(tier), corpse.maxHealth);
         corpse.poison = 0;
-        corpse.poisonFloor = 0;
         board.splice(index, 0, corpse);
         events.push({ type: "revive", side: source.side, index, unit: view(corpse) });
         break;
@@ -1428,7 +1467,7 @@ function simulateCore(lineup, mode) {
       for (const relic of dead.relics) {
         if (!relic.onFaintDamageAll) continue;
         events.push({ type: "relicProc", targetId: dead.instanceId, relicId: relic.id, name: relic.name });
-        for (const foe of [...opposing(dead.side)]) applyDamage(foe, relic.onFaintDamageAll, "attack");
+        for (const foe of [...opposing(dead.side)]) applyDamage(foe, relic.onFaintDamageAll, "attack", relic.onFaintIgnoresArmor);
       }
       for (const ally of [...deadBoard]) {
         if (ally.ability?.trigger === "allyFaint" && ally.health > 0) applyEffect(ally, deadBoard.indexOf(ally), false);
@@ -1451,10 +1490,21 @@ function simulateCore(lineup, mode) {
       applyEffect(unit, index, false);
     }
   };
+  const fireWhileAliveTriggers = (board) => {
+    for (const unit of [...board]) {
+      if (unit.health <= 0 || unit.ability?.trigger !== "whileAlive") continue;
+      const index = board.findIndex((u) => u.instanceId === unit.instanceId);
+      if (index === -1) continue;
+      applyEffect(unit, index, false);
+    }
+  };
   let wavesCleared = 0;
   let totalDamage = 0;
   let damageThisWave = 0;
   let blockCharges = { horde: 0, gauntlet: 0 };
+  const echoSpent = { horde: false, gauntlet: false };
+  const boonBoardFor = (side) => side === "horde" ? lineup : mode.kind === "duel" ? mode.opponent : void 0;
+  const boonEchoFor = (side) => boonBoardFor(side)?.boonEcho === true;
   let poisonAllApplied = { horde: 0, gauntlet: 0 };
   let poisonLastApplied = { horde: 0, gauntlet: 0 };
   let poisonResistApplied = { horde: 0, gauntlet: 0 };
@@ -1467,7 +1517,12 @@ function simulateCore(lineup, mode) {
       (d) => instantiate(d, "gauntlet", [], 1, enemyAttackScale(w), enemyHealthScale(w))
     )
   ) : [
-    () => mode.opponent.units.slice(0, BOARD_CAP).map((u) => instantiate(UNIT_DEFS[u.defId], "gauntlet", u.relicIds, u.tier ?? 1))
+    () => mode.opponent.units.slice(0, BOARD_CAP).map(
+      (u) => applyBoonGrants(
+        instantiate(UNIT_DEFS[u.defId], "gauntlet", u.relicIds, u.tier ?? 1),
+        u
+      )
+    )
   ];
   for (let w = 0; w < enemyWaves.length && horde.length > 0; w++) {
     currentWave = w + 1;
@@ -1481,6 +1536,10 @@ function simulateCore(lineup, mode) {
     poisonResistApplied = { horde: 0, gauntlet: 0 };
     fireEntryTriggers(horde);
     fireEntryTriggers(enemies);
+    for (const side of ["horde", "gauntlet"]) {
+      const hits = boonBoardFor(side)?.boonBlockHits ?? 0;
+      if (hits > 0) blockCharges[side] += hits;
+    }
     resolveDeaths();
     let ticks = 0;
     while (horde.length > 0 && enemies.length > 0 && ticks++ < MAX_TICKS_PER_WAVE) {
@@ -1564,15 +1623,14 @@ function simulateCore(lineup, mode) {
       if (foe.ability?.trigger === "afterAttack") applyEffect(foe, 0, false);
       if (frontTookBlow && front.ability?.trigger === "onHurt") applyTargetedEffect(front, foe);
       if (foeTookBlow && foe.ability?.trigger === "onHurt") applyTargetedEffect(foe, front);
+      fireWhileAliveTriggers(horde);
+      fireWhileAliveTriggers(enemies);
       for (const board of [horde, enemies]) {
         for (const unit of [...board]) {
           if (unit.poison > 0 && unit.health > 0) {
             const resisted = Math.max(0, unit.poison - poisonResistApplied[unit.side]);
             if (board === enemies) totalDamage += resisted;
             applyDamage(unit, resisted, "poison");
-            if (POISON_DECAY_ENABLED && unit.poison > unit.poisonFloor) {
-              unit.poison = Math.max(unit.poisonFloor, Math.ceil(unit.poison / 2));
-            }
           }
         }
       }
@@ -1585,7 +1643,6 @@ function simulateCore(lineup, mode) {
       events.push({ type: "waveClear", wave: w + 1 });
       for (const unit of horde) {
         unit.poison = 0;
-        unit.poisonFloor = 0;
       }
     }
   }
@@ -2100,6 +2157,217 @@ function anomalyFor(seasonId) {
   return pool[rng.int(pool.length)];
 }
 
+// packages/core/src/boons.ts
+var BOONS_PER_DAY = 3;
+var BOON_DEFS = {
+  drag: {
+    id: "drag",
+    name: "Dragged Forward",
+    blurb: "Your rival's hindmost rat is hauled to the front of their line.",
+    effect: { kind: "dragBackToFront" }
+  },
+  buried: {
+    id: "buried",
+    name: "Buried",
+    blurb: "Your rival's leading rat is shoved to the back of their line.",
+    effect: { kind: "buryFrontToBack" }
+  },
+  "a-body-first": {
+    id: "a-body-first",
+    name: "A Body First",
+    blurb: "A runt takes the front of your line. It dies first, so nothing better does.",
+    effect: { kind: "decoyFront" }
+  },
+  silence: {
+    id: "silence",
+    name: "Silence",
+    blurb: "Your rival's leading rat forgets its trick. Its charms still work.",
+    effect: { kind: "silenceFront" }
+  },
+  bulwark: {
+    id: "bulwark",
+    name: "Bulwark",
+    blurb: "Your leading rat takes the field heavier than it left the warren.",
+    effect: { kind: "frontHealth", amount: 10 }
+  },
+  blunt: {
+    id: "blunt",
+    name: "Blunt",
+    blurb: "Your rival's hindmost rat comes to the fight with a dulled tooth.",
+    effect: { kind: "sapBackAttack", amount: 14 }
+  },
+  rearguard: {
+    id: "rearguard",
+    name: "Rearguard",
+    blurb: "Your hindmost rat sharpens up while it waits its turn.",
+    effect: { kind: "backAttack", amount: 14 }
+  },
+  "deep-scout": {
+    id: "deep-scout",
+    name: "Deep Scout",
+    blurb: "You read every rival's line tonight, rat by rat.",
+    effect: { kind: "deepScout" }
+  },
+  guardian: {
+    id: "guardian",
+    name: "Guardian",
+    blurb: "The first blows against your line land on nothing at all.",
+    effect: { kind: "blockHits", hits: 2 }
+  }
+};
+var HELD_BOONS = {
+  echo: {
+    id: "echo",
+    name: "Echo",
+    blurb: "The first rat your warren calls up answers twice.",
+    effect: { kind: "echoFirstSummon" }
+  }
+};
+var BOON_FIRST_DATE = "2026-08-17";
+function boonsFor(rideDate) {
+  if (rideDate < BOON_FIRST_DATE) return [];
+  const pool = Object.values(BOON_DEFS);
+  if (pool.length <= BOONS_PER_DAY) return pool.slice();
+  const rng = xorshift128(fnv1a(`${rideDate}#boons`));
+  const order = pool.map((_, i) => i);
+  for (let i = 0; i < BOONS_PER_DAY; i++) {
+    const j = i + rng.int(order.length - i);
+    const swap = order[i];
+    order[i] = order[j];
+    order[j] = swap;
+  }
+  return order.slice(0, BOONS_PER_DAY).map((i) => pool[i]);
+}
+function isBoonOffered(rideDate, boonId) {
+  if (boonId === null || boonId === void 0) return true;
+  return boonsFor(rideDate).some((b) => b.id === boonId);
+}
+var DECOY_DEF_ID = "gutter-runt";
+function isSelfEffect(e) {
+  switch (e.kind) {
+    case "dragBackToFront":
+    case "buryFrontToBack":
+    case "silenceFront":
+    case "sapBackAttack":
+      return false;
+    default:
+      return true;
+  }
+}
+function patchUnit(lineup, index, patch) {
+  const units = lineup.units.slice();
+  if (index < 0 || index >= units.length) return lineup;
+  units[index] = patch({ ...units[index] });
+  return { ...lineup, units };
+}
+function moveUnit2(lineup, from, to) {
+  const units = lineup.units.slice();
+  if (units.length < 2) return lineup;
+  const [moved] = units.splice(from, 1);
+  units.splice(to, 0, moved);
+  return { ...lineup, units };
+}
+function applySelf(lineup, e) {
+  const last = lineup.units.length - 1;
+  switch (e.kind) {
+    case "frontHealth": {
+      if (lineup.units.length === 0) return { lineup };
+      const out = patchUnit(lineup, 0, (u) => ({ ...u, boonHealth: (u.boonHealth ?? 0) + e.amount }));
+      return {
+        lineup: out,
+        note: { kind: "stat", defId: out.units[0].defId, index: 0, attack: 0, health: e.amount }
+      };
+    }
+    case "backAttack": {
+      if (last < 0) return { lineup };
+      const out = patchUnit(lineup, last, (u) => ({ ...u, boonAttack: (u.boonAttack ?? 0) + e.amount }));
+      return {
+        lineup: out,
+        note: { kind: "stat", defId: out.units[last].defId, index: last, attack: e.amount, health: 0 }
+      };
+    }
+    case "decoyFront": {
+      const cap = (lineup.combatCap ?? BOARD_CAP) + 1;
+      return {
+        lineup: { ...lineup, units: [{ defId: DECOY_DEF_ID }, ...lineup.units], combatCap: cap },
+        note: { kind: "insert", defId: DECOY_DEF_ID, index: 0 }
+      };
+    }
+    case "blockHits":
+      return { lineup: { ...lineup, boonBlockHits: (lineup.boonBlockHits ?? 0) + e.hits } };
+    case "echoFirstSummon":
+      return { lineup: { ...lineup, boonEcho: true } };
+    default:
+      return { lineup };
+  }
+}
+function applyOpponent(lineup, e) {
+  const last = lineup.units.length - 1;
+  switch (e.kind) {
+    case "sapBackAttack": {
+      if (last < 0) return { lineup };
+      const out = patchUnit(lineup, last, (u) => ({ ...u, boonAttack: (u.boonAttack ?? 0) - e.amount }));
+      return {
+        lineup: out,
+        note: { kind: "stat", defId: out.units[last].defId, index: last, attack: -e.amount, health: 0 }
+      };
+    }
+    case "silenceFront": {
+      if (lineup.units.length === 0) return { lineup };
+      const out = patchUnit(lineup, 0, (u) => ({ ...u, boonSilenced: true }));
+      return {
+        lineup: out,
+        note: { kind: "silence", defId: out.units[0].defId, index: 0 }
+      };
+    }
+    case "dragBackToFront": {
+      if (lineup.units.length < 2) return { lineup };
+      const defId = lineup.units[last].defId;
+      return { lineup: moveUnit2(lineup, last, 0), note: { kind: "move", defId, from: last, to: 0 } };
+    }
+    case "buryFrontToBack": {
+      if (lineup.units.length < 2) return { lineup };
+      const defId = lineup.units[0].defId;
+      return { lineup: moveUnit2(lineup, 0, last), note: { kind: "move", defId, from: 0, to: last } };
+    }
+    default:
+      return { lineup };
+  }
+}
+function boardsForDuel(a, boonA, b, boonB, idA = null, idB = null) {
+  const notes = [];
+  const record = (by, boonId, target, note) => {
+    if (note) notes.push({ ...note, by, boonId: boonId ?? "", target });
+  };
+  let outA = a;
+  let outB = b;
+  if (boonA && isSelfEffect(boonA)) {
+    const r = applySelf(outA, boonA);
+    outA = r.lineup;
+    record("a", idA, "a", r.note);
+  }
+  if (boonB && isSelfEffect(boonB)) {
+    const r = applySelf(outB, boonB);
+    outB = r.lineup;
+    record("b", idB, "b", r.note);
+  }
+  if (boonA && !isSelfEffect(boonA)) {
+    const r = applyOpponent(outB, boonA);
+    outB = r.lineup;
+    record("a", idA, "b", r.note);
+  }
+  if (boonB && !isSelfEffect(boonB)) {
+    const r = applyOpponent(outA, boonB);
+    outA = r.lineup;
+    record("b", idB, "a", r.note);
+  }
+  return { a: outA, b: outB, notes };
+}
+function boonEffect(boonId) {
+  if (!boonId) return null;
+  return (BOON_DEFS[boonId] ?? HELD_BOONS[boonId])?.effect ?? null;
+}
+
 // packages/core/src/scout.ts
 var ARCHETYPE_LABEL = {
   swarm: "swarm",
@@ -2144,8 +2412,12 @@ function scoutReport(gauntlet) {
 }
 
 // packages/core/src/duel.ts
-function simulateDuel(a, b) {
-  const { events, result, enemySurvivors } = simulateCore(a, { kind: "duel", opponent: b });
+function simulateDuel(a, b, boonA = null, boonB = null) {
+  const boards = boardsForDuel(a, boonEffect(boonA), b, boonEffect(boonB), boonA, boonB);
+  const { events, result, enemySurvivors } = simulateCore(boards.a, {
+    kind: "duel",
+    opponent: boards.b
+  });
   const survivorsA = result.survivors;
   const survivorsB = enemySurvivors;
   const healthA = survivorsA.reduce((s, u) => s + u.health, 0);
@@ -2169,6 +2441,7 @@ function simulateDuel(a, b) {
     events,
     result: {
       winner,
+      boonNotes: boards.notes,
       survivorsA,
       survivorsB,
       healthA,
@@ -2186,6 +2459,13 @@ function consolationScrap(losses, payoutPerLoss) {
   const n = Math.max(0, Math.floor(losses));
   return perLoss * n;
 }
+function scoutSummary(board) {
+  const units = board.units ?? [];
+  return {
+    unitCount: units.length,
+    totalStars: units.reduce((sum, u) => sum + (u.tier ?? 1), 0)
+  };
+}
 function scoreRound(entrants, winPoints = 3) {
   const n = entrants.length;
   const points = new Array(n).fill(0);
@@ -2195,7 +2475,12 @@ function scoreRound(entrants, winPoints = 3) {
   const survivorDiff = new Array(n).fill(0);
   for (let i = 0; i < n; i++) {
     for (let j = i + 1; j < n; j++) {
-      const { result } = simulateDuel(entrants[i].board, entrants[j].board);
+      const { result } = simulateDuel(
+        entrants[i].board,
+        entrants[j].board,
+        entrants[i].boon ?? null,
+        entrants[j].boon ?? null
+      );
       const diff = result.healthA - result.healthB;
       survivorDiff[i] += diff;
       survivorDiff[j] -= diff;
@@ -2247,6 +2532,9 @@ function validateBoard(board) {
     if (!Number.isInteger(tier) || tier < 1 || tier > MAX_TIER) {
       return { ok: false, reason: `unit "${u.defId}" has invalid tier ${tier}` };
     }
+    if (u.boonAttack !== void 0 || u.boonHealth !== void 0 || u.boonSilenced !== void 0) {
+      return { ok: false, reason: `unit "${u.defId}" carries a boon grant` };
+    }
     const relicIds = u.relicIds ?? [];
     const seenUnitRelics = /* @__PURE__ */ new Set();
     for (const relicId of relicIds) {
@@ -2260,6 +2548,9 @@ function validateBoard(board) {
       }
       seenUnitRelics.add(relicId);
     }
+  }
+  if (board.boonBlockHits !== void 0 || board.boonEcho !== void 0) {
+    return { ok: false, reason: "board carries a boon grant" };
   }
   const teamRelicIds = board.teamRelicIds ?? [];
   const seenTeamRelics = /* @__PURE__ */ new Set();
@@ -2283,8 +2574,12 @@ export {
   ARCHETYPE_LABEL,
   BENCH_SIZE,
   BOARD_CAP,
+  BOONS_PER_DAY,
+  BOON_DEFS,
+  BOON_FIRST_DATE,
   COMBAT_CAP_BONUS,
   DAILY_SCRAP,
+  DECOY_DEF_ID,
   EFFECT_FAMILY,
   EFFECT_KEYWORD,
   ENEMY_ATTACK_SCALE_PER_WAVE,
@@ -2317,6 +2612,9 @@ export {
   benchUnit,
   blockHitsForTier,
   boardCapForDay,
+  boardsForDuel,
+  boonEffect,
+  boonsFor,
   buffSummonedForTier,
   buyBoardSlot,
   buyRelic,
@@ -2335,6 +2633,7 @@ export {
   fnv1a,
   generateGauntlet,
   hasValidRelicTarget,
+  isBoonOffered,
   isShopDead,
   keywordFamily,
   legalEntrants,
@@ -2350,6 +2649,7 @@ export {
   rollOfferings,
   scoreRound,
   scoutReport,
+  scoutSummary,
   scrapForDepth,
   seasonIdFor,
   seasonRelicPool,

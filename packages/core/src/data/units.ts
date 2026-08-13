@@ -590,6 +590,48 @@ export type Effect =
    * per-wave accounting, mirroring Ward-Weaver's `blockCharges` cap-not-sum.
    */
   | { kind: 'poisonAllEnemies' }
+  /**
+   * Draughtsman Moe (2026-08-13 rework — broke off the `poisonAllEnemies`
+   * kit she used to reskin from Blight-Witch; see that unit's doc comment
+   * for the tribute history that stays true, and #116/#155's PvP findings
+   * for why the shared kit didn't). A wave-start AoE that then sat on every
+   * enemy at full, non-decaying strength for a duel's whole length read as a
+   * PvP-specific outlier ([[wrad-pvp-season1-meta]]: 41.5% of her own
+   * outgoing damage in an isolated duel vs 1.8% across a 45-wave PvE
+   * gauntlet) while barely registering mid-PvE. Poison decay
+   * (`POISON_DECAY_ENABLED`, `ce5d513`) was tried as the fix and shipped,
+   * then reverted (2026-08-13, owner call): it blunted every OTHER poison
+   * source in the game as collateral, and against the real top-of-ladder
+   * mirror matches it barely moved the needle anyway (a damage-race
+   * structural limit, documented at length in that commit's history) — the
+   * owner's read was that it nerfed the wrong thing. This effect is the
+   * actual fix, scoped to Moe alone: BREADTH, not duration. Wired to the new
+   * `whileAlive` trigger (fires every combat tick the caster survives, see
+   * `Ability.trigger`'s doc comment), it targets only `opposing(side)[0]` —
+   * whichever enemy currently stands at the front — and sets that target's
+   * poison to `poisonStacksForTier(tier)` via `Math.max`, a REFRESH, not an
+   * addition (see the case in sim.ts's `applyEffect`). A long PvP duel now
+   * only ever has ONE enemy rotting at a time, no matter how long it runs —
+   * the opposite of the old whole-board burst that stayed at full strength
+   * for the whole fight.
+   *
+   * "While alive" gates NEW poison only: Moe falling stops her from
+   * refreshing/retargeting, but does not strip poison already sitting on a
+   * target — nothing in the game strips poison early now that decay is
+   * gone, this effect included.
+   *
+   * Compounding-law note (ADR-0003) — this is the one place a per-tick
+   * trigger is safe without a hard cap or a shared budget, and it's worth
+   * spelling out why: `Math.max` makes re-applying to a target already AT
+   * `poisonStacksForTier(tier)` a no-op, so nothing grows tick over tick.
+   * Multiple Moe casters don't need `poisonAllEnemies`'s cap-not-sum budget
+   * (issue #116) either — `Math.max` across N casters hitting the same front
+   * slot converges to the single highest tier's value for free, the same
+   * outcome a budget would enforce. And it cannot carry across waves:
+   * gauntlet enemies are re-instantiated fresh every wave and horde-side
+   * poison is cleared at `waveClear`, same as every other poison effect.
+   */
+  | { kind: 'poisonFrontEnemyWhileAlive' }
   | { kind: 'gainStats'; attack: number; health: number }
   /**
    * Cellar-Coil (issue #106; "positional patience" in
@@ -821,8 +863,23 @@ export interface Ability {
    * TARGETED triggers: their effects need a target reference threaded in,
    * so they resolve through `applyTargetedEffect` in sim.ts rather than the
    * positional `applyEffect` path every other trigger uses.
+   *
+   * `whileAlive` (Draughtsman Moe's 2026-08-13 rework) fires once per
+   * COMBAT TICK, for every tick the caster survives — not once per wave like
+   * every trigger above. See `poisonFrontEnemyWhileAlive`'s doc comment for
+   * why a continuous per-tick trigger is safe under the compounding law here
+   * specifically (it isn't, in general — see ADR-0003 — this one effect's
+   * `Math.max` refresh is what makes it so).
    */
-  trigger: 'startOfBattle' | 'startOfWave' | 'faint' | 'afterAttack' | 'allyFaint' | 'allySummoned' | 'onHurt';
+  trigger:
+    | 'startOfBattle'
+    | 'startOfWave'
+    | 'faint'
+    | 'afterAttack'
+    | 'allyFaint'
+    | 'allySummoned'
+    | 'onHurt'
+    | 'whileAlive';
   effect: Effect;
   /**
    * Gate the ability's firing on the real-world half of the day the ride
@@ -1109,23 +1166,30 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     ability: { trigger: 'startOfWave', effect: { kind: 'poisonAllEnemies' } },
     tribe: 'plague',
   },
-  // Season-3 prestige tribute (issue #115): Draughtsman Moe reskins
-  // Blight-Witch's exact kit/stats to honor RatMoe, the season-2 champion who
-  // maxed depth 45 on a 3× Blight-Witch poison-swarm. Same reskin precedent as
-  // MD Rattyfock (Warren-Warden) — the base `blight-witch` def stays in
-  // UNIT_DEFS for golden logs/replays, but is removed from the purchasable pool
-  // (see SHOP_UNIT_POOL in shop.ts) so the poison-all kit is only offered under
-  // the prestige name. Stays `plague`-tribe so it supports the archetype he
-  // pioneered and pairs with the reworked Plague-Bearer (#112, poisons the
-  // back): Moe rots wide, Bearer rots deep. Balance of the shared poison-all
-  // kit is tracked in #116 — tune the kit there, since Moe IS that kit.
+  // Season-3 prestige tribute (issue #115): Draughtsman Moe originally
+  // reskinned Blight-Witch's exact kit/stats to honor RatMoe, the season-2
+  // champion who maxed depth 45 on a 3× Blight-Witch poison-swarm — same
+  // body (attack/health/cost), same tribe, same reskin precedent as MD
+  // Rattyfock (Warren-Warden). The base `blight-witch` def stays in
+  // UNIT_DEFS for golden logs/replays, but is removed from the purchasable
+  // pool (see SHOP_UNIT_POOL in shop.ts) so this is the only way to field
+  // that archetype's plague-3/health-3/cost-8 body, and pairs with the
+  // reworked Plague-Bearer (#112, poisons the back).
+  //
+  // 2026-08-13 REWORK: the ABILITY split off `poisonAllEnemies` — see
+  // `poisonFrontEnemyWhileAlive`'s doc comment for the full PvP-overtuning
+  // history and why decay was reverted in favor of this. Body stats,
+  // day-2 gate, and tribe are unchanged; only the kit moved, so Moe no
+  // longer numerically mirrors Blight-Witch and #116's "tune the shared kit
+  // there, since Moe IS that kit" note is now stale history, not current.
   'draughtsman-moe': {
     id: 'draughtsman-moe', name: 'Draughtsman Moe', attack: 3, health: 3, cost: 8,
-    ability: { trigger: 'startOfWave', effect: { kind: 'poisonAllEnemies' } },
+    ability: { trigger: 'whileAlive', effect: { kind: 'poisonFrontEnemyWhileAlive' } },
     tribe: 'plague',
     // Day-2 gate added (Jesper, 2026-08-01) — a deliberate departure from the
     // "day-1, matching Blight-Witch" precedent noted above; holds the
-    // poison-all prestige pick back one day this season.
+    // poison-all prestige pick back one day this season. Kept as-is through
+    // the 2026-08-13 kit rework.
     unlockDay: 2,
   },
   gnawer: {

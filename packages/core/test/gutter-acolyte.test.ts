@@ -23,14 +23,18 @@ import { UNIT_DEFS } from '../src/data/units';
 const ofType = <T extends BattleEvent['type']>(events: BattleEvent[], type: T) =>
   events.filter((e): e is Extract<BattleEvent, { type: T }> => e.type === type);
 
-// A tier-3 Draughtsman-Moe deals poisonStacksForTier(3)=5 poison per tick to
+// A tier-3 Blight-Witch deals poisonStacksForTier(3)=5 poison per tick to
 // every living enemy — used throughout as a fixed, large poison source so
-// resisted amounts land on clean integers. It also hits like a truck
-// (tierAttackMultiplier(3)=9x), so every horde board below puts a sacrificial
-// Grave-Leech at the front to eat the clash — the unit actually under test
-// rides behind it, untouched by the clash, so its poison ticks are measured
-// cleanly regardless of how the front-line fight goes.
-const poisoner = { defId: 'draughtsman-moe', tier: 3 as const };
+// resisted amounts land on clean integers. (Draughtsman Moe used to share
+// this exact kit as a reskin; her 2026-08-13 rework moved her to a
+// single-target `poisonFrontEnemyWhileAlive`, so Blight-Witch is now the
+// fixture here — same numbers, still the whole-wave poison-all source these
+// tests need.) She also hits like a truck (tierAttackMultiplier(3)=9x), so
+// every horde board below puts a sacrificial Grave-Leech at the front to eat
+// the clash — the unit actually under test rides behind it, untouched by the
+// clash, so its poison ticks are measured cleanly regardless of how the
+// front-line fight goes.
+const poisoner = { defId: 'blight-witch', tier: 3 as const };
 const frontTank = { defId: 'grave-leech' };
 
 const hordePoisonTicks = (events: BattleEvent[]) => {
@@ -103,13 +107,12 @@ describe('Gutter-Acolyte (issue #155: poison counter remake)', () => {
   it('never reaches a full 100% counter, even at the multi-caster cap', () => {
     // Checks the RESIST mechanic's own guarantee only: the first tick after
     // poison lands is never fully negated by `poisonResistApplied`, no
-    // matter how many Acolytes are stacked. In a long enough fight,
-    // `POISON_DECAY_ENABLED` (2026-08-07, issue #155 PvP-duel-length
-    // follow-up — see that constant's doc comment in sim.ts) separately
-    // runs a unit's raw poison stack down to 0 over time, so LATER ticks in
-    // this same fight legitimately land at 0 once poison naturally expires
-    // — that's decay doing its job, not resist "fully" countering poison,
-    // so this test only asserts on the tick where poison is freshest.
+    // matter how many Acolytes are stacked. (Poison decay, which used to be
+    // a separate reason later ticks in a long fight could legitimately land
+    // at 0, was reverted 2026-08-13 — see sim.ts's note where
+    // `POISON_DECAY_ENABLED` used to live — so this now also holds for every
+    // later tick, not just the freshest one; asserting on tick 0 only is
+    // still the precise claim this test makes.)
     const { events } = simulateDuel(
       { units: [frontTank, { defId: 'gutter-acolyte', tier: 3 }, { defId: 'gutter-acolyte', tier: 3 }] },
       { units: [poisoner] }

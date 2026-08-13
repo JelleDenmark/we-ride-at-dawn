@@ -49,6 +49,7 @@ const ROLE_OF_EFFECT: Record<string, string> = {
   reflectDamage: 'reach',
   poisonLastEnemy: 'reach',
   poisonAllEnemies: 'reach',
+  poisonFrontEnemyWhileAlive: 'reach',
   // Survive the clash.
   grantArmor: 'defense',
   revive: 'defense',

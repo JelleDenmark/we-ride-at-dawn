@@ -139,16 +139,6 @@ interface BattleUnit {
   ability?: Ability;
   relics: RelicDef[];
   poison: number;
-  /**
-   * Decay floor for `poison` — half (rounded up) of the largest single
-   * poison application this unit has ever taken. See
-   * `POISON_DECAY_ENABLED`'s doc comment: decay must converge to a
-   * TIER-PROPORTIONAL floor, not a universal constant, or merging a poison
-   * caster stops mattering (a T1 and a T3 Moe converge to the same
-   * long-fight total) and a single minimal resist investment can walk any
-   * stack down to the same floor and fully zero it.
-   */
-  poisonFloor: number;
   firstAttackDone: boolean;
   tailCharmUsed: boolean;
   /** Flat armor against 'attack' damage; see UnitDef.damageReduction. */
@@ -211,101 +201,21 @@ interface BattleUnit {
 export const MIN_ATTACK_DAMAGE = 1;
 
 /**
- * PROPOSED (2026-08-07, uncommitted, not yet reviewed — owner asked for a
- * Moe PvP nerf and to "analyse it properly first"; this is that analysis).
+ * Poison decay (`POISON_DECAY_ENABLED`, `ce5d513`/`42b95d5`, 2026-08-07) was
+ * shipped as a Moe PvP nerf and then REVERTED (2026-08-13, owner call): it
+ * blunted every OTHER poison source in the game as collateral (Plague-Bearer,
+ * enemy poison, the Gutter-Acolyte counter's whole premise), and against the
+ * real top-of-ladder mirror matches it barely moved the needle anyway — a
+ * damage-race structural limit (poison and clash attacks drain the same
+ * health pool, so cutting poison's rate mostly just makes the fight run
+ * longer instead of cutting its lifetime total), documented at length in
+ * that commit's history if the full derivation is ever needed again. Poison
+ * once again applies once and holds at full strength until `waveClear`
+ * clears it, exactly like before `ce5d513`.
  *
- * Root cause: poison never decayed — `target.poison += stacks` (see
- * `applyPoisonStacks`) is set once and re-applied at FULL value every
- * single clash tick for the rest of the unit's life (only cleared at
- * `waveClear`). `poisonAllEnemies` (Moe/Blight-Witch) also hits every
- * living enemy at cast time, not just the front. Measured impact
- * (`scripts/moe-poison-share-probe.ts`): poison is 41.5% of a solo Moe's
- * OWN outgoing damage in an isolated PvP duel, vs 1.8% across a full 45-wave
- * PvE gauntlet with the same board — a ~20-40x gap, not because her numbers
- * differ, but because PvP duels field big, high-HP boards that survive many
- * ticks while carrying full poison the whole time, and PvE waves are short
- * (avg ~7 ticks, `scripts/pvp-vs-pve-battle-length-probe.ts`) and enemies
- * mostly die before that has room to compound.
- *
- * When true, poison HALVES (rounded up) after dealing damage each tick,
- * down to a floor of `unit.poisonFloor` — half (rounded up) of the LARGEST
- * SINGLE application this unit has ever taken (see `applyPoisonStacks`),
- * not a universal constant. That distinction went through two rejected
- * designs first:
- *
- * 1. Flat decrement (e.g. -1/tick): collateral-damaged every OTHER poison
- *    source in the game that applies a small stack once — Plague-Bearer
- *    (`poisonLastEnemy`, 1 stack, `startOfWave`) and enemy Plague-Doctor/
- *    Midden-Hag (1 stack) — because a 1-stack poison minus a flat decay of
- *    1 hits zero after exactly one tick, turning a unit designed as a slow
- *    persistent bleed into a single tap (broke `test/abilities.test.ts`'s
- *    crossing-blow Marrow-Snap test).
- * 2. Halving toward a UNIVERSAL floor of 1 (fixed the above — a 1-stack
- *    source is `ceil(1/2)`=1, untouched): but converges every tier to the
- *    same long-fight total (measured over 1000 ticks: T1/T2/T3 totals
- *    1000/1003/1007 — merging Moe bought almost nothing), and let a SINGLE
- *    T1 Gutter-Acolyte (a single resist point) eventually walk any stack
- *    down to fully zero given enough ticks (`ticks: 4,4,4,4,4,4,2,2,2,2,2,2,
- *    1,1,1,1,1,0,0,0,0,0` — stays at 0) — a hard break of the documented
- *    "poison can never be fully zeroed out... not a hard/100% counter" law
- *    (see `POISON_RESIST_CAP`'s doc comment). Both caught by the owner
- *    reviewing the proposal, not by this analysis originally — re-verify
- *    any future poison-engine change against both properties.
- *
- * `poisonFloor` (tracked per-unit, reset alongside `poison` at `waveClear`
- * and on revive) fixes both: floor scales with the tier that cast it, so
- * merging still means something (1000-tick totals: T1=1000, T2=2001,
- * T3=3002 — a clean, preserved ~1x/2x/3x ordering), and a LONE T1 Acolyte
- * can no longer fully zero a T3 Moe (settles at a nonzero floor, verified
- * over a 22-tick duel). Only the theoretical MAXIMUM resist investment
- * (both multi-caster cap-not-sum budget slots filled, e.g. two ★3
- * Acolytes) can, given enough ticks, still walk poison to exactly 0 — a
- * narrow, high-investment edge case the owner accepted as a reasonable
- * payoff for maximum commitment, unlike the single-Acolyte case.
- *
- * Honest limitation, found while tuning the floor ratio (swept 1/2 vs 1/3
- * of peak stack): floor ratio barely moves the REAL top-of-ladder mirror
- * matches (RatMoe vs Well-Dressed-Rat poison share: 73.4% baseline -> 72.7%
- * at floor=1/2 -> 70.9% at floor=1/3 — both landed in the same narrow
- * band). Root cause (`scripts/poison-breadth-vs-depth-check.ts`, per-victim
- * tick breakdown — an initial "victims die too fast for decay to matter"
- * theory was checked and was WRONG: victims survive 14.5-19.9 ticks on
- * average, plenty of time for decay to reach its floor): this is a DAMAGE
- * RACE, not a rate problem. Poison and clash attacks are both draining the
- * same fixed health pool. Cutting poison's sustained rate (floor 3 -> 2)
- * doesn't cut its total lifetime contribution proportionally — it mostly
- * just makes the victim survive MORE ticks before the combined damage
- * (attack + poison) finishes it (avg ticks-to-die rose 14.5 -> 19.9 when
- * the floor dropped), and poison keeps ticking through those extra ticks
- * too, largely refunding the per-tick cut (grand total across all 8
- * victims: 364 at floor=3, 350 at floor=2 — only a ~4% drop for a 33%
- * rate cut). A real fix for THIS specific shape would need a lever that
- * doesn't get raced away — e.g. a hard total-damage budget per victim
- * (rejected earlier as "a victim cap," see the history above) or reducing
- * how much of the target's health poison needs to cover in the first
- * place (a magnitude nerf or making combat itself resolve faster). Kept
- * floor=1/2 (not 1/3) since lowering the ratio further didn't meaningfully
- * improve the real-matchup number (the racing dynamic ate most of the
- * gain) but did degrade merge-scaling (T1/T2 totals converge at 1/3:
- * 1000/1003). The floor mechanism is still real and correct — it's a
- * genuine, meaningful curb for isolated/moderate matchups and the
- * `pvp:matrix` marginal panel (T3 poison-matchup column flips +50 -> -19,
- * bulk/swarm/glass stay positive and close to baseline: 135->105, 159->156,
- * 225->180) — it just structurally cannot be the full answer for the
- * longest, most evenly-matched real fights, no matter how the floor ratio
- * is tuned, because of the racing dynamic above.
- *
- * PvE poison share essentially unchanged (1.8% -> 1.3%,
- * `scripts/pve-poison-cap-check.ts`-style solo-Moe gauntlet run).
- * Compounding-law note (ADR-0003): safe — decay and `poisonFloor` both
- * reset every wave alongside `poison` itself, so nothing carries across
- * the 45-wave gauntlet.
- *
- * Does NOT fix the unrelated acolyte-vs-realistic-board landslide from the
- * POISON_RESIST_CAP analysis (still -357 at T3 either way) — that loss was
- * never about poison, see that constant's doc comment.
+ * The actual Moe fix is scoped to Moe alone: see `poisonFrontEnemyWhileAlive`
+ * in data/units.ts.
  */
-export const POISON_DECAY_ENABLED = true;
 
 /**
  * How the enemy side is sourced for a battle:
@@ -444,7 +354,6 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
       ability: def.ability,
       relics,
       poison: 0,
-      poisonFloor: 0,
       firstAttackDone: false,
       tailCharmUsed: false,
       // Team armor (Filth Totem) is a flat grant like team attack/health
@@ -554,12 +463,6 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
 
   const applyPoisonStacks = (target: BattleUnit, stacks: number): void => {
     target.poison += stacks;
-    // Floor tracks the largest SINGLE application, not the running total —
-    // a 1-stack Plague-Bearer topping up a 5-stack Moe application should
-    // not drag the floor down, and repeated small re-applications
-    // shouldn't ratchet it up either. See POISON_DECAY_ENABLED's doc
-    // comment.
-    target.poisonFloor = Math.max(target.poisonFloor, Math.ceil(stacks / 2));
     events.push({
       type: 'poisonApplied',
       targetId: target.instanceId,
@@ -991,9 +894,11 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
         // this per-wave AoE cannot accumulate across the 45-wave battle.
         //
         // Multi-caster stack cap (issue #116): multiple poison-all casters
-        // (Blight-Witch / its Draughtsman Moe reskin) used to stack ADDITIVELY
-        // within a wave — the direct cause of RatMoe's season-2 depth-45 run on
-        // 3× Blight-Witch (a probe measured +10 avg depth going 0→3 casters,
+        // (Blight-Witch, and Draughtsman Moe before her 2026-08-13 rework
+        // off this kit — see `poisonFrontEnemyWhileAlive`) used to stack
+        // ADDITIVELY within a wave — the direct cause of RatMoe's season-2
+        // depth-45 run on 3× Blight-Witch (a probe measured +10 avg depth
+        // going 0→3 casters,
         // poison then >50% of all damage dealt, ignoring armor and the wave HP
         // curve). We now cap the TOTAL poison-all stacks dispensed to the enemy
         // side this wave at `poisonStacksForTier(3)` (Jesper's call, 2026-07-16:
@@ -1010,6 +915,29 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
             if (target.health > 0) applyPoisonStacks(target, stacks);
           }
           poisonAllApplied[source.side] += stacks;
+        }
+        break;
+      }
+      case 'poisonFrontEnemyWhileAlive': {
+        // Draughtsman Moe (2026-08-13 rework) — see the Effect's doc comment
+        // in data/units.ts. Fired every combat tick the caster survives (see
+        // `fireWhileAliveTriggers` below), targeting only the CURRENT front
+        // enemy. Deliberately NOT `applyPoisonStacks` (which adds): a
+        // `Math.max` refresh keeps a still-poisoned front target flat
+        // instead of growing every tick, which is also what makes multiple
+        // Moe casters safe without a separate cap-not-sum budget — they all
+        // converge on the same target's value.
+        const target = opposing(source.side)[0];
+        const level = poisonStacksForTier(tier);
+        if (target && target.health > 0 && target.poison < level) {
+          const delta = level - target.poison;
+          target.poison = level;
+          events.push({
+            type: 'poisonApplied',
+            targetId: target.instanceId,
+            stacks: delta,
+            totalStacks: target.poison,
+          });
         }
         break;
       }
@@ -1141,7 +1069,6 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
         corpse.raised = true;
         corpse.health = Math.min(reviveHpForTier(tier), corpse.maxHealth);
         corpse.poison = 0;
-        corpse.poisonFloor = 0;
         board.splice(index, 0, corpse);
         events.push({ type: 'revive', side: source.side, index, unit: view(corpse) });
         break;
@@ -1311,6 +1238,22 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
       // clashing slot. A `startOfWave` ability still fires every Wave the
       // unit survives, it just no-ops the Wave it's currently front.
       if (condition?.notFront && index === 0) continue;
+      applyEffect(unit, index, false);
+    }
+  };
+
+  /**
+   * `whileAlive` (Draughtsman Moe's 2026-08-13 rework, see
+   * `poisonFrontEnemyWhileAlive` in data/units.ts): fires every combat tick,
+   * for every LIVING unit with this trigger — unlike `fireEntryTriggers`,
+   * there is no fire-once guard, since the whole point is a continuous
+   * per-tick check. Called from inside the tick loop, once per side.
+   */
+  const fireWhileAliveTriggers = (board: BattleUnit[]): void => {
+    for (const unit of [...board]) {
+      if (unit.health <= 0 || unit.ability?.trigger !== 'whileAlive') continue;
+      const index = board.findIndex((u) => u.instanceId === unit.instanceId);
+      if (index === -1) continue;
       applyEffect(unit, index, false);
     }
   };
@@ -1706,6 +1649,14 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
       if (frontTookBlow && front.ability?.trigger === 'onHurt') applyTargetedEffect(front, foe);
       if (foeTookBlow && foe.ability?.trigger === 'onHurt') applyTargetedEffect(foe, front);
 
+      // `whileAlive` (Draughtsman Moe): a continuous per-tick check, fired
+      // after this tick's clash/execute/cleave/onHurt resolve so a target
+      // that just rotated to front this same tick is already the one it
+      // sees, and before the poison-tick block below so a freshly
+      // refreshed stack still deals damage this same tick.
+      fireWhileAliveTriggers(horde);
+      fireWhileAliveTriggers(enemies);
+
       for (const board of [horde, enemies]) {
         for (const unit of [...board]) {
           if (unit.poison > 0 && unit.health > 0) {
@@ -1726,17 +1677,6 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
             // amount.
             if (board === enemies) totalDamage += resisted;
             applyDamage(unit, resisted, 'poison');
-            // PROPOSED (2026-08-07) — see POISON_DECAY_ENABLED's doc
-            // comment for the full derivation. Halves toward
-            // `poisonFloor` (half the largest single application this
-            // unit ever took), NOT toward a universal constant — a fixed
-            // floor made every tier converge to the same long-fight total
-            // (merging stopped mattering) and let a single T1 Acolyte
-            // eventually zero even a T3 Moe. A tier-proportional floor
-            // keeps both properties intact.
-            if (POISON_DECAY_ENABLED && unit.poison > unit.poisonFloor) {
-              unit.poison = Math.max(unit.poisonFloor, Math.ceil(unit.poison / 2));
-            }
           }
         }
       }
@@ -1760,7 +1700,6 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
       // otherwise plague enemies would compound with attrition (tunable).
       for (const unit of horde) {
         unit.poison = 0;
-        unit.poisonFloor = 0;
       }
     }
   }
