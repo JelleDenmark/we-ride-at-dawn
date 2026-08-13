@@ -5,43 +5,42 @@ name: WRAD PvP nightly round
 # standings to pvp_results. See packages/core/scripts/run-league-round.ts.
 #
 # Two triggers:
-#   * schedule — nightly, TWO entries just shy of the evening slot: 19:38 and
-#     19:53 UTC (≈ 21:38/21:53 Copenhagen in summer CEST, 20:38/20:53 in
-#     winter CET) — 7-22min before the advertised 22:00/21:00 CET duel time.
-#     GitHub cron can't do timezones; the ±1h DST drift is fine for a
+#   * schedule — one entry, 19:38 UTC (≈ 21:38 Copenhagen in summer CEST,
+#     20:38 in winter CET), 22min before the advertised 22:00/21:00 CET duel
+#     time. GitHub cron can't do timezones; the ±1h DST drift is fine for a
 #     friend-group evening slot, and the runner derives the correct league
 #     day from the 06:00 Copenhagen rollover regardless.
-#     Two entries, not one, because a single `schedule` trigger has proven
-#     unreliable here: the first two nights ran ~66min late (19:06/19:07 UTC
-#     instead of 18:00 — GitHub's docs warn schedule events queue behind
-#     everyone else's at "high load" times, including the top of every hour),
-#     and on 2026-08-04 the 17:53 entry didn't fire at all (had to be
-#     dispatched manually). A second entry 15min earlier gives GitHub two
-#     independent chances to actually deliver the event; run-league-round.ts
-#     (roundAlreadyClosed) makes re-running a no-op if the earlier one already
-#     landed, so the backup can't double-score or double-post to Discord.
-#     Both entries stay BEFORE the advertised 22:00 slot, not after: this is
+#     This used to be TWO entries (19:38 + 19:53) because a single `schedule`
+#     trigger proved unreliable: the first two nights ran ~66min late
+#     (19:06/19:07 UTC instead of 18:00 — GitHub's docs warn schedule events
+#     queue behind everyone else's at "high load" times, including the top of
+#     every hour), and on 2026-08-04 the 17:53 entry didn't fire at all (had
+#     to be dispatched manually). Per issue #185, the primary trigger has
+#     since moved to Supabase `pg_cron`/`pg_net` (job `wrad-pvp-nightly-
+#     trigger`, same 19:38 UTC time), which calls this workflow's
+#     `workflow_dispatch` API directly — Postgres runs the timer instead of
+#     GitHub's shared event queue, the actual point of failure. This single
+#     `schedule` entry stays only as a second independent backup;
+#     run-league-round.ts (roundAlreadyClosed) makes re-running a no-op if an
+#     earlier trigger already landed, so it can't double-score or
+#     double-post to Discord.
+#     The trigger stays BEFORE the advertised 22:00 slot, not after: this is
 #     an idle game, and scoring a few minutes *past* the deadline rewards
 #     whoever's actively watching the clock to dump fresh scrap into their
 #     board right before the snapshot, which is the opposite of the idle
 #     incentive the game wants. Landing before 22:00 means the round is
 #     already locked by the time players expect it to run — no clock-sniping
-#     window to camp. If BOTH entries ever miss the same night, that's a
-#     signal GitHub's scheduler itself isn't dependable enough for this and
-#     we should move the trigger off GitHub Actions schedule entirely (e.g. an
-#     external pinger hitting workflow_dispatch via the API), not just add a
-#     third entry.
+#     window to camp.
 #   * workflow_dispatch — the manual "Run workflow" button. Phone-friendly
 #     (GitHub mobile/web) and doubles as the dev trigger: click it to score
 #     the current boards on demand instead of waiting for the evening. Also
-#     the fallback of last resort if both schedule entries miss — safe to
-#     click any time, any number of times, for the same reason the backup
-#     schedule entry is safe: roundAlreadyClosed makes a second trigger for
-#     an already-closed round a no-op.
+#     the fallback of last resort if both the pg_cron and schedule triggers
+#     miss — safe to click any time, any number of times, for the same
+#     reason the backup schedule entry is safe: roundAlreadyClosed makes a
+#     second trigger for an already-closed round a no-op.
 on:
   schedule:
     - cron: '38 19 * * *'
-    - cron: '53 19 * * *'
   workflow_dispatch:
     inputs:
       dry:
