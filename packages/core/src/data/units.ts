@@ -1512,6 +1512,23 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     id: 'gutter-acolyte', name: 'Gutter-Acolyte', attack: 2, health: 3, cost: 5,
     ability: { trigger: 'startOfWave', effect: { kind: 'poisonResist' } },
     tribe: 'plague',
+    // Retired for the upcoming season (Jesper, 2026-08-13) — same mechanism
+    // and precedent as Gutter-Runt above: `retireDay: 1` drops it from the
+    // shop pool from day 1 on, while the def stays in UNIT_DEFS so golden
+    // logs, stored leaderboard lineups and replays still resolve it.
+    // Par-buyback severance (`sellRefund` in shop.ts) applies, so a copy
+    // carried in from a prior season sells for exactly what was spent.
+    //
+    // This removes the game's ONLY poison counter (`poisonResist` has no
+    // other user), which is deliberate rather than overlooked. The counter
+    // never actually did the job it was built for: #155's own probe showed
+    // adding Acolytes did not change the Acolyte-vs-real-RatMoe-board result
+    // at ANY value of `POISON_RESIST_CAP`, and the 2026-08-13 live-board
+    // measurement found poison is only ~1-4% of damage once real boards
+    // carry 4-6 relics each — so there is very little left to counter. The
+    // `season-pool.test.ts` 'defense' role stays covered by `grantArmor`
+    // (Ward-Weaver) and `revive` (Bone-Priest).
+    retireDay: 1,
   },
 };
 
