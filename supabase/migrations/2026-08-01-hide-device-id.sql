@@ -121,9 +121,16 @@ grant select on public.pvp_results_public to anon;
 -- make Part A pointless.
 -- =====================================================================
 
--- revoke select on public.pvp_boards  from anon;
--- revoke select on public.pvp_results from anon;
--- revoke select on public.scores      from anon;
+-- APPLIED 2026-08-13, twelve days late. It was left commented pending the
+-- *_public client rollout, that rollout completed within days, and nobody came
+-- back to it — so raw device_ids stayed publicly readable the whole time.
+-- Found by accident: a control query while verifying the boon migration
+-- returned a live device_id from pvp_results where it should have 403'd.
+-- device_id is the unverified key every write RPC accepts, so this was an
+-- impersonation surface, not just an information leak. See the issue.
+revoke select on public.pvp_boards  from anon;
+revoke select on public.pvp_results from anon;
+revoke select on public.scores      from anon;
 
 -- The "public read" RLS policies on those tables become unreachable for anon
 -- once the grant is gone. Left in place deliberately: they are harmless, and

@@ -60,12 +60,18 @@ create table if not exists public.pvp_boon_picks (
 create index if not exists pvp_boon_picks_season_date_idx
   on public.pvp_boon_picks (season_id, ride_date);
 
--- Deliberately NO `grant select ... to anon` and NO read policy. RLS is on so
--- that a future accidental grant still cannot read rows: a table with RLS
--- enabled and no permissive policy denies everything to non-superusers, which
--- is the belt to the missing grant's braces. The service role bypasses RLS,
--- which is how the nightly job reads the round.
+-- RLS on with NO policy: a table with RLS enabled and no permissive policy
+-- denies every row to non-superusers. The service role bypasses RLS, which is
+-- how the nightly job reads the round.
+--
+-- The explicit REVOKE matters and was missing from the first draft of this
+-- file, which claimed the table simply had "no anon grant". That was wrong:
+-- Supabase grants `anon` select on new public tables by DEFAULT, so without
+-- this line the table answers 200 with an empty array rather than 403 — RLS
+-- was doing the work alone, with none of the second layer the comment
+-- promised. Found on 2026-08-13 by curling the table after applying.
 alter table public.pvp_boon_picks enable row level security;
+revoke select on public.pvp_boon_picks from anon;
 
 -- ---------------------------------------------------------------------
 -- submit_pvp_boon — write (or clear) your own pick.
