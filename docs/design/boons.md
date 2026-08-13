@@ -3,9 +3,10 @@
 Design bank for the daily boon system (issue #184). Written 2026-08-12, after the
 patron/companion framing (#114) was dropped in favour of a bare choice screen.
 
-Same status convention as `future-minions.md`: **concepts, not committed content**,
-except where a rule is marked as a decision. Numbers throughout are placeholders —
-they come from a measurement pass, not from this file.
+Same status convention as `future-minions.md` for the design reasoning. The
+system itself is now BUILT and measured — phases 1-6 shipped to `dev` over
+2026-08-12/13, and the magnitudes below are measured values from `pvp:boons`,
+no longer placeholders.
 
 This file is the design bank. Issue #184 is the build spec. When they disagree, the
 issue wins for *what gets built* and this file wins for *why*.
@@ -100,7 +101,7 @@ trims to the backmost only.
 | **Rearguard** | +X attack on your `units[n-1]` | pre-sim stat write |
 | **Deep Scout** | Read every rival's exact roster for the day | client-only, no sim |
 | **Guardian** | Block the first X incoming attacks on your side | adopts orphaned plumbing |
-| **Echo** | The first unit summoned in combat is summoned twice | trigger modifier |
+
 
 ### Held
 
@@ -116,6 +117,14 @@ trims to the backmost only.
 - **Silence (backmost)** — a sibling that strips the opponent's `units[n-1]` ability.
   Held to ship after the frontmost version, so the two are not introduced as a
   confusing pair.
+- **Echo** — the first unit summoned is summoned twice. Built, tested, and then
+  held on measurement: 2 of 90 duels improved on summoner boards under one
+  population, 3 of 210 under another, every percentile zero. Conditional was
+  accepted as a design, but conditional should mean "strong when it applies",
+  and one extra body in a ONE-WAVE duel almost never flips a result even on the
+  boards built for it. Lives in `HELD_BOONS` with its tests, including its
+  compounding-law canary. Restoring it needs a reason to be worth a pick — a
+  magnitude knob, or a bigger effect than one body — not just moving the entry.
 
 ### Rejected, with reasons
 
@@ -287,9 +296,39 @@ does not carry an absence for the whole fight. The silenced rat needs a marker
 on the board render itself, or the viewer forgets by the third clash and just
 sees a rat that never did anything.
 
+## What the measurement found
+
+`pvp:boons` (`scripts/pvp-boon-matrix.ts`) generates its board population rather
+than using the hand-authored comps, reports a distribution rather than a mean,
+and gates on overlap: a boon whose p25 clears another's p75 is a pick you take
+without thinking.
+
+**Two fixture bugs of mine changed conclusions before any boon did.** Worth
+recording because both looked like findings about the boons:
+
+- The first population randomised board order, which is right for avoiding a
+  fixture convention but is a *straw board* for positional boons. Under it,
+  **Buried measured as a trap** — median -0.034, hurting 42 matchups. Against a
+  tank-first population it is one of the better boons, +0.103 and helping 68.
+  Against an unordered line Buried can promote a better rat than it demotes;
+  real players lead with their toughest. Positional boons are judged tank-first.
+- The first population handed out **no relics at all**, which made A Body First
+  unmeasurable — it exists largely to spend the enemy's first-hit relic bonus on
+  a worthless body, and that can never fire in a relic-free field.
+
+**Measured magnitudes:** Bulwark 10 health, Blunt 14 attack, Rearguard 14
+attack, Guardian 2 blocked hits (4 was dominant over six other boons).
+
+**Unresolved, deliberately:** Silence is consistently the strongest and flags
+against the two weakest on one of three seeds. It has no magnitude knob, so
+tuning it means inflating everything else. Left as a live-data question —
+`pvp_results.boon_id` gives pick rate for free, and six players cannot resolve
+anything subtler than dominance anyway (#186).
+
 ## Open
 
-- X values for every boon. From a `pvp:boons` measurement pass, not guessed.
+- The Silence marker on the board render (see the replay section above) — the
+  last unbuilt piece.
 - How large the pool needs to be before the daily rotation reads as a rotation rather
   than a near-fixed trio.
 - Whether the trio should avoid repeating a boon on adjacent days (the Slay the Spire
