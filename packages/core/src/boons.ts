@@ -231,19 +231,19 @@ export const BOON_DEFS: Record<string, BoonDef> = {
     id: 'bulwark',
     name: 'Bulwark',
     blurb: 'Your leading rat takes the field heavier than it left the warren.',
-    effect: { kind: 'frontHealth', amount: 4 },
+    effect: { kind: 'frontHealth', amount: 10 },
   },
   blunt: {
     id: 'blunt',
     name: 'Blunt',
     blurb: "Your rival's hindmost rat comes to the fight with a dulled tooth.",
-    effect: { kind: 'sapBackAttack', amount: 2 },
+    effect: { kind: 'sapBackAttack', amount: 14 },
   },
   rearguard: {
     id: 'rearguard',
     name: 'Rearguard',
     blurb: 'Your hindmost rat sharpens up while it waits its turn.',
-    effect: { kind: 'backAttack', amount: 2 },
+    effect: { kind: 'backAttack', amount: 14 },
   },
   'deep-scout': {
     id: 'deep-scout',
@@ -257,6 +257,25 @@ export const BOON_DEFS: Record<string, BoonDef> = {
     blurb: 'The first blows against your line land on nothing at all.',
     effect: { kind: 'blockHits', hits: 2 },
   },
+};
+
+/**
+ * HELD OUT OF THE POOL, not deleted (issue #184).
+ *
+ * Echo measured dead on two independent populations: 2 of 90 duels improved on
+ * summoner boards under seed `boon-matrix-v1`, 3 of 210 under
+ * `alt-population-2`, with every percentile at zero. It is conditional by
+ * design, which was accepted — but conditional was supposed to mean "strong
+ * when it applies", and one extra body in a ONE-WAVE duel almost never flips a
+ * result even on the boards built for it.
+ *
+ * Shipping it anyway would repeat the 2026-08-08 anomaly cull exactly: content
+ * too small to notice, carried for a season, then deleted. The implementation
+ * stays (it is tested, including its compounding-law canary) so restoring it is
+ * moving this entry back into BOON_DEFS above. What it needs first is a reason
+ * to be worth a pick — a magnitude knob, or a bigger effect than one body.
+ */
+export const HELD_BOONS: Record<string, BoonDef> = {
   echo: {
     id: 'echo',
     name: 'Echo',
@@ -269,17 +288,20 @@ export const BOON_DEFS: Record<string, BoonDef> = {
  * The first ride-date that offers boons. Compared as a string, which is safe
  * because ride-dates are zero-padded `YYYY-MM-DD` (`currentRideDate`).
  *
- * DORMANT ON PURPOSE. Phase 1 of #184 is plumbing only — the pool above is
- * authored but NOTHING applies any of its effects yet, so a date that has
- * already passed would offer players three cards that do nothing. This
- * sentinel is the launch switch: move it to the intended Monday only once the
- * effects land, and only for boons whose effects are actually implemented.
+ * Set to the 2026-08-17 season reset (was a far-future sentinel while the
+ * effects were being built). Every boon in the pool above now applies, has
+ * tests, and has been measured by `pvp:boons`.
+ *
+ * NOTE this only makes boons live on whichever channel ships it. The nightly
+ * job runs on the DEFAULT branch, so nothing reaches players until dev is
+ * merged to master — that merge is the real go-live, and the Supabase
+ * migration must already be applied when it happens.
  *
  * Boons launch on a season reset rather than mid-week, deliberately. League
  * points accumulate across the week, so introducing a new rule on day 5 makes
  * the standings at either end of one season mean different things.
  */
-export const BOON_FIRST_DATE = '2099-01-01';
+export const BOON_FIRST_DATE = '2026-08-17';
 
 /**
  * The three boons offered on `rideDate` — identical for every player, derived,
@@ -563,8 +585,17 @@ export function boardsForDuel(
   return { a: outA, b: outB, notes };
 }
 
-/** The effect a boon id names, or null for no pick / an unknown id. */
+/**
+ * The effect a boon id names, or null for no pick / an unknown id.
+ *
+ * HELD boons resolve too, deliberately. They are finished, tested
+ * implementations that are merely not on offer, and being able to resolve one
+ * is what keeps its tests meaningful and its restoration a one-line move. It
+ * does not make a held boon playable: `isBoonOffered` gates on the day's
+ * derived menu, a held boon is never on it, and the nightly job refuses any
+ * pick that was not offered.
+ */
 export function boonEffect(boonId: string | null | undefined): BoonEffect | null {
   if (!boonId) return null;
-  return BOON_DEFS[boonId]?.effect ?? null;
+  return (BOON_DEFS[boonId] ?? HELD_BOONS[boonId])?.effect ?? null;
 }

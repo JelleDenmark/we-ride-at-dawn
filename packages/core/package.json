@@ -29,7 +29,8 @@
     "pvp:dry-run": "tsx scripts/pvp-dry-run-leaderboard.ts",
     "pvp:matrix": "tsx scripts/pvp-unit-matrix.ts",
     "pvp:combos": "tsx scripts/pvp-combo-matrix.ts",
-    "pvp:relics": "tsx scripts/pvp-relic-matrix.ts"
+    "pvp:relics": "tsx scripts/pvp-relic-matrix.ts",
+    "pvp:boons": "tsx scripts/pvp-boon-matrix.ts"
   },
   "devDependencies": {
     "tsx": "^4.19.0",
