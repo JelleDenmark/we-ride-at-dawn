@@ -1,5 +1,5 @@
 import { Application, Assets, Container, Graphics, Sprite, Text, Texture } from 'pixi.js';
-import type { BattleEvent, Side, UnitView } from '@wrad/core';
+import type { BattleEvent, BoonNote, Side, UnitView } from '@wrad/core';
 import { ART_URL } from '../art';
 
 const W = 900;
@@ -99,6 +99,26 @@ class UnitSprite {
   setStats(attack: number, health: number): void {
     this.statsText.text = `${attack}/${health}`;
   }
+
+  // The Silence boon (#184) strips a unit's ability for the whole duel with
+  // no `BattleEvent` marking it — a pre-sim transform, by design, so nothing
+  // in the log ever explains the absence. A one-shot beat isn't enough on its
+  // own (see the design bank): by the third clash a viewer has forgotten it
+  // and just sees a rat that never did anything. This badge stays on the
+  // sprite for as long as the sprite exists, which is what makes it read as
+  // an absence rather than a flash.
+  private silenceMark?: Text;
+  setSilenced(): void {
+    if (this.silenceMark) return;
+    this.silenceMark = new Text({
+      text: '🔇',
+      style: { fontSize: 15 },
+    });
+    this.silenceMark.anchor.set(0.5);
+    this.silenceMark.x = UNIT_SIZE / 2 - 6;
+    this.silenceMark.y = -UNIT_SIZE / 2 + 2;
+    this.root.addChild(this.silenceMark);
+  }
 }
 
 export class ReplayPlayer {
@@ -117,6 +137,15 @@ export class ReplayPlayer {
   private skipUntilIndex = -1;
   /** Set by play()'s `outcome` arg; only read when `isDuel`. */
   private duelOutcome?: 'a' | 'b' | 'draw';
+  /**
+   * Board-index positions the Silence boon (#184) hit, keyed by side. Built
+   * once from `play()`'s `boonNotes` and consumed only at the two INITIAL
+   * spawn sites (`battleStart`/`waveStart`) — never by `summon`/`revive`,
+   * which reuse board indices mid-fight for units the boon never touched, so
+   * matching on index there would mismark a replacement that fills the same
+   * slot after the original silenced unit dies.
+   */
+  private silencedSeats = new Map<Side, Set<number>>();
 
   /** True for the PvP duel overlay (`App.svelte`'s `duelReplayPlayer`), which
    * shares this engine with the solo-run stage. A duel is always exactly one
@@ -152,10 +181,21 @@ export class ReplayPlayer {
   /** `outcome` is only used when `isDuel`: which seat (from the DuelResult
    * already computed by `simulateDuel`) the battleEnd banner should read as
    * victory/defeat for. Seat 'a' is always the local player's board — see
-   * `duel.ts`'s seat note — so 'a' reads VICTORY, 'b' reads DEFEAT. */
-  async play(events: BattleEvent[], outcome?: 'a' | 'b' | 'draw'): Promise<void> {
+   * `duel.ts`'s seat note — so 'a' reads VICTORY, 'b' reads DEFEAT.
+   *
+   * `boonNotes` is only ever non-empty for a duel (boons are PvP-only, #184
+   * rule 1) — the solo-ride caller never passes it. Seat 'a' is the horde,
+   * seat 'b' the gauntlet, mirroring `duel.ts`'s seat note. */
+  async play(events: BattleEvent[], outcome?: 'a' | 'b' | 'draw', boonNotes: BoonNote[] = []): Promise<void> {
     this.duelOutcome = outcome;
     this.reset();
+    this.silencedSeats = new Map();
+    for (const note of boonNotes) {
+      if (note.kind !== 'silence') continue;
+      const side: Side = note.target === 'a' ? 'horde' : 'gauntlet';
+      if (!this.silencedSeats.has(side)) this.silencedSeats.set(side, new Set());
+      this.silencedSeats.get(side)!.add(note.index);
+    }
     this.lastWaveStartIndex = -1;
     for (let i = 0; i < events.length; i++) {
       if (events[i].type === 'waveStart') this.lastWaveStartIndex = i;
@@ -193,13 +233,19 @@ export class ReplayPlayer {
   private async handle(event: BattleEvent): Promise<void> {
     switch (event.type) {
       case 'battleStart': {
-        for (const unit of event.horde) this.spawn(unit, this.order.horde.length, -80);
+        for (const unit of event.horde) {
+          const index = this.order.horde.length;
+          this.spawn(unit, index, -80);
+          if (this.silencedSeats.get('horde')?.has(index)) this.sprites.get(unit.instanceId)?.setSilenced();
+        }
         await this.layout(this.d(280));
         break;
       }
       case 'waveStart': {
         for (const unit of event.enemies) {
-          this.spawn(unit, this.order.gauntlet.length, W + 80);
+          const index = this.order.gauntlet.length;
+          this.spawn(unit, index, W + 80);
+          if (this.silencedSeats.get('gauntlet')?.has(index)) this.sprites.get(unit.instanceId)?.setSilenced();
         }
         this.showBanner(`WAVE ${event.wave}`);
         await this.layout(this.d(320));

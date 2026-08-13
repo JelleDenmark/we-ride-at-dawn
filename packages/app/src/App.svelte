@@ -529,6 +529,11 @@
   // board (issue #158). Rounds scored before the snapshot column shipped
   // have `board: null`, so this (and every opponent's board) can be missing.
   const myNightBoard = $derived(displayedNightStandings.find(isMe)?.board ?? null);
+  // My boon pick for that same scored round (issue #184) — NOT `myBoon`,
+  // which tracks today's live in-progress pick and would silently apply the
+  // wrong night's boon once the ride-date has rolled past a watched round.
+  // `null` for a round ridden without one, same as `boon_id` on any row.
+  const myNightBoon = $derived(displayedNightStandings.find(isMe)?.boon_id ?? null);
 
   // Duel replay (issue #158): re-runs `simulateDuel` against the round's
   // SNAPSHOTTED boards (never the live `pvp_boards` — those drift the moment
@@ -565,8 +570,8 @@
       await duelReplayPlayer.init(duelStageEl);
     }
     duelReplayPlayer.speed = duelSpeed;
-    const { events, result } = simulateDuel(mine, opponent.board);
-    await duelReplayPlayer.play(events, result.winner);
+    const { events, result } = simulateDuel(mine, opponent.board, myNightBoon, opponent.boon_id);
+    await duelReplayPlayer.play(events, result.winner, result.boonNotes);
     // The sheet may have been closed (or another duel started) mid-play —
     // don't resurrect it with a stale result.
     if (!duelReplay || duelReplay.opponentName !== opponent.name) return;
