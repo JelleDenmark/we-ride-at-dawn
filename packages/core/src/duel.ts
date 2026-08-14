@@ -12,7 +12,13 @@ import { simulateCore, type BattleEvent, type UnitView } from './sim';
  * is mechanically symmetric — a true mirror (A === B) resolves to `draw`.
  * That symmetry is only sound because the seat-fairness fixes landed with the
  * engine port (Marrow-Snap execute and Gore-Cleaver cleave now fire in both
- * directions); without them a relic on one seat would break the mirror.
+ * directions) and, later, issue #188's `fireEntryTriggers`/`resolveDeaths`
+ * ordering fixes in sim.ts (a cross-side startOfWave hit or faint-relic
+ * splash no longer gets a seat-A head start against a target the other side
+ * hasn't had its own turn to buff/splash around yet). Without either fix a
+ * relic or ability on one seat could break the mirror — see
+ * `test/duel-seat-fairness-realistic.test.ts` for the realistic-board
+ * coverage that caught the second class of bug.
  */
 export interface DuelResult {
   winner: 'a' | 'b' | 'draw';
