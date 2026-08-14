@@ -407,6 +407,121 @@ tuning it blind. Recorded here rather than silently reversing the "safe to
 leave Held" framing above, which was accurate for what it measured — the
 decision moved past it, not around it.
 
+## Proposal: day-gated magnitude pairs (not built, scoped 2026-08-15)
+
+### The problem this answers
+
+Every boon magnitude here is a FLAT number, but a duel board's stats scale
+exponentially with tier (`tierAttackMultiplier`/`tierHealthMultiplier`,
+~3^(tier-1)), and tier tracks the expedition day: `BOARD_GROWTH` and the real
+economy mean a day-1 board is small and mostly tier-1, a day-6/7 board is
+bigger and tier-2/3. A flat amount is therefore a HUGE fraction of a small
+early stat and background noise against a large late one, by construction —
+not a fixture artifact, a property of every flat-amount boon in the pool.
+
+Measured directly (Dire-Rat-vs-Dire-Rat mirror, same tier both sides,
+first-hit damage):
+
+| Tier | Plain | Rust (-4 armor) | Swing |
+|---|---|---|---|
+| 1 | 2 | 4 | **+100%** |
+| 2 | 8 | 12 | +50% |
+| 3 | 30 | 34 | +13% |
+
+And this is NOT new to Rust — **Bulwark, already shipped and already
+"measured," has the identical curve**: +10 health flips a tier-1 or tier-2
+Dire-Rat mirror from a mutual-kill draw into an outright win, and does
+nothing at all at tier 3 (the board's health pool has outgrown 10 flat by
+then). Nobody checked this for the original nine either; it surfaced only
+because Jesper asked whether the win-rate sweep would have caught a day-1
+power spike, and it wouldn't have — win/draw/loss scoring saturates, and a
+population that mixes armor-carriers with everything else dilutes a spike
+that's real on the boards where it applies.
+
+**Decided (Jesper, 2026-08-15): ship flat magnitudes as-is for now** (see the
+promotion note above) rather than block launch on this. This section is the
+scoped follow-up, not a blocker.
+
+### Two designs were on the table
+
+**A. Thread the ride-date through scoring, magnitude as a function of day.**
+Rejected — not because it's impossible, but because it reaches somewhere it
+shouldn't have to. `boonEffect(boonId)` resolves a bare id to a fixed effect
+with NO date input, called fresh at SCORING time by `boardsForDuel`/
+`simulateDuel`, which `scoreRound` calls with just `LeagueEntrant.boonPick`
+— a string. `LeagueEntrant`'s own doc comment states outright that
+`scoreRound` "deliberately does not take" a ride-date. Making magnitude
+day-dependent this way means either (a) `scoreRound`/`simulateDuel`/
+`boardsForDuel`/`boonEffect` all gain a ride-date parameter so scoring
+resolves the SAME magnitude the player was shown at pick time (real signature
+churn across the whole scoring path, plus whatever the app layer's nightly-
+job caller does outside `packages/core`), or (b) skip that and risk scoring
+drifting from what was shown at pick time — a correctness bug, not a tuning
+one. Either way this touches the determinism contract the whole PvP
+anti-cheat story leans on (`simulateDuel`'s doc comment: "the client and the
+nightly server job can independently re-simulate and agree"). Not something
+to reach for under a deadline.
+
+**B. Day-gate WHICH boon is offered, not what any boon resolves to (Jesper's
+proposal) — two ordinary, date-agnostic `BoonDef` entries, mutually
+exclusive by day.** This is the one to build. `boonEffect(id)` never changes
+— every `BoonDef` stays a fixed, date-independent id→effect mapping, exactly
+like today. The only date-aware code is `boonsFor(rideDate)`, which already
+exists precisely to be the one date-aware boundary (rule 1 in the module
+doc comment: "pure function of the ride-date... re-derivable anywhere with
+no stored state"). Scoring, replay, and `boonEffect` are completely
+untouched — zero risk to the determinism story, because a scored duel only
+ever needs to resolve a fixed id it already knows about.
+
+### Concrete shape, using Rust as the pilot
+
+- **`rust`** (existing id, unchanged) — amount stays 4, now understood as the
+  EARLY-week version. Keeping the id stable matters: any pick already
+  recorded against `'rust'` (once this is live) keeps resolving to the same
+  effect it always did — nothing about promoting an existing id to
+  "day-gated" changes what that id itself means.
+- **`rust-major`** (new id) — amount 8, the LATE-week version. A sibling
+  entry, same shape as how Silence (backmost) is already a held sibling of
+  Silence (frontmost) — two ids, never offered on the same day, so they
+  never read as a confusing pair.
+- **Day source: `weekdayFor(rideDate)` from `shop.ts`**, not a new day
+  concept. Already the exact function `BOARD_GROWTH`/`unlockDay`/`retireDay`
+  use for "which expedition day is this," pure, already tested, and
+  importing it into `boons.ts` creates no cycle (`shop.ts` doesn't import
+  `boons.ts`). Split: `rust` eligible days 1-3, `rust-major` eligible days
+  4-7 — Jesper's exact split.
+- **`boonsFor` changes shape slightly:** today it Fisher-Yates draws
+  `BOONS_PER_DAY` straight over `Object.values(BOON_DEFS)`. It would need to
+  FILTER the pool by day-eligibility first (most entries always eligible;
+  a day-gated pair contributes exactly one of itself, never both, never
+  neither), then draw over the filtered array — keeping the array the same
+  LENGTH every day (swapping which entry occupies the "Rust" slot, not
+  changing how many slots exist) is what keeps rule 4's "insertion order is
+  the roll order" reasoning intact rather than needing new reasoning about
+  what a variable-length pool does to historical days.
+- **Test fallout, not just an implementation nicety:** `boons.test.ts`'s
+  "does not lean hard on any one boon" bound (15-50% share over 120 days)
+  assumes every entry is offerable every day. A day-gated id can only ever
+  be drawn on its ~3-4 of 7 eligible days, so its ceiling share is lower by
+  construction — the bound needs a per-id exception, not a blanket loosen,
+  or a day-gated boon that's otherwise perfectly healthy will read as
+  starved.
+
+### Open questions this proposal does NOT answer yet
+
+- Should Bulwark get the same split, given it shows the identical curve and
+  has been live for weeks? This proposal only specs Rust because that's what
+  surfaced it; Bulwark (and possibly Blunt/Rearguard) deserves the same
+  measurement pass before deciding.
+- Exact day-1-3/4-7 split was Jesper's stated example, not re-derived from
+  the swing table above — worth confirming against the actual tier
+  distribution `boardCapForDay`/the real economy produces by each day,
+  rather than assuming the swing curve is linear across days 1-7.
+- Naming convention for the sibling id (`rust-major` here is a placeholder,
+  not a commitment) and whether the card copy needs to say anything
+  different between the two, given blurbs currently carry no numbers and no
+  day information.
+
 ## Open
 
 - The Silence marker on the board render (see the replay section above) — the
@@ -416,6 +531,13 @@ decision moved past it, not around it.
 - Whether the trio should avoid repeating a boon on adjacent days (the Slay the Spire
   rule, cited in #165's design refresh).
 - The overnight/locked screen state.
+- **Day-gated magnitude pairs** (Rust as the pilot: `rust` days 1-3, a new
+  `rust-major` days 4-7) — fully scoped above, not built. Flat magnitudes
+  swing far harder on a day-1 board than a day-6 one (measured: Rust doubles
+  tier-1 damage, adds 13% at tier-3; Bulwark, already shipped, flips a
+  mirror draw to a win at tier 1-2 and does nothing at tier 3), and this
+  design avoids the correctness trap of the alternative (threading the
+  ride-date through scoring) entirely, since it only touches `boonsFor`.
 - X values for Rust, Barren, Antidote, Stripped and First Blood are still
   placeholders (`sim.ts`'s `BOON_DEFS`) even though all five are live —
   the 2026-08-14 `pvp:boons` pass measured direction (none is broken, two
