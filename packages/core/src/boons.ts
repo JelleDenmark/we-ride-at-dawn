@@ -158,7 +158,68 @@ export type BoonEffect =
    * one of the other two. Offers are NOT filtered per board — filtering would
    * cost rule 1's derived offer and the server-side check that rides on it.
    */
-  | { kind: 'echoFirstSummon' };
+  | { kind: 'echoFirstSummon' }
+  /**
+   * opponent, whole line — every unit loses `amount` flat armor
+   * (`damageReduction`), floored at 0 per unit.
+   *
+   * The counter to stacked flat-armor grants (Ward-Weaver, Filth Totem)
+   * that nothing else in the game answers. Unlike Silence it cannot be
+   * dodged by standing somewhere else — the whole board is read, not one
+   * end — which is the entire point: the grants worth answering are
+   * precisely the ones that ignore position, so the answer has to as well.
+   * Permitted by the targeting principle as a whole-line stat write, the
+   * same category `frontHealth`/`backAttack`/`sapBackAttack` already are.
+   */
+  | { kind: 'sapArmorAll'; amount: number }
+  /**
+   * opponent — summon headroom (their `combatCap` above however many rats
+   * they actually deployed) cut to `headroom` for the duel, never raised.
+   *
+   * Echo amplifies summoning and nothing in the pool opposes it, while
+   * summoners are the most-fielded board shape of both leagued seasons —
+   * this is that missing half. A cap READ, not a slice, so the targeting
+   * principle's end-vs-whole-line distinction does not apply to it. Worth
+   * nothing against a board with no summoner, same accepted shape as Echo:
+   * offers are not board-filtered.
+   */
+  | { kind: 'capSummonHeadroom'; headroom: number }
+  /**
+   * self, whole line — flat poison negation for the duel.
+   *
+   * Adopts orphaned plumbing rather than adding any: `poisonResistApplied`
+   * is already a per-side, per-wave, cap-not-sum budget (Gutter-Acolyte's
+   * `poisonResist`), so this seeds that same pool instead of reimplementing
+   * it. Doubles as the free-of-body-cost probe issue #155 never ran: it
+   * isolates whether the RESIST is too weak from whether the ACOLYTE's body
+   * is too weak, which no prior change could tell apart.
+   */
+  | { kind: 'poisonNegation'; amount: number }
+  /**
+   * opponent — their `units[0]` loses its EQUIPPED UNIT RELICS for the
+   * duel. Team relics are untouched.
+   *
+   * Relics are unconditional picks on a mature board, and nothing in the
+   * pool denies one. Silence deliberately leaves relics alone (a silenced
+   * rat keeps Marrow-Snap, Glass Shard, Weeping Boil), so this opens the
+   * denial axis Silence stops short of — the two read as a deliberate pair
+   * rather than a redundant one.
+   */
+  | { kind: 'stripRelics' }
+  /**
+   * self — `units[0]` resolves its opening blow before the return, on the
+   * wave's first clash tick only.
+   *
+   * The clash is normally simultaneous, so a 9/1 and a 1/9 trade
+   * identically — both die. This makes attack a DEFENSIVE stat for one
+   * tick, a genuinely new axis rather than more of the existing one, and a
+   * structural counter to 1-attack swarm bodies. A duel is one wave, so
+   * this is bounded to a single clash by construction — the clearest case
+   * yet of the boon layer shipping something the 45-wave gauntlet could not
+   * safely hold. Both sides picking it cancels out rather than compounding,
+   * which is what keeps an identical mirror board a draw.
+   */
+  | { kind: 'firstBlood' };
 
 export interface BoonDef {
   id: string;
@@ -282,6 +343,49 @@ export const HELD_BOONS: Record<string, BoonDef> = {
     blurb: 'The first rat your warren calls up answers twice.',
     effect: { kind: 'echoFirstSummon' },
   },
+  /**
+   * The five entries below are held for a DIFFERENT reason than Echo above:
+   * not measured and found wanting, but not yet measured at all. Added
+   * 2026-08-12 from the roster-dimensionality pass recorded in
+   * `docs/design/boons.md`'s Ideas section (issue #181/#182's "one axis"
+   * diagnosis) — each one closes a specific gap the launch roster left open
+   * rather than adding another effect on top of what the pool already has.
+   * Implemented and tested exactly like a shipping boon (`boonEffect`
+   * resolves them, same as any HELD entry), but every magnitude below is a
+   * PLACEHOLDER pending a `pvp:boons` pass — moving one to `BOON_DEFS` above
+   * is a one-line move once that pass has a number for it, same as Echo's
+   * own path back would be.
+   */
+  rust: {
+    id: 'rust',
+    name: 'Rust',
+    blurb: "Your rival's whole line takes the field with its guard down.",
+    effect: { kind: 'sapArmorAll', amount: 4 },
+  },
+  barren: {
+    id: 'barren',
+    name: 'Barren',
+    blurb: "Your rival's warren has no room left to call up more rats.",
+    effect: { kind: 'capSummonHeadroom', headroom: 1 },
+  },
+  antidote: {
+    id: 'antidote',
+    name: 'Antidote',
+    blurb: 'Your line shrugs off poison that would have felled it.',
+    effect: { kind: 'poisonNegation', amount: 3 },
+  },
+  stripped: {
+    id: 'stripped',
+    name: 'Stripped',
+    blurb: "Your rival's leading rat marches out with its trinkets confiscated.",
+    effect: { kind: 'stripRelics' },
+  },
+  'first-blood': {
+    id: 'first-blood',
+    name: 'First Blood',
+    blurb: 'Your leading rat lands its strike before anything can answer.',
+    effect: { kind: 'firstBlood' },
+  },
 };
 
 /**
@@ -376,6 +480,9 @@ function isSelfEffect(e: BoonEffect): boolean {
     case 'buryFrontToBack':
     case 'silenceFront':
     case 'sapBackAttack':
+    case 'sapArmorAll':
+    case 'capSummonHeadroom':
+    case 'stripRelics':
       return false;
     default:
       return true;
@@ -424,7 +531,11 @@ export type BoonNoteDetail =
   | { kind: 'move'; defId: string; from: number; to: number }
   | { kind: 'insert'; defId: string; index: number }
   | { kind: 'stat'; defId: string; index: number; attack: number; health: number }
-  | { kind: 'silence'; defId: string; index: number };
+  | { kind: 'silence'; defId: string; index: number }
+  /** Rust — whole line, not one rat, so no single index to point at. */
+  | { kind: 'lineArmor'; amount: number }
+  /** Stripped — same shape as `silence`, different rat/kind. */
+  | { kind: 'strip'; defId: string; index: number };
 
 export type BoonNote = {
   /** Which seat's pick caused this. */
@@ -475,6 +586,10 @@ function applySelf(lineup: Lineup, e: BoonEffect): { lineup: Lineup; note?: Boon
       return { lineup: { ...lineup, boonBlockHits: (lineup.boonBlockHits ?? 0) + e.hits } };
     case 'echoFirstSummon':
       return { lineup: { ...lineup, boonEcho: true } };
+    case 'poisonNegation':
+      return { lineup: { ...lineup, boonPoisonResist: (lineup.boonPoisonResist ?? 0) + e.amount } };
+    case 'firstBlood':
+      return { lineup: { ...lineup, boonFirstBlood: true } };
     default:
       // deepScout is the only boon with no sim surface at all — it changes
       // what the app renders, never what the fight does.
@@ -511,6 +626,30 @@ function applyOpponent(lineup: Lineup, e: BoonEffect): { lineup: Lineup; note?: 
       if (lineup.units.length < 2) return { lineup };
       const defId = lineup.units[0].defId;
       return { lineup: moveUnit(lineup, 0, last), note: { kind: 'move', defId, from: 0, to: last } };
+    }
+    case 'sapArmorAll': {
+      if (lineup.units.length === 0) return { lineup };
+      return {
+        lineup: { ...lineup, boonArmorLoss: (lineup.boonArmorLoss ?? 0) + e.amount },
+        note: { kind: 'lineArmor', amount: e.amount },
+      };
+    }
+    case 'capSummonHeadroom': {
+      // Cuts headroom, never raises it — `Math.min` against whatever the
+      // board already declared (see `combatCapForBuild`: a real board is
+      // `units.length + COMBAT_CAP_BONUS`), same "never a buff in disguise"
+      // shape as every other negative grant in this file.
+      const current = lineup.combatCap ?? BOARD_CAP;
+      const capped = Math.min(current, lineup.units.length + e.headroom);
+      return { lineup: { ...lineup, combatCap: capped } };
+    }
+    case 'stripRelics': {
+      if (lineup.units.length === 0) return { lineup };
+      const out = patchUnit(lineup, 0, (u) => ({ ...u, boonRelicsStripped: true }));
+      return {
+        lineup: out,
+        note: { kind: 'strip', defId: out.units[0].defId, index: 0 },
+      };
     }
     default:
       return { lineup };

@@ -251,7 +251,8 @@ export function validateBoard(board: Lineup): { ok: true } | { ok: false; reason
     if (
       u.boonAttack !== undefined ||
       u.boonHealth !== undefined ||
-      u.boonSilenced !== undefined
+      u.boonSilenced !== undefined ||
+      u.boonRelicsStripped !== undefined
     ) {
       return { ok: false, reason: `unit "${u.defId}" carries a boon grant` };
     }
@@ -272,7 +273,13 @@ export function validateBoard(board: Lineup): { ok: true } | { ok: false; reason
   }
 
   // Board-level boon grants, same door as the per-unit ones above.
-  if (board.boonBlockHits !== undefined || board.boonEcho !== undefined) {
+  if (
+    board.boonBlockHits !== undefined ||
+    board.boonEcho !== undefined ||
+    board.boonPoisonResist !== undefined ||
+    board.boonFirstBlood !== undefined ||
+    board.boonArmorLoss !== undefined
+  ) {
     return { ok: false, reason: 'board carries a boon grant' };
   }
 

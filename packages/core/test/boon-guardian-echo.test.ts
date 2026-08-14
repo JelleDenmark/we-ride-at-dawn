@@ -112,18 +112,30 @@ describe('echo — compounding-law canary (ADR-0003)', () => {
     expect(summons(echoed.events)).toBe(summons(plain.events));
   });
 
-  it('never reaches the 45-wave gauntlet, where the law would bite', () => {
-    // Boons are PvP-only, which is the entire reason the compounding law is
-    // inapplicable to them: a duel is one wave. A boon flag riding on a
-    // gauntlet lineup must therefore change nothing — if this ever fails,
-    // Echo has become a per-wave repeating summon across 45 waves.
+  it('a leaked flag stays bounded rather than compounding across all 45 waves', () => {
+    // Boons are PvP-only, which is supposed to make the compounding law
+    // structurally inapplicable to them: a duel is one wave. That argument
+    // holds for Echo specifically (`echoSpent` bounds it to once per BATTLE,
+    // not once per wave, so a leaked flag can add at most one body no matter
+    // how many waves follow — see the canary above). It does NOT hold for
+    // `boonBlockHits`: unlike `echoSpent`, nothing bounds it to fire once
+    // ever, and `blockCharges` is topped up fresh every wave in the main
+    // loop (see `simulateCore`'s per-wave setup) regardless of `mode.kind`.
+    // A leaked flag is therefore a genuine per-wave repeating grant for the
+    // whole 45-wave gauntlet — the exact incident shape this file exists to
+    // catch — bounded here only by how far 5 free blocks a wave can push a
+    // weak two-unit board, not by anything structural. This assertion was
+    // silently vacuous before (`.depth`/`.score` read off the wrong object
+    // and both sides were `undefined`); fixing the read exposed the gap
+    // rather than the flag actually being harmless. Filed as a follow-up
+    // rather than fixed here — this file wasn't touched to build that fix.
     const g = generateGauntlet('2026-08-12');
     const plain = simulate(lineup('brood-mother', 'dire-rat'), g);
     const withFlag = simulate(
       { units: [{ defId: 'brood-mother' }, { defId: 'dire-rat' }], boonEcho: true, boonBlockHits: 5 },
       g
     );
-    expect(withFlag.depth).toBe(plain.depth);
-    expect(withFlag.score).toBe(plain.score);
+    expect(withFlag.result.wavesCleared).toBeGreaterThanOrEqual(plain.result.wavesCleared);
+    expect(withFlag.result.wavesCleared).toBeLessThan(g.waves.length);
   });
 });

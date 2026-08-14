@@ -5,8 +5,14 @@ patron/companion framing (#114) was dropped in favour of a bare choice screen.
 
 Same status convention as `future-minions.md` for the design reasoning. The
 system itself is now BUILT and measured — phases 1-6 shipped to `dev` over
-2026-08-12/13, and the magnitudes below are measured values from `pvp:boons`,
-no longer placeholders.
+2026-08-12/13, and the magnitudes for the nine SHIPPING boons below are
+measured values from `pvp:boons`, no longer placeholders.
+
+Five more (Rust, Barren, Antidote, Stripped, First Blood) were added to
+**Held** on 2026-08-14 from the roster-dimensionality pass below — built and
+tested the same way the shipping nine were, but not yet run through
+`pvp:boons`, so their magnitudes ARE still placeholders. See the Held section
+of the roster for the reasoning behind each.
 
 This file is the design bank. Issue #184 is the build spec. When they disagree, the
 issue wins for *what gets built* and this file wins for *why*.
@@ -125,6 +131,59 @@ trims to the backmost only.
   boards built for it. Lives in `HELD_BOONS` with its tests, including its
   compounding-law canary. Restoring it needs a reason to be worth a pick — a
   magnitude knob, or a bigger effect than one body — not just moving the entry.
+
+The five below are held for the OPPOSITE reason Echo is: not measured and found
+wanting, but not yet measured at all. Added 2026-08-12 from the
+roster-dimensionality pass (#181/#182's "one axis" diagnosis), each one closes a
+specific gap the launch nine left open rather than adding another effect on top
+of what the pool already had. Built and tested exactly like a shipping boon —
+`HELD_BOONS`, resolved by `boonEffect`, covered in `boon-ideas.test.ts` — with
+every magnitude a PLACEHOLDER pending a `pvp:boons` pass. Moving one to Shipping
+is the same one-line move restoring Echo would be.
+
+- **Rust** — opponent, whole line loses flat armor (`damageReduction`),
+  floored at 0 per unit. Closes the largest hole in the game, not just in this
+  pool: nothing anywhere answers stacked flat armor (three ★3 Ward-Weavers put
+  +18 `damageReduction` on every rat, and with `MIN_ATTACK_DAMAGE` at 1 that
+  converts survival into health-in-ticks). Unlike Silence it cannot be dodged
+  by standing somewhere else, which is the point — the grants worth answering
+  are precisely the ones that ignore position. A whole-line stat write, so the
+  targeting principle's end-vs-whole-line split doesn't restrict it, the same
+  way Bulwark/Rearguard/Blunt aren't restricted despite being single-end.
+- **Barren** — opponent's summon headroom (`combatCap` above however many rats
+  they deployed) cut for the duel, never raised. Echo amplifies summoning and
+  nothing in the pool opposes it, while summoners are the most-fielded board
+  shape of both leagued seasons — this is that missing half. A cap READ, not a
+  slice, so it sits outside the targeting principle entirely. Worth nothing
+  against a board with no summoner, same accepted shape as Echo.
+- **Antidote** — self, whole line, flat poison negation for the duel. Adopts
+  orphaned plumbing rather than adding any: `poisonResistApplied` is already a
+  per-side, per-wave, cap-not-sum budget (Gutter-Acolyte's `poisonResist`), so
+  this seeds the same pool instead of reimplementing it. Also doubles as the
+  free-of-body-cost probe #155 never ran — isolating whether the RESIST is too
+  weak from whether the ACOLYTE's body is too weak, which no prior change
+  could tell apart.
+- **Stripped** — opponent's `units[0]` loses its equipped unit relics for the
+  duel; team relics untouched. Relics are unconditional picks on a mature
+  board and nothing in the pool denies one. Silence deliberately leaves relics
+  alone (a silenced rat keeps Marrow-Snap, Glass Shard, Weeping Boil), so this
+  opens the denial axis Silence stops short of — the two read as a deliberate
+  pair, not a redundant one. Implemented as a pre-`instantiate` relic filter
+  rather than a post-hoc patch, since relic stats are baked into a `BattleUnit`
+  at that point.
+- **First Blood** — self, `units[0]` resolves its opening blow before the
+  return, on the wave's first clash tick only. The clash is normally
+  simultaneous (a 9/1 and a 1/9 trade identically — both die); this makes
+  attack a DEFENSIVE stat for one tick, a genuinely new axis, and a structural
+  counter to 1-attack swarm bodies. Bounded to a single clash by construction
+  — the clearest case yet of the boon layer shipping something the 45-wave
+  gauntlet could not safely hold. Both sides picking it cancels out rather
+  than compounding, keeping an identical mirror board a draw. The highest-risk
+  entry here: it touches the clash loop's net-damage floor clamp directly, so
+  it shipped with its own compounding-law canary (`currentWave === 1`, not
+  merely `ticks === 1` — `ticks` resets every wave, so the weaker check would
+  have re-fired on every wave's opening tick if the flag ever reached a
+  multi-wave gauntlet battle).
 
 ### Rejected, with reasons
 
@@ -334,6 +393,40 @@ anything subtler than dominance anyway (#186).
 - Whether the trio should avoid repeating a boon on adjacent days (the Slay the Spire
   rule, cited in #165's design refresh).
 - The overnight/locked screen state.
+- X values for Rust, Barren, Antidote and First Blood — all five newly-held
+  boons carry the same magnitude conventions as the shipping roster's, but the
+  actual numbers are placeholders (`sim.ts`'s `HELD_BOONS`) pending a
+  `pvp:boons` pass, same as Silence's own still-open magnitude question above.
+- **First Blood's interaction with Drag/Buried needs to be stated at pick
+  time, not just discoverable in the replay (Jesper, 2026-08-14).** First
+  Blood binds to WHICHEVER unit is at `units[0]` when the wave's opening tick
+  fires — which is after every pre-sim transform, including an opponent's
+  Drag/Buried. So if a rival drags your backline attacker to the front, First
+  Blood follows it there, not the rat you actually built your line around
+  (confirmed against the engine: a dragged 1-health MBP Rat survived a fight
+  it would normally trade even in, because its own hit landed first and the
+  return never came). The card's one-sentence blurb convention (no numbers,
+  no rules panel — see `BoonDef`'s doc comment) isn't the right place to spell
+  this out. Decided: the patch note that announces First Blood's release
+  states the ordering rule explicitly, rather than leaving it to be
+  discovered in a replay. Draft language, ready for whenever First Blood
+  actually ships (it is still Held, so nothing to announce yet):
+  > **First Blood** resolves after every other pre-fight effect, including a
+  > rival's Drag or Buried — so it always follows whichever rat is actually
+  > standing at your front when the fight starts, not whichever one you
+  > built your line around.
+- **A real gap found while building this batch, not introduced by it:**
+  `boonBlockHits` (Guardian) has no per-battle bound the way Echo's
+  `echoSpent` flag gives Echo one — `blockCharges` is topped up fresh every
+  wave regardless of `mode.kind`. If a `boonBlockHits`-carrying `Lineup` ever
+  reached the 45-wave gauntlet (it structurally cannot today — nothing outside
+  `boardsForDuel` writes it, and `validateBoard` refuses it on any submitted
+  board), it would be a genuine per-wave repeating grant, not a bounded one.
+  Caught because fixing a vacuous assertion in the Echo compounding-law canary
+  (`boon-guardian-echo.test.ts` was comparing two `undefined`s) exposed it.
+  Not fixed here — this file's batch didn't touch Guardian's engine code —
+  but worth its own follow-up before this convention-only PvP-only boundary is
+  leaned on any harder.
 
 ## A note on measuring boons
 
