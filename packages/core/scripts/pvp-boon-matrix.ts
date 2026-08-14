@@ -60,6 +60,16 @@ const SEED = process.env.BOON_SEED ?? 'boon-matrix-v1';
 const UNMEASURABLE = new Set(['deep-scout']);
 const READ_DEPENDENT = new Set(['silence']);
 const CONDITIONAL = new Set(['echo']);
+/**
+ * HELD candidates under evaluation for promotion to `BOON_DEFS` (2026-08-14
+ * roster-dimensionality pass). `measurable` below is normally just
+ * `Object.keys(BOON_DEFS)` — this is the one place a Held boon gets pulled in
+ * on purpose, so it measures against the live field rather than in a vacuum.
+ * `echo` is deliberately excluded from this list even though it is also
+ * Held: it already has its own bespoke field-C conditional treatment below,
+ * from when it was still shipping.
+ */
+const HELD_CANDIDATES = ['rust', 'barren', 'antidote', 'stripped', 'first-blood'];
 
 const rng = xorshift128(fnv1a(SEED));
 const pool = seasonUnitPool();
@@ -155,7 +165,9 @@ const f = (n: number): string => (n >= 0 ? '+' : '') + n.toFixed(3);
 const line = (r: Row, tag = ''): string =>
   `  ${(r.name + tag).padEnd(20)}${f(pct(r.perBoard, 0.25)).padEnd(9)}${f(pct(r.perBoard, 0.5)).padEnd(9)}${f(pct(r.perBoard, 0.75)).padEnd(9)}${String(r.better).padEnd(9)}${r.worse}`;
 
-const measurable = Object.keys(BOON_DEFS).filter((id) => !UNMEASURABLE.has(id));
+const measurable = [...Object.keys(BOON_DEFS), ...HELD_CANDIDATES].filter(
+  (id) => !UNMEASURABLE.has(id)
+);
 
 function table(label: string, field: Lineup[]): Row[] {
   const rows = measurable.map((id) => measure(id, field));
@@ -163,7 +175,8 @@ function table(label: string, field: Lineup[]): Row[] {
   console.log('  boon                p25      median   p75      helped   hurt');
   console.log('  ' + '-'.repeat(64));
   for (const r of [...rows].sort((x, y) => pct(y.perBoard, 0.5) - pct(x.perBoard, 0.5))) {
-    console.log(line(r, READ_DEPENDENT.has(r.id) ? ' *' : CONDITIONAL.has(r.id) ? ' +' : ''));
+    const heldTag = HELD_CANDIDATES.includes(r.id) ? ' ~' : '';
+    console.log(line(r, (READ_DEPENDENT.has(r.id) ? ' *' : CONDITIONAL.has(r.id) ? ' +' : '') + heldTag));
   }
   return rows;
 }
@@ -176,6 +189,7 @@ const rows = table('B. TANK FIRST (deliberate order — judge positional boons h
 
 console.log('\n  * read-dependent: judge on spread, not median.');
 console.log('  + conditional: see field C.');
+console.log('  ~ Held candidate (not on the live rotation) — 2026-08-14 ideas pass.');
 for (const id of UNMEASURABLE) {
   console.log(`  ${BOON_DEFS[id].name}: EXCLUDED — no sim surface; its value is information`);
   console.log('    the sim cannot act on, because nothing models a player adapting.');

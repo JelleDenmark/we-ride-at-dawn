@@ -384,6 +384,54 @@ tuning it means inflating everything else. Left as a live-data question —
 `pvp_results.boon_id` gives pick rate for free, and six players cannot resolve
 anything subtler than dominance anyway (#186).
 
+### The 2026-08-14 pass: the five Held candidates
+
+`pvp-boon-matrix.ts` extended to pull in `rust`/`barren`/`antidote`/`stripped`/
+`first-blood` alongside the shipping nine (`HELD_CANDIDATES`, tagged `~` in the
+table), so they're measured against the SAME live field rather than in
+isolation. Three seeds (`boon-matrix-v1`, `alt-population-2`, `boon-matrix-v3`)
+at the current placeholder magnitudes (Rust 4 armor, Barren 1 headroom,
+Antidote 3 resist).
+
+**No dominance violation involving any of the five, on any seed, in either
+direction.** None ever appears on the winning side of a `!` line — they never
+strictly outrank a shipping boon — but they also never get outranked so hard
+it would read as a trap. Safe to leave Held; nothing here says "ship it now,"
+nothing says "this is broken."
+
+**Two read as solid already, on the general population alone:**
+- **Antidote** — consistently net-positive on every field/seed combination
+  (e.g. 40 helped / 1 hurt, 42/0, 32/1 across the three field-A runs) and
+  essentially never backfires. The safest-looking of the five.
+- **Rust** — smaller magnitude but the same shape: always more helped than
+  hurt, never negative-trending, across all six field/seed runs.
+
+**Three show Echo's exact shape — conditional-by-design, undersold by a
+population that mostly doesn't trigger them:**
+- **Barren** only moves anything on a board that both has a summoner AND has
+  headroom to spare; most of the general population has neither, so it fires
+  on roughly 5-9 of 30 boards per run (compare Echo's own summoner-only
+  requirement, and its dedicated field C for exactly this reason).
+- **Stripped** only matters against a front unit that actually carries a
+  relic worth stripping. The population hands out a unit relic to about a
+  third of units at random, but the FRONT specifically needs one — same
+  fixture-bug shape #186 already found for A Body First in a relic-free
+  population, just less severe here since this population does carry relics.
+- **First Blood** only matters when the wave's opening blow is lethal against
+  a real board (not a 1-hit fixture) — a narrow window against boards built
+  from real health totals. Fires on roughly 7-27 of 870 duels per run, never
+  once net-negative across all six runs.
+
+**Not yet resolved:** whether any of these three would look different measured
+the way Echo was — against a board population built to actually trigger them
+(a summoner-heavy field for Barren, a relic-heavy front for Stripped, a
+glass-cannon-heavy field for First Blood) rather than the general population.
+Given the shape match to Echo, that's the obvious next step before writing any
+of the three off OR promoting them. The general-population numbers above are
+real, just possibly an underestimate the same way Echo's first population
+was — see #186's "two fixture bugs" note above for why that distinction
+mattered enough to change a real conclusion once already.
+
 ## Open
 
 - The Silence marker on the board render (see the replay section above) — the
@@ -393,10 +441,16 @@ anything subtler than dominance anyway (#186).
 - Whether the trio should avoid repeating a boon on adjacent days (the Slay the Spire
   rule, cited in #165's design refresh).
 - The overnight/locked screen state.
-- X values for Rust, Barren, Antidote and First Blood — all five newly-held
-  boons carry the same magnitude conventions as the shipping roster's, but the
-  actual numbers are placeholders (`sim.ts`'s `HELD_BOONS`) pending a
-  `pvp:boons` pass, same as Silence's own still-open magnitude question above.
+- X values for Rust, Barren, Antidote and First Blood are still placeholders
+  (`sim.ts`'s `HELD_BOONS`) — the 2026-08-14 `pvp:boons` pass above measured
+  direction (none is broken, two look solid, three look Echo-shaped) at the
+  CURRENT placeholder magnitudes, but never swept alternate values the way
+  Bulwark/Blunt/Rearguard/Guardian's shipped numbers imply happened for them.
+  A magnitude sweep is still open for whichever of the five moves toward
+  Shipping.
+- Whether Barren/Stripped/First Blood need Echo's field-C treatment (a
+  board population built to actually trigger them) before their Held status
+  is revisited — see the pass write-up above.
 - **First Blood's interaction with Drag/Buried needs to be stated at pick
   time, not just discoverable in the replay (Jesper, 2026-08-14).** First
   Blood binds to WHICHEVER unit is at `units[0]` when the wave's opening tick
