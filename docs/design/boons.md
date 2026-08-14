@@ -509,10 +509,19 @@ ever needs to resolve a fixed id it already knows about.
 
 ### Open questions this proposal does NOT answer yet
 
-- Should Bulwark get the same split, given it shows the identical curve and
-  has been live for weeks? This proposal only specs Rust because that's what
-  surfaced it; Bulwark (and possibly Blunt/Rearguard) deserves the same
-  measurement pass before deciding.
+- **Decided (Jesper, 2026-08-15): all of the flat-magnitude stat boons or
+  none — not a per-boon judgment call.** Applying day-gating to Rust alone
+  while Bulwark/Blunt/Rearguard/Guardian/Barren/Antidote stay flat would make
+  the pool inconsistent for no principled reason; the day-1-vs-day-7 swing is
+  a property of "flat amount against exponentially-scaling stats," not of any
+  one boon, so the fix scope is the whole class: **Bulwark, Blunt, Rearguard,
+  Guardian, Rust, Barren, Antidote** (every `BoonEffect` carrying a numeric
+  `amount`/`hits`/`headroom`). Drag/Buried/A Body First/Silence/Deep Scout/
+  Stripped/First Blood are unaffected either way — nothing about them scales
+  with a stat number. This turns the proposal from "spec one sibling pair"
+  into "spec up to seven," each needing its own day-split numbers from a
+  measurement pass (the 4→8 Rust split was Jesper's illustrative example, not
+  yet re-derived per-boon) — real follow-up work, still not started.
 - Exact day-1-3/4-7 split was Jesper's stated example, not re-derived from
   the swing table above — worth confirming against the actual tier
   distribution `boardCapForDay`/the real economy produces by each day,
@@ -531,13 +540,15 @@ ever needs to resolve a fixed id it already knows about.
 - Whether the trio should avoid repeating a boon on adjacent days (the Slay the Spire
   rule, cited in #165's design refresh).
 - The overnight/locked screen state.
-- **Day-gated magnitude pairs** (Rust as the pilot: `rust` days 1-3, a new
-  `rust-major` days 4-7) — fully scoped above, not built. Flat magnitudes
-  swing far harder on a day-1 board than a day-6 one (measured: Rust doubles
-  tier-1 damage, adds 13% at tier-3; Bulwark, already shipped, flips a
-  mirror draw to a win at tier 1-2 and does nothing at tier 3), and this
-  design avoids the correctness trap of the alternative (threading the
-  ride-date through scoring) entirely, since it only touches `boonsFor`.
+- **Day-gated magnitude pairs, scoped for ALL seven flat-magnitude stat
+  boons (Bulwark, Blunt, Rearguard, Guardian, Rust, Barren, Antidote) per
+  Jesper's all-or-none call, not built.** Rust's `rust`/`rust-major` split
+  (days 1-3 / 4-7) is the illustrative example, not yet re-derived for the
+  other six. Flat magnitudes swing far harder on a day-1 board than a day-6
+  one (measured: Rust doubles tier-1 damage, adds 13% at tier-3; Bulwark
+  flips a mirror draw to a win at tier 1-2, does nothing at tier 3), and the
+  proposed design avoids the correctness trap of the alternative (threading
+  the ride-date through scoring) entirely, since it only touches `boonsFor`.
 - X values for Rust, Barren, Antidote, Stripped and First Blood are still
   placeholders (`sim.ts`'s `BOON_DEFS`) even though all five are live —
   the 2026-08-14 `pvp:boons` pass measured direction (none is broken, two
