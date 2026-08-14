@@ -1275,6 +1275,18 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     id: 'ward-weaver', name: 'Ward-Weaver', attack: 1, health: 3, cost: 6,
     ability: { trigger: 'startOfBattle', effect: { kind: 'grantArmor', all: true } },
     // Day-1 gate removed (Jesper, 2026-08-01) — see Dire-Rat's note above.
+    //
+    // Retired for the 2026-08-17 season reset (season-to-season census,
+    // see wrad-cross-season-staleness memory): the only true two-season
+    // auto-include — 32/42 S1 board-rounds, 5/5-5/6 boards every day
+    // measured in S2, unmoved by this season's anti-stacking anomaly. The
+    // real fix (`ahead`-only armor variant, #181/#182) is already built and
+    // measured but deliberately held for a later season — this pulls the
+    // unit from the pool in the meantime rather than leave the free
+    // whole-board grant live untouched. Same mechanism/precedent as
+    // Gnawer/Gutter-Acolyte above: out of the shop pool from day 1 on,
+    // carried-in copies still sell at par (`sellRefund`).
+    retireDay: 1,
   },
   // Issue #12: a parallel "Runt" pair (Gutter-Runt precedent) tied to the
   // game's dawn/dusk duality rather than literal noon-splitting — the actual
@@ -1353,8 +1365,10 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   // look — matches the pun on the name) and a glass of Nutella somewhere in
   // the art (see mbp-rat.svg). Stats/ability are a byte-for-byte carryover,
   // not a fresh tune — balance sign-off already covers Slink-Rat's numbers.
+  // (attack was 4 here vs Slink-Rat's 3 — a copy slip against the "byte-for-
+  // byte" claim above, corrected 2026-08-14.)
   'mbp-rat': {
-    id: 'mbp-rat', name: 'MBP Rat', attack: 4, health: 1, cost: 6,
+    id: 'mbp-rat', name: 'MBP Rat', attack: 3, health: 1, cost: 6,
     ability: { trigger: 'startOfWave', effect: { kind: 'backlineDamage' } },
   },
   // Issue #110: single-unit fusion of the Dawn-Runt/Dusk-Runt pair above —

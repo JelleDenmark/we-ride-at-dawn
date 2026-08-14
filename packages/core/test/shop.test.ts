@@ -1437,15 +1437,15 @@ describe('day-gated shop unlocks (issue #12)', () => {
     return false;
   };
 
-  it('the former day-2 picks (Dire-Rat, Ward-Weaver) are available every day, including day 1', () => {
+  it('the former day-2 pick (Dire-Rat) is available every day, including day 1', () => {
     // Day-1 shop was deliberately kept plain (2026-07-11): the armored tank
     // and the front-shield held back to day 2. Gate REMOVED (Jesper,
-    // 2026-08-01, see the units' own doc comments) — the full pool is now
+    // 2026-08-01, see the unit's own doc comment) — the full pool is now
     // offered from day 1. (MD Rattyfock was the third day-2 pick until the
-    // season-3 swap retired it entirely — issue #115.)
-    for (const defId of ['dire-rat', 'ward-weaver']) {
-      for (const day of [1, 2, 3, 4, 5, 6, 7]) expect(everAppears(day, defId)).toBe(true);
-    }
+    // season-3 swap retired it entirely — issue #115. Ward-Weaver, the
+    // fourth, was retired outright for the 2026-08-17 reset — see the
+    // retireDay test below.)
+    for (const day of [1, 2, 3, 4, 5, 6, 7]) expect(everAppears(day, 'dire-rat')).toBe(true);
   });
 
   it('season-3 reskin swap (issue #115) + #149 pool flip: retired reskins never roll; tribute + un-retired anchor do', () => {
@@ -1540,6 +1540,20 @@ describe('day-gated shop retirement (issue #108: retireDay primitive)', () => {
   it('upcomingRetirements never lists Cellar-Coil (already gone before day 1, not "leaving soon")', () => {
     for (const day of [1, 2, 3, 4, 5, 6, 7]) {
       expect(upcomingRetirements(day).map((u) => u.id)).not.toContain('cellar-coil');
+    }
+  });
+
+  it('Ward-Weaver (retireDay: 1, retired for the 2026-08-17 season reset) never appears in the shop pool, on any day', () => {
+    // Cross-season census (wrad-cross-season-staleness) found it the only
+    // true two-season auto-include, unmoved by the anti-stacking anomaly;
+    // its real fix (`ahead`-only armor variant, #181/#182) is held for a
+    // later season, so it's pulled from the pool in the meantime.
+    for (const day of [1, 2, 3, 4, 5, 6, 7]) expect(everAppears(day, 'ward-weaver')).toBe(false);
+  });
+
+  it('upcomingRetirements never lists Ward-Weaver (already gone before day 1, not "leaving soon")', () => {
+    for (const day of [1, 2, 3, 4, 5, 6, 7]) {
+      expect(upcomingRetirements(day).map((u) => u.id)).not.toContain('ward-weaver');
     }
   });
 });
