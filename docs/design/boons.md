@@ -5,14 +5,17 @@ patron/companion framing (#114) was dropped in favour of a bare choice screen.
 
 Same status convention as `future-minions.md` for the design reasoning. The
 system itself is now BUILT and measured — phases 1-6 shipped to `dev` over
-2026-08-12/13, and the magnitudes for the nine SHIPPING boons below are
+2026-08-12/13, and the magnitudes for the original nine boons below are
 measured values from `pvp:boons`, no longer placeholders.
 
-Five more (Rust, Barren, Antidote, Stripped, First Blood) were added to
-**Held** on 2026-08-14 from the roster-dimensionality pass below — built and
-tested the same way the shipping nine were, but not yet run through
-`pvp:boons`, so their magnitudes ARE still placeholders. See the Held section
-of the roster for the reasoning behind each.
+Five more (Rust, Barren, Antidote, Stripped, First Blood) were added to Held
+on 2026-08-14 from the roster-dimensionality pass below, then promoted into
+Shipping on 2026-08-15 (owner call) on the strength of a DIRECTIONAL
+`pvp:boons` pass — no dominance violation, but no magnitude sweep, and three
+of the five likely undersold by the general population the same way Echo's
+first population undersold it. Their magnitudes ARE still placeholders. See
+the roster's Shipping section and "The 2026-08-14 pass" under measurement for
+the full reasoning.
 
 This file is the design bank. Issue #184 is the build spec. When they disagree, the
 issue wins for *what gets built* and this file wins for *why*.
@@ -107,7 +110,20 @@ trims to the backmost only.
 | **Rearguard** | +X attack on your `units[n-1]` | pre-sim stat write |
 | **Deep Scout** | Read every rival's exact roster for the day | client-only, no sim |
 | **Guardian** | Block the first X incoming attacks on your side | adopts orphaned plumbing |
+| **Rust** | Opponent, whole line, −X armor (`damageReduction`), floored at 0 | pre-sim stat write |
+| **Barren** | Opponent's summon headroom cut to X for the duel, never raised | pre-sim cap write |
+| **Antidote** | Self, whole line, X flat poison negation for the duel | adopts orphaned plumbing |
+| **Stripped** | The opponent's `units[0]` loses its equipped unit relics for the duel | pre-sim instantiate flag |
+| **First Blood** | Your `units[0]` resolves its opening blow before the return, wave's first tick only | trigger modifier |
 
+**Rust through First Blood promoted 2026-08-15 (owner call, Jesper), ahead of
+the follow-up work the pass below calls for.** No dominance violation on any
+of three seeds either direction, but no magnitude sweep, and three of the
+five (Barren, Stripped, First Blood) measured on the general population the
+same way Echo did before it got its own summoner-only field — conditional by
+design, so that population likely undersells them rather than proving them
+weak. Shipped anyway; the magnitude sweep and the targeted-population passes
+for the conditional three are still open, tracked below.
 
 ### Held
 
@@ -131,59 +147,6 @@ trims to the backmost only.
   boards built for it. Lives in `HELD_BOONS` with its tests, including its
   compounding-law canary. Restoring it needs a reason to be worth a pick — a
   magnitude knob, or a bigger effect than one body — not just moving the entry.
-
-The five below are held for the OPPOSITE reason Echo is: not measured and found
-wanting, but not yet measured at all. Added 2026-08-12 from the
-roster-dimensionality pass (#181/#182's "one axis" diagnosis), each one closes a
-specific gap the launch nine left open rather than adding another effect on top
-of what the pool already had. Built and tested exactly like a shipping boon —
-`HELD_BOONS`, resolved by `boonEffect`, covered in `boon-ideas.test.ts` — with
-every magnitude a PLACEHOLDER pending a `pvp:boons` pass. Moving one to Shipping
-is the same one-line move restoring Echo would be.
-
-- **Rust** — opponent, whole line loses flat armor (`damageReduction`),
-  floored at 0 per unit. Closes the largest hole in the game, not just in this
-  pool: nothing anywhere answers stacked flat armor (three ★3 Ward-Weavers put
-  +18 `damageReduction` on every rat, and with `MIN_ATTACK_DAMAGE` at 1 that
-  converts survival into health-in-ticks). Unlike Silence it cannot be dodged
-  by standing somewhere else, which is the point — the grants worth answering
-  are precisely the ones that ignore position. A whole-line stat write, so the
-  targeting principle's end-vs-whole-line split doesn't restrict it, the same
-  way Bulwark/Rearguard/Blunt aren't restricted despite being single-end.
-- **Barren** — opponent's summon headroom (`combatCap` above however many rats
-  they deployed) cut for the duel, never raised. Echo amplifies summoning and
-  nothing in the pool opposes it, while summoners are the most-fielded board
-  shape of both leagued seasons — this is that missing half. A cap READ, not a
-  slice, so it sits outside the targeting principle entirely. Worth nothing
-  against a board with no summoner, same accepted shape as Echo.
-- **Antidote** — self, whole line, flat poison negation for the duel. Adopts
-  orphaned plumbing rather than adding any: `poisonResistApplied` is already a
-  per-side, per-wave, cap-not-sum budget (Gutter-Acolyte's `poisonResist`), so
-  this seeds the same pool instead of reimplementing it. Also doubles as the
-  free-of-body-cost probe #155 never ran — isolating whether the RESIST is too
-  weak from whether the ACOLYTE's body is too weak, which no prior change
-  could tell apart.
-- **Stripped** — opponent's `units[0]` loses its equipped unit relics for the
-  duel; team relics untouched. Relics are unconditional picks on a mature
-  board and nothing in the pool denies one. Silence deliberately leaves relics
-  alone (a silenced rat keeps Marrow-Snap, Glass Shard, Weeping Boil), so this
-  opens the denial axis Silence stops short of — the two read as a deliberate
-  pair, not a redundant one. Implemented as a pre-`instantiate` relic filter
-  rather than a post-hoc patch, since relic stats are baked into a `BattleUnit`
-  at that point.
-- **First Blood** — self, `units[0]` resolves its opening blow before the
-  return, on the wave's first clash tick only. The clash is normally
-  simultaneous (a 9/1 and a 1/9 trade identically — both die); this makes
-  attack a DEFENSIVE stat for one tick, a genuinely new axis, and a structural
-  counter to 1-attack swarm bodies. Bounded to a single clash by construction
-  — the clearest case yet of the boon layer shipping something the 45-wave
-  gauntlet could not safely hold. Both sides picking it cancels out rather
-  than compounding, keeping an identical mirror board a draw. The highest-risk
-  entry here: it touches the clash loop's net-damage floor clamp directly, so
-  it shipped with its own compounding-law canary (`currentWave === 1`, not
-  merely `ticks === 1` — `ticks` resets every wave, so the weaker check would
-  have re-fired on every wave's opening tick if the flag ever reached a
-  multi-wave gauntlet battle).
 
 ### Rejected, with reasons
 
@@ -384,6 +347,190 @@ tuning it means inflating everything else. Left as a live-data question —
 `pvp_results.boon_id` gives pick rate for free, and six players cannot resolve
 anything subtler than dominance anyway (#186).
 
+### The 2026-08-14 pass: the five Held candidates (promoted 2026-08-15)
+
+`pvp-boon-matrix.ts` extended to pull in `rust`/`barren`/`antidote`/`stripped`/
+`first-blood` alongside the shipping nine (`HELD_CANDIDATES`, tagged `~` in the
+table), so they're measured against the SAME live field rather than in
+isolation. Three seeds (`boon-matrix-v1`, `alt-population-2`, `boon-matrix-v3`)
+at the current placeholder magnitudes (Rust 4 armor, Barren 1 headroom,
+Antidote 3 resist).
+
+**No dominance violation involving any of the five, on any seed, in either
+direction.** None ever appears on the winning side of a `!` line — they never
+strictly outrank a shipping boon — but they also never get outranked so hard
+it would read as a trap. Nothing here says "this is broken" — that's the bar
+the promotion below actually leaned on, not a claim that magnitude tuning or
+the conditional-population question was settled.
+
+**Two read as solid already, on the general population alone:**
+- **Antidote** — consistently net-positive on every field/seed combination
+  (e.g. 40 helped / 1 hurt, 42/0, 32/1 across the three field-A runs) and
+  essentially never backfires. The safest-looking of the five.
+- **Rust** — smaller magnitude but the same shape: always more helped than
+  hurt, never negative-trending, across all six field/seed runs.
+
+**Three show Echo's exact shape — conditional-by-design, undersold by a
+population that mostly doesn't trigger them:**
+- **Barren** only moves anything on a board that both has a summoner AND has
+  headroom to spare; most of the general population has neither, so it fires
+  on roughly 5-9 of 30 boards per run (compare Echo's own summoner-only
+  requirement, and its dedicated field C for exactly this reason).
+- **Stripped** only matters against a front unit that actually carries a
+  relic worth stripping. The population hands out a unit relic to about a
+  third of units at random, but the FRONT specifically needs one — same
+  fixture-bug shape #186 already found for A Body First in a relic-free
+  population, just less severe here since this population does carry relics.
+- **First Blood** only matters when the wave's opening blow is lethal against
+  a real board (not a 1-hit fixture) — a narrow window against boards built
+  from real health totals. Fires on roughly 7-27 of 870 duels per run, never
+  once net-negative across all six runs.
+
+**Not yet resolved:** whether any of these three would look different measured
+the way Echo was — against a board population built to actually trigger them
+(a summoner-heavy field for Barren, a relic-heavy front for Stripped, a
+glass-cannon-heavy field for First Blood) rather than the general population.
+Given the shape match to Echo, that's the obvious next step before writing any
+of the three off OR promoting them. The general-population numbers above are
+real, just possibly an underestimate the same way Echo's first population
+was — see #186's "two fixture bugs" note above for why that distinction
+mattered enough to change a real conclusion once already.
+
+**Promoted to Shipping anyway, 2026-08-15 (owner call, Jesper).** The bar the
+owner applied was narrower than "fully measured": no dominance violation is
+enough to ship, the magnitude sweep and the conditional-population passes
+above can happen with the boons live rather than gating their release. Six
+players scouting each other daily also generates real pick-rate and
+`pvp_results` data no synthetic population can — same argument #186 already
+made for leaving Silence's magnitude as a live-data question rather than
+tuning it blind. Recorded here rather than silently reversing the "safe to
+leave Held" framing above, which was accurate for what it measured — the
+decision moved past it, not around it.
+
+## Proposal: day-gated magnitude pairs (not built, scoped 2026-08-15)
+
+### The problem this answers
+
+Every boon magnitude here is a FLAT number, but a duel board's stats scale
+exponentially with tier (`tierAttackMultiplier`/`tierHealthMultiplier`,
+~3^(tier-1)), and tier tracks the expedition day: `BOARD_GROWTH` and the real
+economy mean a day-1 board is small and mostly tier-1, a day-6/7 board is
+bigger and tier-2/3. A flat amount is therefore a HUGE fraction of a small
+early stat and background noise against a large late one, by construction —
+not a fixture artifact, a property of every flat-amount boon in the pool.
+
+Measured directly (Dire-Rat-vs-Dire-Rat mirror, same tier both sides,
+first-hit damage):
+
+| Tier | Plain | Rust (-4 armor) | Swing |
+|---|---|---|---|
+| 1 | 2 | 4 | **+100%** |
+| 2 | 8 | 12 | +50% |
+| 3 | 30 | 34 | +13% |
+
+And this is NOT new to Rust — **Bulwark, already shipped and already
+"measured," has the identical curve**: +10 health flips a tier-1 or tier-2
+Dire-Rat mirror from a mutual-kill draw into an outright win, and does
+nothing at all at tier 3 (the board's health pool has outgrown 10 flat by
+then). Nobody checked this for the original nine either; it surfaced only
+because Jesper asked whether the win-rate sweep would have caught a day-1
+power spike, and it wouldn't have — win/draw/loss scoring saturates, and a
+population that mixes armor-carriers with everything else dilutes a spike
+that's real on the boards where it applies.
+
+**Decided (Jesper, 2026-08-15): ship flat magnitudes as-is for now** (see the
+promotion note above) rather than block launch on this. This section is the
+scoped follow-up, not a blocker.
+
+### Two designs were on the table
+
+**A. Thread the ride-date through scoring, magnitude as a function of day.**
+Rejected — not because it's impossible, but because it reaches somewhere it
+shouldn't have to. `boonEffect(boonId)` resolves a bare id to a fixed effect
+with NO date input, called fresh at SCORING time by `boardsForDuel`/
+`simulateDuel`, which `scoreRound` calls with just `LeagueEntrant.boonPick`
+— a string. `LeagueEntrant`'s own doc comment states outright that
+`scoreRound` "deliberately does not take" a ride-date. Making magnitude
+day-dependent this way means either (a) `scoreRound`/`simulateDuel`/
+`boardsForDuel`/`boonEffect` all gain a ride-date parameter so scoring
+resolves the SAME magnitude the player was shown at pick time (real signature
+churn across the whole scoring path, plus whatever the app layer's nightly-
+job caller does outside `packages/core`), or (b) skip that and risk scoring
+drifting from what was shown at pick time — a correctness bug, not a tuning
+one. Either way this touches the determinism contract the whole PvP
+anti-cheat story leans on (`simulateDuel`'s doc comment: "the client and the
+nightly server job can independently re-simulate and agree"). Not something
+to reach for under a deadline.
+
+**B. Day-gate WHICH boon is offered, not what any boon resolves to (Jesper's
+proposal) — two ordinary, date-agnostic `BoonDef` entries, mutually
+exclusive by day.** This is the one to build. `boonEffect(id)` never changes
+— every `BoonDef` stays a fixed, date-independent id→effect mapping, exactly
+like today. The only date-aware code is `boonsFor(rideDate)`, which already
+exists precisely to be the one date-aware boundary (rule 1 in the module
+doc comment: "pure function of the ride-date... re-derivable anywhere with
+no stored state"). Scoring, replay, and `boonEffect` are completely
+untouched — zero risk to the determinism story, because a scored duel only
+ever needs to resolve a fixed id it already knows about.
+
+### Concrete shape, using Rust as the pilot
+
+- **`rust`** (existing id, unchanged) — amount stays 4, now understood as the
+  EARLY-week version. Keeping the id stable matters: any pick already
+  recorded against `'rust'` (once this is live) keeps resolving to the same
+  effect it always did — nothing about promoting an existing id to
+  "day-gated" changes what that id itself means.
+- **`rust-major`** (new id) — amount 8, the LATE-week version. A sibling
+  entry, same shape as how Silence (backmost) is already a held sibling of
+  Silence (frontmost) — two ids, never offered on the same day, so they
+  never read as a confusing pair.
+- **Day source: `weekdayFor(rideDate)` from `shop.ts`**, not a new day
+  concept. Already the exact function `BOARD_GROWTH`/`unlockDay`/`retireDay`
+  use for "which expedition day is this," pure, already tested, and
+  importing it into `boons.ts` creates no cycle (`shop.ts` doesn't import
+  `boons.ts`). Split: `rust` eligible days 1-3, `rust-major` eligible days
+  4-7 — Jesper's exact split.
+- **`boonsFor` changes shape slightly:** today it Fisher-Yates draws
+  `BOONS_PER_DAY` straight over `Object.values(BOON_DEFS)`. It would need to
+  FILTER the pool by day-eligibility first (most entries always eligible;
+  a day-gated pair contributes exactly one of itself, never both, never
+  neither), then draw over the filtered array — keeping the array the same
+  LENGTH every day (swapping which entry occupies the "Rust" slot, not
+  changing how many slots exist) is what keeps rule 4's "insertion order is
+  the roll order" reasoning intact rather than needing new reasoning about
+  what a variable-length pool does to historical days.
+- **Test fallout, not just an implementation nicety:** `boons.test.ts`'s
+  "does not lean hard on any one boon" bound (15-50% share over 120 days)
+  assumes every entry is offerable every day. A day-gated id can only ever
+  be drawn on its ~3-4 of 7 eligible days, so its ceiling share is lower by
+  construction — the bound needs a per-id exception, not a blanket loosen,
+  or a day-gated boon that's otherwise perfectly healthy will read as
+  starved.
+
+### Open questions this proposal does NOT answer yet
+
+- **Decided (Jesper, 2026-08-15): all of the flat-magnitude stat boons or
+  none — not a per-boon judgment call.** Applying day-gating to Rust alone
+  while Bulwark/Blunt/Rearguard/Guardian/Barren/Antidote stay flat would make
+  the pool inconsistent for no principled reason; the day-1-vs-day-7 swing is
+  a property of "flat amount against exponentially-scaling stats," not of any
+  one boon, so the fix scope is the whole class: **Bulwark, Blunt, Rearguard,
+  Guardian, Rust, Barren, Antidote** (every `BoonEffect` carrying a numeric
+  `amount`/`hits`/`headroom`). Drag/Buried/A Body First/Silence/Deep Scout/
+  Stripped/First Blood are unaffected either way — nothing about them scales
+  with a stat number. This turns the proposal from "spec one sibling pair"
+  into "spec up to seven," each needing its own day-split numbers from a
+  measurement pass (the 4→8 Rust split was Jesper's illustrative example, not
+  yet re-derived per-boon) — real follow-up work, still not started.
+- Exact day-1-3/4-7 split was Jesper's stated example, not re-derived from
+  the swing table above — worth confirming against the actual tier
+  distribution `boardCapForDay`/the real economy produces by each day,
+  rather than assuming the swing curve is linear across days 1-7.
+- Naming convention for the sibling id (`rust-major` here is a placeholder,
+  not a commitment) and whether the card copy needs to say anything
+  different between the two, given blurbs currently carry no numbers and no
+  day information.
+
 ## Open
 
 - The Silence marker on the board render (see the replay section above) — the
@@ -393,10 +540,27 @@ anything subtler than dominance anyway (#186).
 - Whether the trio should avoid repeating a boon on adjacent days (the Slay the Spire
   rule, cited in #165's design refresh).
 - The overnight/locked screen state.
-- X values for Rust, Barren, Antidote and First Blood — all five newly-held
-  boons carry the same magnitude conventions as the shipping roster's, but the
-  actual numbers are placeholders (`sim.ts`'s `HELD_BOONS`) pending a
-  `pvp:boons` pass, same as Silence's own still-open magnitude question above.
+- **Day-gated magnitude pairs, scoped for ALL seven flat-magnitude stat
+  boons (Bulwark, Blunt, Rearguard, Guardian, Rust, Barren, Antidote) per
+  Jesper's all-or-none call, not built.** Rust's `rust`/`rust-major` split
+  (days 1-3 / 4-7) is the illustrative example, not yet re-derived for the
+  other six. Flat magnitudes swing far harder on a day-1 board than a day-6
+  one (measured: Rust doubles tier-1 damage, adds 13% at tier-3; Bulwark
+  flips a mirror draw to a win at tier 1-2, does nothing at tier 3), and the
+  proposed design avoids the correctness trap of the alternative (threading
+  the ride-date through scoring) entirely, since it only touches `boonsFor`.
+- X values for Rust, Barren, Antidote, Stripped and First Blood are still
+  placeholders (`sim.ts`'s `BOON_DEFS`) even though all five are live —
+  the 2026-08-14 `pvp:boons` pass measured direction (none is broken, two
+  look solid, three look Echo-shaped) at the CURRENT placeholder magnitudes,
+  but never swept alternate values the way Bulwark/Blunt/Rearguard/Guardian's
+  shipped numbers imply happened for them. Still open, now against live data
+  instead of gating the release.
+- Whether Barren/Stripped/First Blood need Echo's field-C treatment (a board
+  population built to actually trigger them) to get a real read, now that
+  `pvp_results.boon_id` pick-rate data will start accumulating alongside
+  whatever a targeted synthetic pass would show — see the pass write-up
+  above.
 - **First Blood's interaction with Drag/Buried needs to be stated at pick
   time, not just discoverable in the replay (Jesper, 2026-08-14).** First
   Blood binds to WHICHEVER unit is at `units[0]` when the wave's opening tick
