@@ -1180,45 +1180,110 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
     }
   };
 
+  /**
+   * Issue #188: the old version of this loop scanned `[horde, enemies]` and
+   * dispatched ONE dead unit at a time, which meant a whole side's deaths —
+   * faint ability, `allyFaint` listeners, AND the cross-side
+   * `onFaintDamageAll` relic splash — fully resolved before the other side's
+   * simultaneous death (same tick, e.g. a mutual front-line kill) was even
+   * looked at. Every faint-triggered ABILITY effect (`summon`, `revive`,
+   * `bequeathAttack`, `distributeStatsOnFaint`) only ever touches the dying
+   * unit's OWN side, so that part of the old ordering was harmless — but
+   * `onFaintDamageAll` (Weeping Boil) hits the OPPOSING side directly, so
+   * whichever side (horde/seat A) got scanned first always landed its splash
+   * first, seat after seat, duel after duel. Confirmed by a realistic-board
+   * mirror match (Warren-Warden + Gnawer + Weeping-Boil Brood-Mother, no
+   * relics needed beyond that) breaking the "a true mirror always draws"
+   * invariant.
+   *
+   * Fixed the same way as `fireEntryTriggers` below: each round resolves
+   * every SAME-side effect for both boards first (still front-to-back,
+   * horde-then-enemies order — harmless, since none of those effects can
+   * see the other side), queuing any cross-side splash instead of firing it
+   * immediately; only once both sides' same-side effects for this round are
+   * done does the queued splash apply, side-order no longer mattering since
+   * neither side's splash can influence what the other side's splash reads.
+   * A splash-caused death is a new, later round — no longer a same-tick tie,
+   * so it needs no special handling and falls through to the top of the
+   * outer loop.
+   */
   const resolveDeaths = (): void => {
     for (;;) {
-      let dead: BattleUnit | undefined;
-      let deadIndex = -1;
-      let deadBoard: BattleUnit[] | undefined;
+      const pendingSplash: Array<{ dead: BattleUnit; amount: number; relicId: string; relicName: string; ignoresArmor?: boolean }> = [];
+      let anyDead = false;
       for (const board of [horde, enemies]) {
-        deadIndex = board.findIndex((u) => u.health <= 0);
-        if (deadIndex !== -1) {
-          deadBoard = board;
-          dead = board[deadIndex];
-          break;
+        for (;;) {
+          const deadIndex = board.findIndex((u) => u.health <= 0);
+          if (deadIndex === -1) break;
+          anyDead = true;
+          const dead = board[deadIndex];
+          board.splice(deadIndex, 1);
+          events.push({ type: 'death', unitId: dead.instanceId });
+          fallen[dead.side].push(dead);
+
+          if (dead.ability?.trigger === 'faint') applyEffect(dead, deadIndex, true);
+          for (const relic of dead.relics) {
+            if (!relic.onFaintDamageAll) continue;
+            pendingSplash.push({
+              dead,
+              amount: relic.onFaintDamageAll,
+              relicId: relic.id,
+              relicName: relic.name,
+              ignoresArmor: relic.onFaintIgnoresArmor,
+            });
+          }
+          for (const ally of [...board]) {
+            if (ally.ability?.trigger === 'allyFaint' && ally.health > 0) applyEffect(ally, board.indexOf(ally), false);
+          }
         }
       }
-      if (!dead || !deadBoard) return;
-      deadBoard.splice(deadIndex, 1);
-      events.push({ type: 'death', unitId: dead.instanceId });
-      fallen[dead.side].push(dead);
-
-      if (dead.ability?.trigger === 'faint') applyEffect(dead, deadIndex, true);
-      for (const relic of dead.relics) {
-        if (!relic.onFaintDamageAll) continue;
-        events.push({ type: 'relicProc', targetId: dead.instanceId, relicId: relic.id, name: relic.name });
-        for (const foe of [...opposing(dead.side)]) applyDamage(foe, relic.onFaintDamageAll, 'attack', relic.onFaintIgnoresArmor);
-      }
-      for (const ally of [...deadBoard]) {
-        if (ally.ability?.trigger === 'allyFaint' && ally.health > 0) applyEffect(ally, deadBoard.indexOf(ally), false);
+      if (!anyDead) return;
+      for (const { dead, amount, relicId, relicName, ignoresArmor } of pendingSplash) {
+        events.push({ type: 'relicProc', targetId: dead.instanceId, relicId, name: relicName });
+        for (const foe of [...opposing(dead.side)]) applyDamage(foe, amount, 'attack', ignoresArmor);
       }
     }
   };
 
   /**
+   * Entry-trigger effect kinds that reach across to the OPPOSING side
+   * (`poisonFrontEnemy`/`poisonLastEnemy`/`poisonAllEnemies`/`backlineDamage`)
+   * — every other startOfBattle/startOfWave effect only ever touches its own
+   * board (buffs, armor, summons). Issue #188: `fireEntryTriggers` used to run
+   * to completion for `horde` before `enemies` even started, so a horde
+   * cross-side hit (backline snipe, poison-all) landed on an enemy that
+   * hadn't yet received ITS OWN startOfWave armor/buffs, while the reverse
+   * hit (enemy -> horde) always landed on an already-armored/buffed horde —
+   * a real, seat-dependent damage difference, not just an event-order
+   * artifact (confirmed: it broke the `duel.test.ts` mirror-always-draws
+   * invariant on boards combining Ward-Weaver + a cross-side attacker). Fixed
+   * by splitting into two full passes across BOTH sides (see the call site
+   * below): every self-only effect resolves for horde AND enemies before any
+   * cross-side effect fires for either — so a cross-side hit always lands on
+   * a target that has already received its own side's self-buffs this wave,
+   * regardless of seat.
+   */
+  const CROSS_SIDE_ENTRY_EFFECTS = new Set([
+    'poisonFrontEnemy',
+    'poisonLastEnemy',
+    'poisonAllEnemies',
+    'backlineDamage',
+  ]);
+
+  /**
    * Entry triggers, fired in board order at the top of every wave:
    * `startOfWave` for every unit, `startOfBattle` only for units that have
    * never fired it. See `Ability` in data/units.ts for why the split exists.
+   * `phase` selects self-only effects or cross-side effects (see
+   * `CROSS_SIDE_ENTRY_EFFECTS` above) — callers must run 'self' for both
+   * sides before 'crossSide' for either.
    */
-  const fireEntryTriggers = (board: BattleUnit[]): void => {
+  const fireEntryTriggers = (board: BattleUnit[], phase: 'self' | 'crossSide'): void => {
     for (const unit of [...board]) {
       const trigger = unit.ability?.trigger;
       if (trigger !== 'startOfBattle' && trigger !== 'startOfWave') continue;
+      const isCrossSide = CROSS_SIDE_ENTRY_EFFECTS.has(unit.ability!.effect.kind);
+      if ((phase === 'crossSide') !== isCrossSide) continue;
       if (trigger === 'startOfBattle') {
         if (unit.startOfBattleFired) continue;
         unit.startOfBattleFired = true;
@@ -1438,8 +1503,12 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
     // cap-not-sum budget — see the map's doc comment above.
     poisonResistApplied = { horde: 0, gauntlet: 0 };
 
-    fireEntryTriggers(horde);
-    fireEntryTriggers(enemies);
+    // Self-only effects (buffs, armor, summons) resolve for BOTH sides
+    // before either side's cross-side effects (poison, backline damage) can
+    // fire — see `CROSS_SIDE_ENTRY_EFFECTS`'s doc comment above for why this
+    // split exists (issue #188: seat-dependent duel outcomes).
+    fireEntryTriggers(horde, 'self');
+    fireEntryTriggers(enemies, 'self');
 
     // Guardian (issue #184) tops up the block pool AFTER the entry triggers
     // that would otherwise set it. Additive rather than `Math.max`, unlike
@@ -1447,11 +1516,17 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
     // casters, and a boon cannot be stacked with itself — one pick per player.
     // Adding also keeps the grant honest if a `blockFrontHits` unit is ever
     // shipped again, instead of the two silently swallowing each other.
+    // Self-only (per-side), same as everything above it, so it's unaffected
+    // by the self/crossSide split — placed here (before crossSide fires)
+    // purely to preserve its pre-#188 position relative to the rest of
+    // startOfWave setup.
     for (const side of ['horde', 'gauntlet'] as const) {
       const hits = boonBoardFor(side)?.boonBlockHits ?? 0;
       if (hits > 0) blockCharges[side] += hits;
     }
 
+    fireEntryTriggers(horde, 'crossSide');
+    fireEntryTriggers(enemies, 'crossSide');
     resolveDeaths();
 
     let ticks = 0;
