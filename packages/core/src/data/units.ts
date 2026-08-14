@@ -1013,6 +1013,23 @@ export interface LineupUnit {
    * Brood-Mother's death-summon and Bone-Priest's revive.
    */
   boonSilenced?: boolean;
+  /**
+   * Set by the Stripped boon (issue #184 ideas pass): this unit fights with
+   * its EQUIPPED RELICS removed for the duel and everything else intact.
+   * Same security posture as `boonSilenced` — written by `boardsForDuel`
+   * after validation, and `validateBoard` refuses a submitted board
+   * carrying it.
+   *
+   * Unlike Silence, this is consumed BEFORE `instantiate` rather than after:
+   * a unit's relic-derived attack/health/armor are baked into its stats
+   * inside `instantiate`, so the clean way to remove them completely (stats
+   * and behaviour both — first-hit bonuses, execute thresholds, cleave,
+   * per-tick heal, Weeping Boil's death detonation) is to pass an empty
+   * `relicIds` array in rather than to patch a `BattleUnit` after the fact.
+   * Team relics are untouched — this only ever reaches the unit's own
+   * equipped relics, never `teamRelicIds`.
+   */
+  boonRelicsStripped?: boolean;
 }
 
 export interface Lineup {
@@ -1025,12 +1042,40 @@ export interface Lineup {
    * refuses a submitted board carrying either, because this type IS the sync
    * payload.
    *
-   * These two are the only boons that cannot be a pre-sim transform — they are
-   * runtime behaviour, not a rearranged board — so unlike every other boon
-   * they are read by `simulateCore` itself.
+   * These are boons that cannot be a pre-sim transform — they are runtime
+   * behaviour, not a rearranged board — so unlike a positional or stat-grant
+   * boon they are read by `simulateCore` itself.
    */
   boonBlockHits?: number;
   boonEcho?: boolean;
+  /**
+   * Antidote (issue #184 ideas pass): self, whole line, flat poison
+   * negation for the duel. Seeds the SAME per-side `poisonResistApplied`
+   * budget Gutter-Acolyte's `poisonResist` ability banks into — deliberately
+   * adopted rather than duplicated, so the cap (`POISON_RESIST_CAP`) and the
+   * point where it actually reduces a poison tick are shared with that
+   * ability rather than reimplemented. Same security posture as
+   * `boonBlockHits` above.
+   */
+  boonPoisonResist?: number;
+  /**
+   * First Blood (issue #184 ideas pass): self, `units[0]` resolves its
+   * opening blow before the return. Bounded to the wave's very first clash
+   * tick by construction — see the `ticks === 1` check in `simulateCore`'s
+   * tick loop, the only place in the engine a clash is resolved
+   * sequentially rather than simultaneously. Same security posture as
+   * `boonBlockHits` above.
+   */
+  boonFirstBlood?: boolean;
+  /**
+   * Rust (issue #184 ideas pass): opponent, whole line loses this much flat
+   * armor (`damageReduction`) for the duel, floored at 0 per unit — the
+   * counter to stacked flat-armor grants (Ward-Weaver, Filth Totem) that
+   * nothing else in the game answers, because unlike Silence it cannot be
+   * dodged by standing somewhere else. Same security posture as
+   * `boonBlockHits` above.
+   */
+  boonArmorLoss?: number;
   /**
    * How many bodies this side may hold *during combat*, summons included.
    * Callers building from a `BuildState` (see `lineupFromBuild`/

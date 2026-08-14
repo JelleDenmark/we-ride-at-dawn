@@ -316,6 +316,16 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
   const enemyCombatCap =
     mode.kind === 'duel' ? (mode.opponent.combatCap ?? BOARD_CAP) : hordeCombatCap;
   const capOf = (side: Side): number => (side === 'horde' ? hordeCombatCap : enemyCombatCap);
+  // Rust (issue #184 ideas pass): flat armor lost for the duel, resolved PER
+  // SIDE the same way team relics and the combat cap are above. Defined here
+  // (rather than read off `boonBoardFor`, which isn't declared until later in
+  // this closure) so `instantiate` below — which runs before that point — can
+  // close over it safely. Zero in gauntlet mode's enemy side and for any
+  // caller that never went through `boardsForDuel`, which is what keeps this
+  // PvP-only in practice: nothing else ever writes `boonArmorLoss`.
+  const hordeArmorLoss = lineup.boonArmorLoss ?? 0;
+  const enemyArmorLoss = mode.kind === 'duel' ? (mode.opponent.boonArmorLoss ?? 0) : 0;
+  const armorLossOf = (side: Side): number => (side === 'horde' ? hordeArmorLoss : enemyArmorLoss);
   // Real-world half-day this ride belongs to (issue #12: Dawn-Runt/Dusk-Runt).
   // Never read from the clock here — the app layer resolves it and passes it
   // in via Lineup.timeOfDay. Omitted = matches neither ability condition, so
@@ -358,8 +368,10 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
       tailCharmUsed: false,
       // Team armor (Filth Totem) is a flat grant like team attack/health
       // above, not tier-scaled — the unit's own base armor (Ward-Weaver,
-      // Dire-Rat, Steel-Whisker) is the only tier-scaled term here.
-      damageReduction: (def.damageReduction ?? 0) * tier + team.damageReduction,
+      // Dire-Rat, Steel-Whisker) is the only tier-scaled term here. Rust's
+      // armor loss is subtracted last and floored at 0 per unit, same as
+      // every other negative boon grant (Blunt) — it dulls, never inverts.
+      damageReduction: Math.max(0, (def.damageReduction ?? 0) * tier + team.damageReduction - armorLossOf(side)),
       startOfBattleFired: false,
       raised: false,
       chargeStacks: 0,
@@ -402,6 +414,14 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
     return u;
   };
 
+  // Stripped (issue #184 ideas pass): unlike every other per-unit boon flag,
+  // this one has to be read BEFORE `instantiate` rather than after — relic
+  // stats and behaviour are baked in at that point, so removing them cleanly
+  // means never handing the relics in, not patching a BattleUnit afterward.
+  // Team relics are untouched; only this unit's own equipped relics are
+  // dropped.
+  const relicIdsFor = (u: LineupUnit): string[] => (u.boonRelicsStripped ? [] : u.relicIds ?? []);
+
   const view = (u: BattleUnit): UnitView => ({
     instanceId: u.instanceId,
     defId: u.defId,
@@ -414,7 +434,7 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
 
   const horde: BattleUnit[] = lineup.units
     .slice(0, BOARD_CAP)
-    .map((u) => applyBoonGrants(instantiate(UNIT_DEFS[u.defId], 'horde', u.relicIds, u.tier ?? 1), u));
+    .map((u) => applyBoonGrants(instantiate(UNIT_DEFS[u.defId], 'horde', relicIdsFor(u), u.tier ?? 1), u));
   let enemies: BattleUnit[] = [];
   const fallen: Record<Side, BattleUnit[]> = { horde: [], gauntlet: [] };
 
@@ -1469,7 +1489,7 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
               .slice(0, BOARD_CAP)
               .map((u) =>
                 applyBoonGrants(
-                  instantiate(UNIT_DEFS[u.defId], 'gauntlet', u.relicIds, u.tier ?? 1),
+                  instantiate(UNIT_DEFS[u.defId], 'gauntlet', relicIdsFor(u), u.tier ?? 1),
                   u
                 )
               ),
@@ -1523,6 +1543,22 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
     for (const side of ['horde', 'gauntlet'] as const) {
       const hits = boonBoardFor(side)?.boonBlockHits ?? 0;
       if (hits > 0) blockCharges[side] += hits;
+    }
+
+    // Antidote (issue #184 ideas pass) tops up the SAME per-side, cap-not-sum
+    // `poisonResistApplied` budget Gutter-Acolyte's `poisonResist` ability
+    // already banks into (see that case's doc comment above) — adopted
+    // rather than duplicated, so the actual reduction, applied where poison
+    // ticks resolve below, is byte-identical whichever source fed the
+    // budget. Self-only, so it's unaffected by the self/crossSide split;
+    // placed alongside Guardian's top-up, before crossSide fires, so the
+    // resist is already banked if a crossSide poison caster (Blight-Witch,
+    // Draughtsman Moe) goes this same wave.
+    for (const side of ['horde', 'gauntlet'] as const) {
+      const resist = boonBoardFor(side)?.boonPoisonResist ?? 0;
+      if (resist > 0) {
+        poisonResistApplied[side] = Math.min(POISON_RESIST_CAP, poisonResistApplied[side] + resist);
+      }
     }
 
     fireEntryTriggers(horde, 'crossSide');
@@ -1607,20 +1643,6 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
       // fire `onHurt` (issue #134) below.
       let foeTookBlow = false;
       let frontTookBlow = false;
-      if (blockCharges[foe.side] > 0) {
-        blockCharges[foe.side]--;
-        events.push({ type: 'shieldAbsorbed', targetId: foe.instanceId });
-      } else {
-        applyDamage(foe, damageOut, 'attack', frontIgnoresArmor);
-        foeTookBlow = true;
-      }
-      if (blockCharges[front.side] > 0) {
-        blockCharges[front.side]--;
-        events.push({ type: 'shieldAbsorbed', targetId: front.instanceId });
-      } else {
-        applyDamage(front, damageIn, 'attack', foeIgnoresArmor);
-        frontTookBlow = true;
-      }
       // Net-damage floor: a unit whose clash blow landed must end the tick at
       // least MIN_ATTACK_DAMAGE below where it started (pre-regen), so per-tick
       // healing can never fully offset the armor floor and manufacture an
@@ -1629,13 +1651,82 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
       // (Tail-Charm) path, so this never bypasses a death-cheat rescue. The
       // clamp only ever removes healing the unit gained THIS tick — it can't
       // deal fresh damage past the raw clash, so it never front-runs a faint.
-      if (frontTookBlow && frontStartHealth > MIN_ATTACK_DAMAGE) {
-        front.health = Math.min(front.health, frontStartHealth - MIN_ATTACK_DAMAGE);
+      // Folded into the two strike closures below (rather than left as a
+      // pair of blocks run after both strikes, as before First Blood) so
+      // each strike is fully self-contained — landed-or-blocked, floor
+      // clamp included — which is what lets First Blood below skip a strike
+      // outright instead of merely reordering two already-computed numbers.
+      const strikeFoe = (): void => {
+        if (blockCharges[foe.side] > 0) {
+          blockCharges[foe.side]--;
+          events.push({ type: 'shieldAbsorbed', targetId: foe.instanceId });
+        } else {
+          applyDamage(foe, damageOut, 'attack', frontIgnoresArmor);
+          foeTookBlow = true;
+          if (foeStartHealth > MIN_ATTACK_DAMAGE) {
+            foe.health = Math.min(foe.health, foeStartHealth - MIN_ATTACK_DAMAGE);
+          }
+        }
+      };
+      const strikeFront = (): void => {
+        if (blockCharges[front.side] > 0) {
+          blockCharges[front.side]--;
+          events.push({ type: 'shieldAbsorbed', targetId: front.instanceId });
+        } else {
+          applyDamage(front, damageIn, 'attack', foeIgnoresArmor);
+          frontTookBlow = true;
+          if (frontStartHealth > MIN_ATTACK_DAMAGE) {
+            front.health = Math.min(front.health, frontStartHealth - MIN_ATTACK_DAMAGE);
+          }
+        }
+      };
+
+      // First Blood (issue #184 ideas pass) is the one place this engine
+      // resolves a clash SEQUENTIALLY rather than simultaneously, and only
+      // here: the very first tick of the very first wave of the whole
+      // battle — gated on `currentWave === 1`, not just `ticks === 1`, which
+      // matters even though a duel is only ever one wave: `ticks` resets to
+      // 0 at the top of EVERY wave, so a bare `ticks === 1` check would fire
+      // on wave 2's opening tick too, wave 3's, and so on, if this flag ever
+      // reached a multi-wave gauntlet battle (see `boonBoardFor`'s doc
+      // comment — nothing gates that path except convention, same as every
+      // other boon). `currentWave === 1` closes that off the same way
+      // `echoSpent` bounds Echo to once per BATTLE rather than once per
+      // wave — see the compounding-law canary in boon-ideas.test.ts.
+      // Applies only while exactly one side holds the boon; both picking it
+      // cancels out, so an identical mirror board still draws. The
+      // prioritized side's blow — landed-or-blocked, floor clamp included —
+      // resolves in full before the return is even attempted; if that
+      // leaves the target at 0 health, the return never happens, rather
+      // than merely landing on a corpse. Every tick after the first, and
+      // every wave after the first, falls through to the untouched
+      // simultaneous branch below.
+      const frontHasFirstBlood =
+        currentWave === 1 && ticks === 1 && boonBoardFor(front.side)?.boonFirstBlood === true;
+      const foeHasFirstBlood =
+        currentWave === 1 && ticks === 1 && boonBoardFor(foe.side)?.boonFirstBlood === true;
+      const frontHasPriority = frontHasFirstBlood && !foeHasFirstBlood;
+      const foeHasPriority = foeHasFirstBlood && !frontHasFirstBlood;
+
+      let frontStruck = true;
+      let foeStruck = true;
+      if (frontHasPriority) {
+        strikeFoe();
+        if (foe.health > 0) strikeFront();
+        else foeStruck = false;
+      } else if (foeHasPriority) {
+        strikeFront();
+        if (front.health > 0) strikeFoe();
+        else frontStruck = false;
+      } else {
+        strikeFoe();
+        strikeFront();
       }
-      if (foeTookBlow && foeStartHealth > MIN_ATTACK_DAMAGE) {
-        foe.health = Math.min(foe.health, foeStartHealth - MIN_ATTACK_DAMAGE);
-      }
-      damageThisWave += damageOut;
+      // Front's output only counts toward damage-dealt if it actually swung
+      // — a blocked swing still counts (it was thrown, just absorbed, same
+      // as before First Blood existed), but a swing First Blood skipped
+      // outright (front died before its turn) was never thrown at all.
+      damageThisWave += frontStruck ? damageOut : 0;
 
       // Marrow-Snap: if THIS clash hit drove the foe from above the execute
       // line to at or below it (executeThreshold of the foe's OWN max
@@ -1707,8 +1798,13 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
       tryCleave(front, foe);
       tryCleave(foe, front);
 
-      if (front.ability?.trigger === 'afterAttack') applyEffect(front, 0, false);
-      if (foe.ability?.trigger === 'afterAttack') applyEffect(foe, 0, false);
+      // Gated on `*Struck`, not just presence of the ability: a strike First
+      // Blood skipped outright never happened, so nothing fires off it —
+      // same principle as the onHurt gating below, one tier earlier (a
+      // blocked strike still "happened" and still fires afterAttack, exactly
+      // as before First Blood existed; only a fully skipped one does not).
+      if (frontStruck && front.ability?.trigger === 'afterAttack') applyEffect(front, 0, false);
+      if (foeStruck && foe.ability?.trigger === 'afterAttack') applyEffect(foe, 0, false);
 
       // `onHurt` reflect (issue #134: Steel-Whisker) resolves HERE — after
       // the execute (Marrow-Snap) and cleave (Gore-Cleaver) blocks above,
