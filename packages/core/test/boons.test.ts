@@ -55,9 +55,11 @@ describe('boonsFor', () => {
 
   it('does not lean hard on any one boon', () => {
     // Not a uniformity proof — just a canary for a derivation bug that
-    // starves or floods an entry. With a 10-boon pool and 3 draws a day, an
-    // even split is 30% of days; anything outside 15-50% over 120 days means
-    // the shuffle is wrong, not that the rng got unlucky.
+    // starves or floods an entry. An even split is BOONS_PER_DAY / pool size
+    // of days (currently ~21% at 14 entries, was 33% at 9); the 15-50% band
+    // is loose on purpose so this doesn't need re-tuning every time the pool
+    // grows — it just needs to catch the shuffle being actually wrong, not
+    // the rng being unlucky.
     const days = DAYS.length;
     for (const id of Object.keys(BOON_DEFS)) {
       const share = DAYS.filter((d) => boonsFor(d).some((b) => b.id === id)).length / days;

@@ -318,43 +318,17 @@ export const BOON_DEFS: Record<string, BoonDef> = {
     blurb: 'The first blows against your line land on nothing at all.',
     effect: { kind: 'blockHits', hits: 2 },
   },
-};
-
-/**
- * HELD OUT OF THE POOL, not deleted (issue #184).
- *
- * Echo measured dead on two independent populations: 2 of 90 duels improved on
- * summoner boards under seed `boon-matrix-v1`, 3 of 210 under
- * `alt-population-2`, with every percentile at zero. It is conditional by
- * design, which was accepted — but conditional was supposed to mean "strong
- * when it applies", and one extra body in a ONE-WAVE duel almost never flips a
- * result even on the boards built for it.
- *
- * Shipping it anyway would repeat the 2026-08-08 anomaly cull exactly: content
- * too small to notice, carried for a season, then deleted. The implementation
- * stays (it is tested, including its compounding-law canary) so restoring it is
- * moving this entry back into BOON_DEFS above. What it needs first is a reason
- * to be worth a pick — a magnitude knob, or a bigger effect than one body.
- */
-export const HELD_BOONS: Record<string, BoonDef> = {
-  echo: {
-    id: 'echo',
-    name: 'Echo',
-    blurb: 'The first rat your warren calls up answers twice.',
-    effect: { kind: 'echoFirstSummon' },
-  },
   /**
-   * The five entries below are held for a DIFFERENT reason than Echo above:
-   * not measured and found wanting, but not yet measured at all. Added
-   * 2026-08-12 from the roster-dimensionality pass recorded in
-   * `docs/design/boons.md`'s Ideas section (issue #181/#182's "one axis"
-   * diagnosis) — each one closes a specific gap the launch roster left open
-   * rather than adding another effect on top of what the pool already has.
-   * Implemented and tested exactly like a shipping boon (`boonEffect`
-   * resolves them, same as any HELD entry), but every magnitude below is a
-   * PLACEHOLDER pending a `pvp:boons` pass — moving one to `BOON_DEFS` above
-   * is a one-line move once that pass has a number for it, same as Echo's
-   * own path back would be.
+   * Rust through First Blood below: the 2026-08-12 roster-dimensionality
+   * pass (docs/design/boons.md's Ideas section, issue #181/#182's "one axis"
+   * diagnosis), promoted to the live pool 2026-08-15 (owner call, Jesper) on
+   * the strength of the 2026-08-14 `pvp:boons` pass — no dominance violation
+   * on any of three seeds, either direction. That pass did NOT include a
+   * magnitude sweep, and found Barren/Stripped/First Blood read exactly like
+   * Echo did on its first, condition-free population (conditional by design,
+   * so a general population undersells them). Promoted anyway, deliberately
+   * ahead of that follow-up work — see the design bank for the full
+   * measurement writeup and the still-open magnitude question.
    */
   rust: {
     id: 'rust',
@@ -389,12 +363,41 @@ export const HELD_BOONS: Record<string, BoonDef> = {
 };
 
 /**
+ * HELD OUT OF THE POOL, not deleted (issue #184).
+ *
+ * Echo measured dead on two independent populations: 2 of 90 duels improved on
+ * summoner boards under seed `boon-matrix-v1`, 3 of 210 under
+ * `alt-population-2`, with every percentile at zero. It is conditional by
+ * design, which was accepted — but conditional was supposed to mean "strong
+ * when it applies", and one extra body in a ONE-WAVE duel almost never flips a
+ * result even on the boards built for it.
+ *
+ * Shipping it anyway would repeat the 2026-08-08 anomaly cull exactly: content
+ * too small to notice, carried for a season, then deleted. The implementation
+ * stays (it is tested, including its compounding-law canary) so restoring it is
+ * moving this entry back into BOON_DEFS above. What it needs first is a reason
+ * to be worth a pick — a magnitude knob, or a bigger effect than one body.
+ */
+export const HELD_BOONS: Record<string, BoonDef> = {
+  echo: {
+    id: 'echo',
+    name: 'Echo',
+    blurb: 'The first rat your warren calls up answers twice.',
+    effect: { kind: 'echoFirstSummon' },
+  },
+};
+
+/**
  * The first ride-date that offers boons. Compared as a string, which is safe
  * because ride-dates are zero-padded `YYYY-MM-DD` (`currentRideDate`).
  *
  * Set to the 2026-08-17 season reset (was a far-future sentinel while the
- * effects were being built). Every boon in the pool above now applies, has
- * tests, and has been measured by `pvp:boons`.
+ * effects were being built). Every boon in the pool above applies and has
+ * tests. Nine were measured by `pvp:boons` before shipping; the five added
+ * 2026-08-15 (Rust through First Blood) were promoted off a directional pass
+ * only — no dominance violation, but no magnitude sweep and three of the
+ * five read exactly like Echo did before its own summoner-only population —
+ * see `docs/design/boons.md`'s measurement section for the full story.
  *
  * NOTE this only makes boons live on whichever channel ships it. The nightly
  * job runs on the DEFAULT branch, so nothing reaches players until dev is

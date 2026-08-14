@@ -59,17 +59,31 @@ const POPULATION = 30;
 const SEED = process.env.BOON_SEED ?? 'boon-matrix-v1';
 const UNMEASURABLE = new Set(['deep-scout']);
 const READ_DEPENDENT = new Set(['silence']);
-const CONDITIONAL = new Set(['echo']);
 /**
- * HELD candidates under evaluation for promotion to `BOON_DEFS` (2026-08-14
- * roster-dimensionality pass). `measurable` below is normally just
- * `Object.keys(BOON_DEFS)` — this is the one place a Held boon gets pulled in
- * on purpose, so it measures against the live field rather than in a vacuum.
- * `echo` is deliberately excluded from this list even though it is also
- * Held: it already has its own bespoke field-C conditional treatment below,
- * from when it was still shipping.
+ * Conditional by design: strong only against a specific board shape, so a
+ * population-wide row understates all four by construction (same "population
+ * without the right shape reads as dead weight" story the 2026-08-14
+ * directional pass found for barren/stripped/first-blood, mirroring what the
+ * first, summoner-free population already did to echo). Excluded from the
+ * dominance check below for that reason. `echo` alone gets its own bespoke
+ * field-C treatment (a summoner-only population); the other three don't have
+ * one yet — that targeted-population pass is still open, see the design
+ * bank's "2026-08-14 pass" writeup.
  */
-const HELD_CANDIDATES = ['rust', 'barren', 'antidote', 'stripped', 'first-blood'];
+const CONDITIONAL = new Set(['echo', 'barren', 'stripped', 'first-blood']);
+/**
+ * HELD candidates under evaluation for promotion to `BOON_DEFS`. `measurable`
+ * below is normally just `Object.keys(BOON_DEFS)` — this is the one place a
+ * Held boon gets pulled in on purpose, so it measures against the live field
+ * rather than in a vacuum. Empty as of 2026-08-15: the five candidates the
+ * 2026-08-14 pass added here (rust/barren/antidote/stripped/first-blood)
+ * were promoted straight into `BOON_DEFS`, so they're picked up by
+ * `Object.keys(BOON_DEFS)` now and would double-count if left listed here
+ * too. `echo` is deliberately never added to this list even while Held: it
+ * already has its own bespoke field-C conditional treatment below, from when
+ * it was still shipping.
+ */
+const HELD_CANDIDATES: string[] = [];
 
 const rng = xorshift128(fnv1a(SEED));
 const pool = seasonUnitPool();
