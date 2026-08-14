@@ -397,6 +397,24 @@ anything subtler than dominance anyway (#186).
   boons carry the same magnitude conventions as the shipping roster's, but the
   actual numbers are placeholders (`sim.ts`'s `HELD_BOONS`) pending a
   `pvp:boons` pass, same as Silence's own still-open magnitude question above.
+- **First Blood's interaction with Drag/Buried needs to be stated at pick
+  time, not just discoverable in the replay (Jesper, 2026-08-14).** First
+  Blood binds to WHICHEVER unit is at `units[0]` when the wave's opening tick
+  fires — which is after every pre-sim transform, including an opponent's
+  Drag/Buried. So if a rival drags your backline attacker to the front, First
+  Blood follows it there, not the rat you actually built your line around
+  (confirmed against the engine: a dragged 1-health MBP Rat survived a fight
+  it would normally trade even in, because its own hit landed first and the
+  return never came). The card's one-sentence blurb convention (no numbers,
+  no rules panel — see `BoonDef`'s doc comment) isn't the right place to spell
+  this out. Decided: the patch note that announces First Blood's release
+  states the ordering rule explicitly, rather than leaving it to be
+  discovered in a replay. Draft language, ready for whenever First Blood
+  actually ships (it is still Held, so nothing to announce yet):
+  > **First Blood** resolves after every other pre-fight effect, including a
+  > rival's Drag or Buried — so it always follows whichever rat is actually
+  > standing at your front when the fight starts, not whichever one you
+  > built your line around.
 - **A real gap found while building this batch, not introduced by it:**
   `boonBlockHits` (Guardian) has no per-battle bound the way Echo's
   `echoSpent` flag gives Echo one — `blockCharges` is topped up fresh every
