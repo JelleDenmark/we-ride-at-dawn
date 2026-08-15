@@ -254,6 +254,30 @@ export const ANOMALY_DEFS: Record<string, AnomalyDef> = {
 export const ANOMALY_FIRST_SEASON = '2026-08-10';
 
 /**
+ * First season eligible to draw a clean (no-anomaly) week as an OUTCOME of
+ * the roll, rather than only via the `ANOMALY_FIRST_SEASON` pre-launch gate
+ * above. With `ANOMALY_DEFS` down to a single entry (Grown Past Use, see its
+ * doc comment), every season since launch has drawn the same anomaly by
+ * construction — there was nothing else in the pool to draw. Adding `null`
+ * as a second pool slot below gives the roll a real "off" outcome again
+ * without writing a second anomaly.
+ *
+ * Gated behind its own date for the same reason `ANOMALY_FIRST_SEASON`
+ * exists: `anomalyFor` re-derives live off the CURRENT `ANOMALY_DEFS`, so
+ * widening the pool changes `rng.int(pool.length)` for every season id, not
+ * just future ones. Confirmed by direct computation before shipping this:
+ * with `null` unconditionally in the pool, the then-live 2026-08-10 season
+ * flips from Grown Past Use to a clean week retroactively — unacceptable
+ * mid-week (`retireDay`-style pure-function-of-date bug, see
+ * `docs/agents/*` deploy notes). Gating the second slot behind this date
+ * keeps every season before it exactly as committed. 2026-08-17 (the next
+ * reset after this was built) is deliberately included on the wide side of
+ * the gate — also confirmed by direct computation to still draw Grown Past
+ * Use, so turning the toggle on does not change that week's outcome.
+ */
+export const ANOMALY_NONE_FIRST_SEASON = '2026-08-17';
+
+/**
  * The season's anomaly, or `null` for a clean week.
  *
  * Seeded off a `#anomaly` sub-key of the season id, exactly as
@@ -266,7 +290,9 @@ export const ANOMALY_FIRST_SEASON = '2026-08-10';
  */
 export function anomalyFor(seasonId: string): AnomalyDef | null {
   if (seasonId < ANOMALY_FIRST_SEASON) return null;
-  const pool = Object.values(ANOMALY_DEFS);
+  const defs = Object.values(ANOMALY_DEFS);
+  const pool: (AnomalyDef | null)[] =
+    seasonId >= ANOMALY_NONE_FIRST_SEASON ? [...defs, null] : defs;
   if (pool.length === 0) return null;
   const rng = xorshift128(fnv1a(`${seasonId}#anomaly`));
   return pool[rng.int(pool.length)];

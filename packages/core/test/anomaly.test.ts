@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { anomalyFor, ANOMALY_DEFS, ANOMALY_FIRST_SEASON } from '../src/anomaly';
+import { anomalyFor, ANOMALY_DEFS, ANOMALY_FIRST_SEASON, ANOMALY_NONE_FIRST_SEASON } from '../src/anomaly';
 import { generateGauntlet } from '../src/gauntlet';
 
 /** Mondays, walking forward from a given one. */
@@ -30,17 +30,49 @@ describe('anomalyFor', () => {
 
   it('draws every anomaly in the pool over a run of seasons', () => {
     // Guards a dead entry: an anomaly that never rolls is content that
-    // silently does not exist.
-    const drawn = new Set(SEASONS.map((s) => anomalyFor(s)?.id));
+    // silently does not exist. Seasons before ANOMALY_NONE_FIRST_SEASON
+    // can't draw null yet, so restrict this check to that window — it's
+    // about a def going dead, not about whether "none" also shows up.
+    const drawn = new Set(
+      SEASONS.filter((s) => s < ANOMALY_NONE_FIRST_SEASON).map((s) => anomalyFor(s)?.id)
+    );
     expect(drawn).toEqual(new Set(Object.keys(ANOMALY_DEFS)));
   });
 
   // With a single-entry pool (only Grown Past Use remains, 2026-08-08 —
   // one-warren/teeming-dark/two-warrens removed for not sufficiently
-  // changing how the week plays out), every season past
-  // ANOMALY_FIRST_SEASON draws the same anomaly by construction. That is
-  // correct, not a bug; the old "does not hand out the same anomaly every
-  // week" check no longer applies to a pool of one.
+  // changing how the week plays out), every season before
+  // ANOMALY_NONE_FIRST_SEASON draws the same anomaly by construction. That
+  // is correct, not a bug; the old "does not hand out the same anomaly
+  // every week" check no longer applies to a pool of one.
+});
+
+describe('the no-anomaly toggle (ANOMALY_NONE_FIRST_SEASON)', () => {
+  it('never draws null before the gate', () => {
+    for (const s of SEASONS.filter((s) => s < ANOMALY_NONE_FIRST_SEASON)) {
+      expect(anomalyFor(s)).not.toBeNull();
+    }
+  });
+
+  it('can draw null from the gate onward', () => {
+    // Not every season past the gate need be null (it's a roll, not a
+    // switch) — but over a long enough run, "off" has to actually come up
+    // or the toggle is dead code with an unreachable branch.
+    const pastGate = SEASONS.filter((s) => s >= ANOMALY_NONE_FIRST_SEASON);
+    expect(pastGate.some((s) => anomalyFor(s) === null)).toBe(true);
+  });
+
+  it('does not retroactively change the season already live when this was built', () => {
+    // The whole reason for gating on a date instead of unconditionally
+    // widening the pool: widening it unconditionally flips this specific
+    // season (already being played) from Grown Past Use to a clean week,
+    // which would yank the anomaly out from under players mid-week.
+    expect(anomalyFor('2026-08-10')?.id).toBe('grown-past-use');
+  });
+
+  it('does not change the very next reset either, per the explicit ask to let it repeat', () => {
+    expect(anomalyFor('2026-08-17')?.id).toBe('grown-past-use');
+  });
 });
 
 // The single most important regression check in the anomaly work: a clean

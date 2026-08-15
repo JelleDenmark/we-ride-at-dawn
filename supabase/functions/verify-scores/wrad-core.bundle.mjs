@@ -354,8 +354,20 @@ var UNIT_DEFS = {
     attack: 1,
     health: 3,
     cost: 6,
-    ability: { trigger: "startOfBattle", effect: { kind: "grantArmor", all: true } }
+    ability: { trigger: "startOfBattle", effect: { kind: "grantArmor", all: true } },
     // Day-1 gate removed (Jesper, 2026-08-01) — see Dire-Rat's note above.
+    //
+    // Retired for the 2026-08-17 season reset (season-to-season census,
+    // see wrad-cross-season-staleness memory): the only true two-season
+    // auto-include — 32/42 S1 board-rounds, 5/5-5/6 boards every day
+    // measured in S2, unmoved by this season's anti-stacking anomaly. The
+    // real fix (`ahead`-only armor variant, #181/#182) is already built and
+    // measured but deliberately held for a later season — this pulls the
+    // unit from the pool in the meantime rather than leave the free
+    // whole-board grant live untouched. Same mechanism/precedent as
+    // Gnawer/Gutter-Acolyte above: out of the shop pool from day 1 on,
+    // carried-in copies still sell at par (`sellRefund`).
+    retireDay: 1
   },
   // Issue #12: a parallel "Runt" pair (Gutter-Runt precedent) tied to the
   // game's dawn/dusk duality rather than literal noon-splitting — the actual
@@ -450,10 +462,12 @@ var UNIT_DEFS = {
   // look — matches the pun on the name) and a glass of Nutella somewhere in
   // the art (see mbp-rat.svg). Stats/ability are a byte-for-byte carryover,
   // not a fresh tune — balance sign-off already covers Slink-Rat's numbers.
+  // (attack was 4 here vs Slink-Rat's 3 — a copy slip against the "byte-for-
+  // byte" claim above, corrected 2026-08-14.)
   "mbp-rat": {
     id: "mbp-rat",
     name: "MBP Rat",
-    attack: 4,
+    attack: 3,
     health: 1,
     cost: 6,
     ability: { trigger: "startOfWave", effect: { kind: "backlineDamage" } }
@@ -639,7 +653,24 @@ var UNIT_DEFS = {
     health: 3,
     cost: 5,
     ability: { trigger: "startOfWave", effect: { kind: "poisonResist" } },
-    tribe: "plague"
+    tribe: "plague",
+    // Retired for the upcoming season (Jesper, 2026-08-13) — same mechanism
+    // and precedent as Gutter-Runt above: `retireDay: 1` drops it from the
+    // shop pool from day 1 on, while the def stays in UNIT_DEFS so golden
+    // logs, stored leaderboard lineups and replays still resolve it.
+    // Par-buyback severance (`sellRefund` in shop.ts) applies, so a copy
+    // carried in from a prior season sells for exactly what was spent.
+    //
+    // This removes the game's ONLY poison counter (`poisonResist` has no
+    // other user), which is deliberate rather than overlooked. The counter
+    // never actually did the job it was built for: #155's own probe showed
+    // adding Acolytes did not change the Acolyte-vs-real-RatMoe-board result
+    // at ANY value of `POISON_RESIST_CAP`, and the 2026-08-13 live-board
+    // measurement found poison is only ~1-4% of damage once real boards
+    // carry 4-6 relics each — so there is very little left to counter. The
+    // `season-pool.test.ts` 'defense' role stays covered by `grantArmor`
+    // (Ward-Weaver) and `revive` (Bone-Priest).
+    retireDay: 1
   }
 };
 var TEST_HORDE = {
@@ -1069,6 +1100,9 @@ function simulateCore(lineup, mode) {
   const hordeCombatCap = lineup.combatCap ?? BOARD_CAP;
   const enemyCombatCap = mode.kind === "duel" ? mode.opponent.combatCap ?? BOARD_CAP : hordeCombatCap;
   const capOf = (side) => side === "horde" ? hordeCombatCap : enemyCombatCap;
+  const hordeArmorLoss = lineup.boonArmorLoss ?? 0;
+  const enemyArmorLoss = mode.kind === "duel" ? mode.opponent.boonArmorLoss ?? 0 : 0;
+  const armorLossOf = (side) => side === "horde" ? hordeArmorLoss : enemyArmorLoss;
   const timeOfDay = lineup.timeOfDay;
   const instantiate = (def, side, relicIds = [], tier = 1, attackScale = 1, healthScale = 1) => {
     const relics = relicIds.map((id) => RELIC_DEFS[id]).filter((r) => r !== void 0 && r.scope === "unit");
@@ -1093,8 +1127,10 @@ function simulateCore(lineup, mode) {
       tailCharmUsed: false,
       // Team armor (Filth Totem) is a flat grant like team attack/health
       // above, not tier-scaled — the unit's own base armor (Ward-Weaver,
-      // Dire-Rat, Steel-Whisker) is the only tier-scaled term here.
-      damageReduction: (def.damageReduction ?? 0) * tier + team.damageReduction,
+      // Dire-Rat, Steel-Whisker) is the only tier-scaled term here. Rust's
+      // armor loss is subtracted last and floored at 0 per unit, same as
+      // every other negative boon grant (Blunt) — it dulls, never inverts.
+      damageReduction: Math.max(0, (def.damageReduction ?? 0) * tier + team.damageReduction - armorLossOf(side)),
       startOfBattleFired: false,
       raised: false,
       chargeStacks: 0,
@@ -1116,6 +1152,7 @@ function simulateCore(lineup, mode) {
     }
     return u;
   };
+  const relicIdsFor = (u) => u.boonRelicsStripped ? [] : u.relicIds ?? [];
   const view = (u) => ({
     instanceId: u.instanceId,
     defId: u.defId,
@@ -1125,7 +1162,7 @@ function simulateCore(lineup, mode) {
     tier: u.tier,
     side: u.side
   });
-  const horde = lineup.units.slice(0, BOARD_CAP).map((u) => applyBoonGrants(instantiate(UNIT_DEFS[u.defId], "horde", u.relicIds, u.tier ?? 1), u));
+  const horde = lineup.units.slice(0, BOARD_CAP).map((u) => applyBoonGrants(instantiate(UNIT_DEFS[u.defId], "horde", relicIdsFor(u), u.tier ?? 1), u));
   let enemies = [];
   const fallen = { horde: [], gauntlet: [] };
   const boardOf = (side) => side === "horde" ? horde : enemies;
@@ -1448,36 +1485,52 @@ function simulateCore(lineup, mode) {
   };
   const resolveDeaths = () => {
     for (; ; ) {
-      let dead;
-      let deadIndex = -1;
-      let deadBoard;
+      const pendingSplash = [];
+      let anyDead = false;
       for (const board of [horde, enemies]) {
-        deadIndex = board.findIndex((u) => u.health <= 0);
-        if (deadIndex !== -1) {
-          deadBoard = board;
-          dead = board[deadIndex];
-          break;
+        for (; ; ) {
+          const deadIndex = board.findIndex((u) => u.health <= 0);
+          if (deadIndex === -1) break;
+          anyDead = true;
+          const dead = board[deadIndex];
+          board.splice(deadIndex, 1);
+          events.push({ type: "death", unitId: dead.instanceId });
+          fallen[dead.side].push(dead);
+          if (dead.ability?.trigger === "faint") applyEffect(dead, deadIndex, true);
+          for (const relic of dead.relics) {
+            if (!relic.onFaintDamageAll) continue;
+            pendingSplash.push({
+              dead,
+              amount: relic.onFaintDamageAll,
+              relicId: relic.id,
+              relicName: relic.name,
+              ignoresArmor: relic.onFaintIgnoresArmor
+            });
+          }
+          for (const ally of [...board]) {
+            if (ally.ability?.trigger === "allyFaint" && ally.health > 0) applyEffect(ally, board.indexOf(ally), false);
+          }
         }
       }
-      if (!dead || !deadBoard) return;
-      deadBoard.splice(deadIndex, 1);
-      events.push({ type: "death", unitId: dead.instanceId });
-      fallen[dead.side].push(dead);
-      if (dead.ability?.trigger === "faint") applyEffect(dead, deadIndex, true);
-      for (const relic of dead.relics) {
-        if (!relic.onFaintDamageAll) continue;
-        events.push({ type: "relicProc", targetId: dead.instanceId, relicId: relic.id, name: relic.name });
-        for (const foe of [...opposing(dead.side)]) applyDamage(foe, relic.onFaintDamageAll, "attack", relic.onFaintIgnoresArmor);
-      }
-      for (const ally of [...deadBoard]) {
-        if (ally.ability?.trigger === "allyFaint" && ally.health > 0) applyEffect(ally, deadBoard.indexOf(ally), false);
+      if (!anyDead) return;
+      for (const { dead, amount, relicId, relicName, ignoresArmor } of pendingSplash) {
+        events.push({ type: "relicProc", targetId: dead.instanceId, relicId, name: relicName });
+        for (const foe of [...opposing(dead.side)]) applyDamage(foe, amount, "attack", ignoresArmor);
       }
     }
   };
-  const fireEntryTriggers = (board) => {
+  const CROSS_SIDE_ENTRY_EFFECTS = /* @__PURE__ */ new Set([
+    "poisonFrontEnemy",
+    "poisonLastEnemy",
+    "poisonAllEnemies",
+    "backlineDamage"
+  ]);
+  const fireEntryTriggers = (board, phase) => {
     for (const unit of [...board]) {
       const trigger = unit.ability?.trigger;
       if (trigger !== "startOfBattle" && trigger !== "startOfWave") continue;
+      const isCrossSide = CROSS_SIDE_ENTRY_EFFECTS.has(unit.ability.effect.kind);
+      if (phase === "crossSide" !== isCrossSide) continue;
       if (trigger === "startOfBattle") {
         if (unit.startOfBattleFired) continue;
         unit.startOfBattleFired = true;
@@ -1519,7 +1572,7 @@ function simulateCore(lineup, mode) {
   ) : [
     () => mode.opponent.units.slice(0, BOARD_CAP).map(
       (u) => applyBoonGrants(
-        instantiate(UNIT_DEFS[u.defId], "gauntlet", u.relicIds, u.tier ?? 1),
+        instantiate(UNIT_DEFS[u.defId], "gauntlet", relicIdsFor(u), u.tier ?? 1),
         u
       )
     )
@@ -1534,12 +1587,20 @@ function simulateCore(lineup, mode) {
     poisonAllApplied = { horde: 0, gauntlet: 0 };
     poisonLastApplied = { horde: 0, gauntlet: 0 };
     poisonResistApplied = { horde: 0, gauntlet: 0 };
-    fireEntryTriggers(horde);
-    fireEntryTriggers(enemies);
+    fireEntryTriggers(horde, "self");
+    fireEntryTriggers(enemies, "self");
     for (const side of ["horde", "gauntlet"]) {
       const hits = boonBoardFor(side)?.boonBlockHits ?? 0;
       if (hits > 0) blockCharges[side] += hits;
     }
+    for (const side of ["horde", "gauntlet"]) {
+      const resist = boonBoardFor(side)?.boonPoisonResist ?? 0;
+      if (resist > 0) {
+        poisonResistApplied[side] = Math.min(POISON_RESIST_CAP, poisonResistApplied[side] + resist);
+      }
+    }
+    fireEntryTriggers(horde, "crossSide");
+    fireEntryTriggers(enemies, "crossSide");
     resolveDeaths();
     let ticks = 0;
     while (horde.length > 0 && enemies.length > 0 && ticks++ < MAX_TICKS_PER_WAVE) {
@@ -1574,27 +1635,49 @@ function simulateCore(lineup, mode) {
       const frontHealthBeforeClash = front.health;
       let foeTookBlow = false;
       let frontTookBlow = false;
-      if (blockCharges[foe.side] > 0) {
-        blockCharges[foe.side]--;
-        events.push({ type: "shieldAbsorbed", targetId: foe.instanceId });
+      const strikeFoe = () => {
+        if (blockCharges[foe.side] > 0) {
+          blockCharges[foe.side]--;
+          events.push({ type: "shieldAbsorbed", targetId: foe.instanceId });
+        } else {
+          applyDamage(foe, damageOut, "attack", frontIgnoresArmor);
+          foeTookBlow = true;
+          if (foeStartHealth > MIN_ATTACK_DAMAGE) {
+            foe.health = Math.min(foe.health, foeStartHealth - MIN_ATTACK_DAMAGE);
+          }
+        }
+      };
+      const strikeFront = () => {
+        if (blockCharges[front.side] > 0) {
+          blockCharges[front.side]--;
+          events.push({ type: "shieldAbsorbed", targetId: front.instanceId });
+        } else {
+          applyDamage(front, damageIn, "attack", foeIgnoresArmor);
+          frontTookBlow = true;
+          if (frontStartHealth > MIN_ATTACK_DAMAGE) {
+            front.health = Math.min(front.health, frontStartHealth - MIN_ATTACK_DAMAGE);
+          }
+        }
+      };
+      const frontHasFirstBlood = currentWave === 1 && ticks === 1 && boonBoardFor(front.side)?.boonFirstBlood === true;
+      const foeHasFirstBlood = currentWave === 1 && ticks === 1 && boonBoardFor(foe.side)?.boonFirstBlood === true;
+      const frontHasPriority = frontHasFirstBlood && !foeHasFirstBlood;
+      const foeHasPriority = foeHasFirstBlood && !frontHasFirstBlood;
+      let frontStruck = true;
+      let foeStruck = true;
+      if (frontHasPriority) {
+        strikeFoe();
+        if (foe.health > 0) strikeFront();
+        else foeStruck = false;
+      } else if (foeHasPriority) {
+        strikeFront();
+        if (front.health > 0) strikeFoe();
+        else frontStruck = false;
       } else {
-        applyDamage(foe, damageOut, "attack", frontIgnoresArmor);
-        foeTookBlow = true;
+        strikeFoe();
+        strikeFront();
       }
-      if (blockCharges[front.side] > 0) {
-        blockCharges[front.side]--;
-        events.push({ type: "shieldAbsorbed", targetId: front.instanceId });
-      } else {
-        applyDamage(front, damageIn, "attack", foeIgnoresArmor);
-        frontTookBlow = true;
-      }
-      if (frontTookBlow && frontStartHealth > MIN_ATTACK_DAMAGE) {
-        front.health = Math.min(front.health, frontStartHealth - MIN_ATTACK_DAMAGE);
-      }
-      if (foeTookBlow && foeStartHealth > MIN_ATTACK_DAMAGE) {
-        foe.health = Math.min(foe.health, foeStartHealth - MIN_ATTACK_DAMAGE);
-      }
-      damageThisWave += damageOut;
+      damageThisWave += frontStruck ? damageOut : 0;
       const tryExecute = (attacker, defender, defenderHealthBeforeClash) => {
         const relic = attacker.relics.find((r) => r.executeThreshold !== void 0);
         if (!relic) return;
@@ -1619,8 +1702,8 @@ function simulateCore(lineup, mode) {
       tryExecute(foe, front, frontHealthBeforeClash);
       tryCleave(front, foe);
       tryCleave(foe, front);
-      if (front.ability?.trigger === "afterAttack") applyEffect(front, 0, false);
-      if (foe.ability?.trigger === "afterAttack") applyEffect(foe, 0, false);
+      if (frontStruck && front.ability?.trigger === "afterAttack") applyEffect(front, 0, false);
+      if (foeStruck && foe.ability?.trigger === "afterAttack") applyEffect(foe, 0, false);
       if (frontTookBlow && front.ability?.trigger === "onHurt") applyTargetedEffect(front, foe);
       if (foeTookBlow && foe.ability?.trigger === "onHurt") applyTargetedEffect(foe, front);
       fireWhileAliveTriggers(horde);
@@ -2149,9 +2232,11 @@ var ANOMALY_DEFS = {
   }
 };
 var ANOMALY_FIRST_SEASON = "2026-08-10";
+var ANOMALY_NONE_FIRST_SEASON = "2026-08-17";
 function anomalyFor(seasonId) {
   if (seasonId < ANOMALY_FIRST_SEASON) return null;
-  const pool = Object.values(ANOMALY_DEFS);
+  const defs = Object.values(ANOMALY_DEFS);
+  const pool = seasonId >= ANOMALY_NONE_FIRST_SEASON ? [...defs, null] : defs;
   if (pool.length === 0) return null;
   const rng = xorshift128(fnv1a(`${seasonId}#anomaly`));
   return pool[rng.int(pool.length)];
@@ -2213,6 +2298,48 @@ var BOON_DEFS = {
     name: "Guardian",
     blurb: "The first blows against your line land on nothing at all.",
     effect: { kind: "blockHits", hits: 2 }
+  },
+  /**
+   * Rust through First Blood below: the 2026-08-12 roster-dimensionality
+   * pass (docs/design/boons.md's Ideas section, issue #181/#182's "one axis"
+   * diagnosis), promoted to the live pool 2026-08-15 (owner call, Jesper) on
+   * the strength of the 2026-08-14 `pvp:boons` pass — no dominance violation
+   * on any of three seeds, either direction. That pass did NOT include a
+   * magnitude sweep, and found Barren/Stripped/First Blood read exactly like
+   * Echo did on its first, condition-free population (conditional by design,
+   * so a general population undersells them). Promoted anyway, deliberately
+   * ahead of that follow-up work — see the design bank for the full
+   * measurement writeup and the still-open magnitude question.
+   */
+  rust: {
+    id: "rust",
+    name: "Rust",
+    blurb: "Your rival's whole line takes the field with its guard down.",
+    effect: { kind: "sapArmorAll", amount: 4 }
+  },
+  barren: {
+    id: "barren",
+    name: "Barren",
+    blurb: "Your rival's warren has no room left to call up more rats.",
+    effect: { kind: "capSummonHeadroom", headroom: 1 }
+  },
+  antidote: {
+    id: "antidote",
+    name: "Antidote",
+    blurb: "Your line shrugs off poison that would have felled it.",
+    effect: { kind: "poisonNegation", amount: 3 }
+  },
+  stripped: {
+    id: "stripped",
+    name: "Stripped",
+    blurb: "Your rival's leading rat marches out with its trinkets confiscated.",
+    effect: { kind: "stripRelics" }
+  },
+  "first-blood": {
+    id: "first-blood",
+    name: "First Blood",
+    blurb: "Your leading rat lands its strike before anything can answer.",
+    effect: { kind: "firstBlood" }
   }
 };
 var HELD_BOONS = {
@@ -2249,6 +2376,9 @@ function isSelfEffect(e) {
     case "buryFrontToBack":
     case "silenceFront":
     case "sapBackAttack":
+    case "sapArmorAll":
+    case "capSummonHeadroom":
+    case "stripRelics":
       return false;
     default:
       return true;
@@ -2297,6 +2427,10 @@ function applySelf(lineup, e) {
       return { lineup: { ...lineup, boonBlockHits: (lineup.boonBlockHits ?? 0) + e.hits } };
     case "echoFirstSummon":
       return { lineup: { ...lineup, boonEcho: true } };
+    case "poisonNegation":
+      return { lineup: { ...lineup, boonPoisonResist: (lineup.boonPoisonResist ?? 0) + e.amount } };
+    case "firstBlood":
+      return { lineup: { ...lineup, boonFirstBlood: true } };
     default:
       return { lineup };
   }
@@ -2329,6 +2463,26 @@ function applyOpponent(lineup, e) {
       if (lineup.units.length < 2) return { lineup };
       const defId = lineup.units[0].defId;
       return { lineup: moveUnit2(lineup, 0, last), note: { kind: "move", defId, from: 0, to: last } };
+    }
+    case "sapArmorAll": {
+      if (lineup.units.length === 0) return { lineup };
+      return {
+        lineup: { ...lineup, boonArmorLoss: (lineup.boonArmorLoss ?? 0) + e.amount },
+        note: { kind: "lineArmor", amount: e.amount }
+      };
+    }
+    case "capSummonHeadroom": {
+      const current = lineup.combatCap ?? BOARD_CAP;
+      const capped = Math.min(current, lineup.units.length + e.headroom);
+      return { lineup: { ...lineup, combatCap: capped } };
+    }
+    case "stripRelics": {
+      if (lineup.units.length === 0) return { lineup };
+      const out = patchUnit(lineup, 0, (u) => ({ ...u, boonRelicsStripped: true }));
+      return {
+        lineup: out,
+        note: { kind: "strip", defId: out.units[0].defId, index: 0 }
+      };
     }
     default:
       return { lineup };
@@ -2532,7 +2686,7 @@ function validateBoard(board) {
     if (!Number.isInteger(tier) || tier < 1 || tier > MAX_TIER) {
       return { ok: false, reason: `unit "${u.defId}" has invalid tier ${tier}` };
     }
-    if (u.boonAttack !== void 0 || u.boonHealth !== void 0 || u.boonSilenced !== void 0) {
+    if (u.boonAttack !== void 0 || u.boonHealth !== void 0 || u.boonSilenced !== void 0 || u.boonRelicsStripped !== void 0) {
       return { ok: false, reason: `unit "${u.defId}" carries a boon grant` };
     }
     const relicIds = u.relicIds ?? [];
@@ -2549,7 +2703,7 @@ function validateBoard(board) {
       seenUnitRelics.add(relicId);
     }
   }
-  if (board.boonBlockHits !== void 0 || board.boonEcho !== void 0) {
+  if (board.boonBlockHits !== void 0 || board.boonEcho !== void 0 || board.boonPoisonResist !== void 0 || board.boonFirstBlood !== void 0 || board.boonArmorLoss !== void 0) {
     return { ok: false, reason: "board carries a boon grant" };
   }
   const teamRelicIds = board.teamRelicIds ?? [];
