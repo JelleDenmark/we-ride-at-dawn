@@ -2351,10 +2351,18 @@ var HELD_BOONS = {
   }
 };
 var BOON_FIRST_DATE = "2026-08-17";
+function previousDate(rideDate) {
+  const d = /* @__PURE__ */ new Date(`${rideDate}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
 function boonsFor(rideDate) {
   if (rideDate < BOON_FIRST_DATE) return [];
-  const pool = Object.values(BOON_DEFS);
-  if (pool.length <= BOONS_PER_DAY) return pool.slice();
+  const all = Object.values(BOON_DEFS);
+  if (all.length <= BOONS_PER_DAY) return all.slice();
+  const canFilter = all.length >= BOONS_PER_DAY * 2;
+  const excluded = canFilter && weekdayFor(rideDate) !== 1 ? new Set(boonsFor(previousDate(rideDate)).map((b) => b.id)) : /* @__PURE__ */ new Set();
+  const pool = excluded.size > 0 ? all.filter((b) => !excluded.has(b.id)) : all;
   const rng = xorshift128(fnv1a(`${rideDate}#boons`));
   const order = pool.map((_, i) => i);
   for (let i = 0; i < BOONS_PER_DAY; i++) {
