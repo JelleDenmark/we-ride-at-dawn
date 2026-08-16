@@ -188,6 +188,34 @@ export function loadConsolationCredited(seasonId: string): string {
   }
 }
 
+/** This device's daily boon pick (issue #184), keyed by season AND ride-date
+ * so yesterday's choice can never leak into today's round. Returns null when
+ * nothing has been picked for that day.
+ *
+ * The server copy in `pvp_boon_picks` is authoritative, not this — a
+ * localStorage write can fail silently (the seasonBest/rideLog desync, #180),
+ * and a reinstall or cleared cache loses it entirely. This is the fast local
+ * read; `fetchMyPvpBoon` is the reconciliation path. */
+export function saveBoonPick(seasonId: string, rideDate: string, boonId: string | null): void {
+  try {
+    localStorage.setItem(`${NS}:pvp-boon`, JSON.stringify({ seasonId, rideDate, boonId }));
+  } catch {
+    // Non-fatal — the pick still went to the server, and the next league
+    // refresh reads it back.
+  }
+}
+
+export function loadBoonPick(seasonId: string, rideDate: string): string | null {
+  try {
+    const raw = localStorage.getItem(`${NS}:pvp-boon`);
+    if (!raw) return null;
+    const v = JSON.parse(raw) as { seasonId: string; rideDate: string; boonId: string | null };
+    return v.seasonId === seasonId && v.rideDate === rideDate ? (v.boonId ?? null) : null;
+  } catch {
+    return null;
+  }
+}
+
 export interface RideLogEntry {
   /** Absolute hour bucket (Date.now() / 3_600_000, floored). */
   hour: number;

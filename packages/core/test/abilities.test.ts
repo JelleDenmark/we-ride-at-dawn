@@ -3,7 +3,7 @@ import { simulate, type BattleEvent } from '../src/sim';
 import type { Gauntlet } from '../src/gauntlet';
 import type { Lineup, UnitDef } from '../src/data/units';
 import { generateGauntlet } from '../src/gauntlet';
-import { TEST_HORDE } from '../src/data/units';
+import { TEST_HORDE, UNIT_DEFS } from '../src/data/units';
 import { fnv1a } from '../src/seed';
 
 const dummy = (attack: number, health: number): UnitDef => ({
@@ -92,14 +92,6 @@ describe('unit abilities', () => {
     expect(total).toBe(5);
   });
 
-  it('the Draughtsman Moe reskin shares the identical cap (same kit)', () => {
-    const total = poisonAllStacks([
-      { defId: 'draughtsman-moe', tier: 3 },
-      { defId: 'draughtsman-moe', tier: 3 },
-    ]).reduce((a, b) => a + b, 0);
-    expect(total).toBe(5);
-  });
-
   it('the cap resets each wave — 3×★3 spends a fresh 5 every wave, not once', () => {
     const stacks = poisonAllStacks(
       [
@@ -170,6 +162,67 @@ describe('unit abilities', () => {
       { defId: 'blight-witch', tier: 3 },
     ]).reduce((a, b) => a + b, 0);
     expect(total).toBe(10);
+  });
+
+  // 2026-08-13 rework: Draughtsman Moe broke off the shared `poisonAllEnemies`
+  // kit above (she no longer numerically mirrors Blight-Witch) in favor of a
+  // new `whileAlive`-triggered `poisonFrontEnemyWhileAlive` — see that
+  // Effect's doc comment in data/units.ts for the PvP-overtuning history.
+  describe('Draughtsman Moe (2026-08-13 rework: poisonFrontEnemyWhileAlive)', () => {
+    it('is wired as designed: whileAlive trigger, poisonFrontEnemyWhileAlive effect', () => {
+      const def = UNIT_DEFS['draughtsman-moe'];
+      expect(def.ability?.trigger).toBe('whileAlive');
+      expect(def.ability?.effect.kind).toBe('poisonFrontEnemyWhileAlive');
+    });
+
+    it('only ever poisons the frontmost enemy, never the whole wave (the breadth cut that replaces decay)', () => {
+      const front: UnitDef = { id: 'front-dummy', name: 'Front', attack: 0, health: 1_000_000, cost: 0 };
+      const back: UnitDef = { id: 'back-dummy', name: 'Back', attack: 0, health: 1_000_000, cost: 0 };
+      const { events } = simulate(lineup({ defId: 'draughtsman-moe', tier: 3 }), gauntletOf([front, back]));
+      const waveStart = events.find((e) => e.type === 'waveStart');
+      if (waveStart?.type !== 'waveStart') throw new Error('expected a waveStart event');
+      const backId = waveStart.enemies[1].instanceId;
+      const applied = ofType(events, 'poisonApplied');
+      expect(applied.length).toBeGreaterThan(0);
+      expect(applied.some((e) => e.targetId === backId)).toBe(false);
+    });
+
+    it('refreshes rather than stacks — a tick per tick, poison never climbs past the tier value', () => {
+      const target: UnitDef = { id: 'tank', name: 'Tank', attack: 0, health: 1_000_000, cost: 0 };
+      const { events } = simulate(lineup({ defId: 'draughtsman-moe', tier: 3 }), gauntletOf([target]));
+      const ticks = ofType(events, 'poisonTick');
+      expect(ticks.length).toBeGreaterThan(1);
+      expect(ticks.every((t) => t.amount <= 5)).toBe(true); // poisonStacksForTier(3)
+    });
+
+    it('multiple casters converge on the target instead of stacking additively (no shared budget needed)', () => {
+      const target: UnitDef = { id: 'tank', name: 'Tank', attack: 0, health: 1_000_000, cost: 0 };
+      const { events } = simulate(
+        lineup({ defId: 'draughtsman-moe', tier: 3 }, { defId: 'draughtsman-moe', tier: 3 }),
+        gauntletOf([target])
+      );
+      const ticks = ofType(events, 'poisonTick');
+      expect(ticks.length).toBeGreaterThan(0);
+      expect(ticks.every((t) => t.amount <= 5)).toBe(true); // still capped at ONE ★3's value
+    });
+
+    it('stops applying once the caster falls, but poison already on the target does not fade with it', () => {
+      // A second body behind Moe — Gutter-Runt has no ability of its own, so
+      // it can't add stray poison events of its own — keeps the horde alive
+      // (and the wave running) past Moe's own death, leaving ticks to prove
+      // the enemy's already-applied poison keeps landing on its own.
+      const enemy: UnitDef = { id: 'enemy-dummy', name: 'Enemy', attack: 2, health: 200, cost: 0 };
+      const { events } = simulate(
+        lineup({ defId: 'draughtsman-moe', tier: 1 }, { defId: 'gutter-runt', tier: 3 }),
+        gauntletOf([enemy])
+      );
+      const moeId = ofType(events, 'battleStart')[0].horde[0].instanceId;
+      const moeDeathIndex = events.findIndex((e) => e.type === 'death' && e.unitId === moeId);
+      expect(moeDeathIndex).toBeGreaterThan(-1);
+      const afterDeath = events.slice(moeDeathIndex);
+      expect(afterDeath.filter((e) => e.type === 'poisonApplied').length).toBe(0);
+      expect(afterDeath.filter((e) => e.type === 'poisonTick').length).toBeGreaterThan(0);
+    });
   });
 
   // Issue #111 rework: Gnawer's faint payout is no longer a flat literal —

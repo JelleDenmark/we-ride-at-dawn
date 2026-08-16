@@ -72,3 +72,40 @@ happen to have a pre-deploy tab open, and it only needs re-confirming after
 changes to the update-detection path itself (`updateCheck.ts`,
 `pwaUpdate.ts`, the `version.txt` plumbing in `vite.config.ts`).
 First confirmed live: owner's open prod tab, 2026-07-20.
+
+## 6. Anon read posture (added 2026-08-13, issue #187)
+
+Part B of the hide-device-id migration sat unapplied for twelve days because a
+"apply this later" comment inside a `.sql` file is invisible the day after it
+is written. Raw `device_id` — the unverified key every write RPC accepts — was
+publicly readable that whole time, and it was found by accident.
+
+This check is cheap and would have caught it within a day. Every table below
+must refuse anon; every view must serve it.
+
+```
+for t in pvp_boards pvp_results scores pvp_boon_picks; do
+  printf "%-16s " "$t"
+  curl -s -o /dev/null -w "%{http_code}
+"     "https://wvrllhiktnkvbpclmrpq.supabase.co/rest/v1/$t?select=device_id&limit=1"     -H "apikey: <anon key from telemetry.ts>"
+done
+```
+
+Expect **401** on all four. A **200 is a finding**, even with an empty body —
+an empty array from an empty table looks identical to one from RLS doing its
+job, so never read `200 []` as proof of anything.
+
+```
+for v in pvp_boards_public pvp_results_public scores_public; do
+  printf "%-20s " "$v"
+  curl -s -o /dev/null -w "%{http_code}
+"     "https://wvrllhiktnkvbpclmrpq.supabase.co/rest/v1/$v?select=player_id&limit=1"     -H "apikey: <anon key>"
+done
+```
+
+Expect **200** on all three — those are what the app actually reads, and a
+revoke that also broke them would empty every leaderboard.
+
+Also: Supabase grants `anon` select on new public tables **by default**. Any
+new table that is not meant to be public needs an explicit `revoke`, not just
+RLS. RLS alone is sufficient, but the second layer is one line.

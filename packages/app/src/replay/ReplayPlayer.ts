@@ -62,6 +62,8 @@ function tween(
 class UnitSprite {
   root = new Container();
   private statsText: Text;
+  private nameText: Text;
+  private nameBaseWidth: number;
 
   constructor(view: UnitView) {
     const texture = ART_TEXTURE.get(view.defId);
@@ -80,24 +82,34 @@ class UnitSprite {
         .fill(SIDE_COLOR[view.side])
         .stroke({ color: 0x000000, width: 2 });
     }
-    const name = new Text({
+    this.nameText = new Text({
       text: view.tier > 1 ? `${view.name} ★${view.tier}` : view.name,
       style: { fill: 0xd8cdb8, fontSize: 11, fontFamily: 'Georgia' },
     });
-    name.anchor.set(0.5);
-    name.y = -UNIT_SIZE / 2 - 12;
+    this.nameText.anchor.set(0.5);
+    this.nameText.y = -UNIT_SIZE / 2 - 12;
+    this.nameBaseWidth = this.nameText.width;
     this.statsText = new Text({
       text: '',
       style: { fill: 0xf0e6d2, fontSize: 14, fontWeight: 'bold', fontFamily: 'Georgia' },
     });
     this.statsText.anchor.set(0.5);
     this.statsText.y = UNIT_SIZE / 2 + 12;
-    this.root.addChild(body, name, this.statsText);
+    this.root.addChild(body, this.nameText, this.statsText);
     this.setStats(view.attack, view.health);
   }
 
   setStats(attack: number, health: number): void {
     this.statsText.text = `${attack}/${health}`;
+  }
+
+  // Alternates name labels between two rows so same-row neighbors get 2x the
+  // per-unit spacing, then shrinks the label as a last resort if a crowded
+  // board still leaves less room than the name needs.
+  setNameLayout(row: number, spacing: number): void {
+    this.nameText.y = -UNIT_SIZE / 2 - 12 - row * 14;
+    const room = spacing * 2 - 6;
+    this.nameText.scale.set(Math.max(0.7, Math.min(1, room / this.nameBaseWidth)));
   }
 }
 
@@ -338,12 +350,18 @@ export class ReplayPlayer {
     const hordeSpacing = spacingFor(this.order.horde.length);
     this.order.horde.forEach((id, i) => {
       const sprite = this.sprites.get(id);
-      if (sprite) moves.push(tween(sprite.root, { x: W / 2 - FRONT_GAP - i * hordeSpacing, y: GROUND_Y }, ms));
+      if (sprite) {
+        sprite.setNameLayout(i % 2, hordeSpacing);
+        moves.push(tween(sprite.root, { x: W / 2 - FRONT_GAP - i * hordeSpacing, y: GROUND_Y }, ms));
+      }
     });
     const gauntletSpacing = spacingFor(this.order.gauntlet.length);
     this.order.gauntlet.forEach((id, i) => {
       const sprite = this.sprites.get(id);
-      if (sprite) moves.push(tween(sprite.root, { x: W / 2 + FRONT_GAP + i * gauntletSpacing, y: GROUND_Y }, ms));
+      if (sprite) {
+        sprite.setNameLayout(i % 2, gauntletSpacing);
+        moves.push(tween(sprite.root, { x: W / 2 + FRONT_GAP + i * gauntletSpacing, y: GROUND_Y }, ms));
+      }
     });
     return Promise.all(moves);
   }

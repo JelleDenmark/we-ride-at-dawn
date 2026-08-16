@@ -590,6 +590,48 @@ export type Effect =
    * per-wave accounting, mirroring Ward-Weaver's `blockCharges` cap-not-sum.
    */
   | { kind: 'poisonAllEnemies' }
+  /**
+   * Draughtsman Moe (2026-08-13 rework — broke off the `poisonAllEnemies`
+   * kit she used to reskin from Blight-Witch; see that unit's doc comment
+   * for the tribute history that stays true, and #116/#155's PvP findings
+   * for why the shared kit didn't). A wave-start AoE that then sat on every
+   * enemy at full, non-decaying strength for a duel's whole length read as a
+   * PvP-specific outlier ([[wrad-pvp-season1-meta]]: 41.5% of her own
+   * outgoing damage in an isolated duel vs 1.8% across a 45-wave PvE
+   * gauntlet) while barely registering mid-PvE. Poison decay
+   * (`POISON_DECAY_ENABLED`, `ce5d513`) was tried as the fix and shipped,
+   * then reverted (2026-08-13, owner call): it blunted every OTHER poison
+   * source in the game as collateral, and against the real top-of-ladder
+   * mirror matches it barely moved the needle anyway (a damage-race
+   * structural limit, documented at length in that commit's history) — the
+   * owner's read was that it nerfed the wrong thing. This effect is the
+   * actual fix, scoped to Moe alone: BREADTH, not duration. Wired to the new
+   * `whileAlive` trigger (fires every combat tick the caster survives, see
+   * `Ability.trigger`'s doc comment), it targets only `opposing(side)[0]` —
+   * whichever enemy currently stands at the front — and sets that target's
+   * poison to `poisonStacksForTier(tier)` via `Math.max`, a REFRESH, not an
+   * addition (see the case in sim.ts's `applyEffect`). A long PvP duel now
+   * only ever has ONE enemy rotting at a time, no matter how long it runs —
+   * the opposite of the old whole-board burst that stayed at full strength
+   * for the whole fight.
+   *
+   * "While alive" gates NEW poison only: Moe falling stops her from
+   * refreshing/retargeting, but does not strip poison already sitting on a
+   * target — nothing in the game strips poison early now that decay is
+   * gone, this effect included.
+   *
+   * Compounding-law note (ADR-0003) — this is the one place a per-tick
+   * trigger is safe without a hard cap or a shared budget, and it's worth
+   * spelling out why: `Math.max` makes re-applying to a target already AT
+   * `poisonStacksForTier(tier)` a no-op, so nothing grows tick over tick.
+   * Multiple Moe casters don't need `poisonAllEnemies`'s cap-not-sum budget
+   * (issue #116) either — `Math.max` across N casters hitting the same front
+   * slot converges to the single highest tier's value for free, the same
+   * outcome a budget would enforce. And it cannot carry across waves:
+   * gauntlet enemies are re-instantiated fresh every wave and horde-side
+   * poison is cleared at `waveClear`, same as every other poison effect.
+   */
+  | { kind: 'poisonFrontEnemyWhileAlive' }
   | { kind: 'gainStats'; attack: number; health: number }
   /**
    * Cellar-Coil (issue #106; "positional patience" in
@@ -821,8 +863,23 @@ export interface Ability {
    * TARGETED triggers: their effects need a target reference threaded in,
    * so they resolve through `applyTargetedEffect` in sim.ts rather than the
    * positional `applyEffect` path every other trigger uses.
+   *
+   * `whileAlive` (Draughtsman Moe's 2026-08-13 rework) fires once per
+   * COMBAT TICK, for every tick the caster survives — not once per wave like
+   * every trigger above. See `poisonFrontEnemyWhileAlive`'s doc comment for
+   * why a continuous per-tick trigger is safe under the compounding law here
+   * specifically (it isn't, in general — see ADR-0003 — this one effect's
+   * `Math.max` refresh is what makes it so).
    */
-  trigger: 'startOfBattle' | 'startOfWave' | 'faint' | 'afterAttack' | 'allyFaint' | 'allySummoned' | 'onHurt';
+  trigger:
+    | 'startOfBattle'
+    | 'startOfWave'
+    | 'faint'
+    | 'afterAttack'
+    | 'allyFaint'
+    | 'allySummoned'
+    | 'onHurt'
+    | 'whileAlive';
   effect: Effect;
   /**
    * Gate the ability's firing on the real-world half of the day the ride
@@ -922,11 +979,103 @@ export interface LineupUnit {
   defId: string;
   tier?: number;
   relicIds?: string[];
+  /**
+   * Flat attack/health added by a DAILY BOON only (issue #184), applied at
+   * instantiate on top of the tier and relic maths.
+   *
+   * SECURITY: these are written by `boardsForDuel` after a board has already
+   * been validated, and by nothing else. They must NEVER appear on a board a
+   * client submits — a player could otherwise sync `boonHealth: 999` straight
+   * into `pvp_boards` and field it every night. `validateBoard` rejects any
+   * submitted unit carrying either field, which is what makes it safe to have
+   * them on the same type the sync payload uses.
+   *
+   * Attack applies to BOTH the clash total and `attackBuffs`, mirroring the
+   * engine's own `buff()` helper — the backline-damage path reads
+   * `attackBuffs` and never `attack`, so writing only the latter would make a
+   * boon silently miss a backline attacker, which is the board shape
+   * Rearguard most obviously exists for. `boonAttack` may be negative (Blunt);
+   * the resulting attack is floored at 0 rather than allowed to invert.
+   */
+  boonAttack?: number;
+  boonHealth?: number;
+  /**
+   * Set by the Silence boon: this unit fights with its ABILITY stripped and
+   * everything else intact. Same security note as the stat grants above — it
+   * is written by `boardsForDuel` after validation, and `validateBoard`
+   * refuses a submitted board carrying it.
+   *
+   * Relics are deliberately untouched. A silenced rat keeps Marrow-Snap,
+   * keeps Glass Shard, and keeps Weeping Boil — that last one is a RELIC
+   * rather than a unit ability, so a silenced carrier still detonates on
+   * death. What silence actually reaches is the def's own `ability`: the
+   * startOfBattle/startOfWave buffs, and unit faint triggers like
+   * Brood-Mother's death-summon and Bone-Priest's revive.
+   */
+  boonSilenced?: boolean;
+  /**
+   * Set by the Stripped boon (issue #184 ideas pass): this unit fights with
+   * its EQUIPPED RELICS removed for the duel and everything else intact.
+   * Same security posture as `boonSilenced` — written by `boardsForDuel`
+   * after validation, and `validateBoard` refuses a submitted board
+   * carrying it.
+   *
+   * Unlike Silence, this is consumed BEFORE `instantiate` rather than after:
+   * a unit's relic-derived attack/health/armor are baked into its stats
+   * inside `instantiate`, so the clean way to remove them completely (stats
+   * and behaviour both — first-hit bonuses, execute thresholds, cleave,
+   * per-tick heal, Weeping Boil's death detonation) is to pass an empty
+   * `relicIds` array in rather than to patch a `BattleUnit` after the fact.
+   * Team relics are untouched — this only ever reaches the unit's own
+   * equipped relics, never `teamRelicIds`.
+   */
+  boonRelicsStripped?: boolean;
 }
 
 export interface Lineup {
   units: LineupUnit[];
   teamRelicIds?: string[];
+  /**
+   * Board-level daily boon grants (issue #184), written by `boardsForDuel`
+   * after validation and by nothing else. Same security posture as
+   * `LineupUnit`'s `boonAttack`/`boonHealth`/`boonSilenced`: `validateBoard`
+   * refuses a submitted board carrying either, because this type IS the sync
+   * payload.
+   *
+   * These are boons that cannot be a pre-sim transform — they are runtime
+   * behaviour, not a rearranged board — so unlike a positional or stat-grant
+   * boon they are read by `simulateCore` itself.
+   */
+  boonBlockHits?: number;
+  boonEcho?: boolean;
+  /**
+   * Antidote (issue #184 ideas pass): self, whole line, flat poison
+   * negation for the duel. Seeds the SAME per-side `poisonResistApplied`
+   * budget Gutter-Acolyte's `poisonResist` ability banks into — deliberately
+   * adopted rather than duplicated, so the cap (`POISON_RESIST_CAP`) and the
+   * point where it actually reduces a poison tick are shared with that
+   * ability rather than reimplemented. Same security posture as
+   * `boonBlockHits` above.
+   */
+  boonPoisonResist?: number;
+  /**
+   * First Blood (issue #184 ideas pass): self, `units[0]` resolves its
+   * opening blow before the return. Bounded to the wave's very first clash
+   * tick by construction — see the `ticks === 1` check in `simulateCore`'s
+   * tick loop, the only place in the engine a clash is resolved
+   * sequentially rather than simultaneously. Same security posture as
+   * `boonBlockHits` above.
+   */
+  boonFirstBlood?: boolean;
+  /**
+   * Rust (issue #184 ideas pass): opponent, whole line loses this much flat
+   * armor (`damageReduction`) for the duel, floored at 0 per unit — the
+   * counter to stacked flat-armor grants (Ward-Weaver, Filth Totem) that
+   * nothing else in the game answers, because unlike Silence it cannot be
+   * dodged by standing somewhere else. Same security posture as
+   * `boonBlockHits` above.
+   */
+  boonArmorLoss?: number;
   /**
    * How many bodies this side may hold *during combat*, summons included.
    * Callers building from a `BuildState` (see `lineupFromBuild`/
@@ -1062,23 +1211,30 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     ability: { trigger: 'startOfWave', effect: { kind: 'poisonAllEnemies' } },
     tribe: 'plague',
   },
-  // Season-3 prestige tribute (issue #115): Draughtsman Moe reskins
-  // Blight-Witch's exact kit/stats to honor RatMoe, the season-2 champion who
-  // maxed depth 45 on a 3× Blight-Witch poison-swarm. Same reskin precedent as
-  // MD Rattyfock (Warren-Warden) — the base `blight-witch` def stays in
-  // UNIT_DEFS for golden logs/replays, but is removed from the purchasable pool
-  // (see SHOP_UNIT_POOL in shop.ts) so the poison-all kit is only offered under
-  // the prestige name. Stays `plague`-tribe so it supports the archetype he
-  // pioneered and pairs with the reworked Plague-Bearer (#112, poisons the
-  // back): Moe rots wide, Bearer rots deep. Balance of the shared poison-all
-  // kit is tracked in #116 — tune the kit there, since Moe IS that kit.
+  // Season-3 prestige tribute (issue #115): Draughtsman Moe originally
+  // reskinned Blight-Witch's exact kit/stats to honor RatMoe, the season-2
+  // champion who maxed depth 45 on a 3× Blight-Witch poison-swarm — same
+  // body (attack/health/cost), same tribe, same reskin precedent as MD
+  // Rattyfock (Warren-Warden). The base `blight-witch` def stays in
+  // UNIT_DEFS for golden logs/replays, but is removed from the purchasable
+  // pool (see SHOP_UNIT_POOL in shop.ts) so this is the only way to field
+  // that archetype's plague-3/health-3/cost-8 body, and pairs with the
+  // reworked Plague-Bearer (#112, poisons the back).
+  //
+  // 2026-08-13 REWORK: the ABILITY split off `poisonAllEnemies` — see
+  // `poisonFrontEnemyWhileAlive`'s doc comment for the full PvP-overtuning
+  // history and why decay was reverted in favor of this. Body stats,
+  // day-2 gate, and tribe are unchanged; only the kit moved, so Moe no
+  // longer numerically mirrors Blight-Witch and #116's "tune the shared kit
+  // there, since Moe IS that kit" note is now stale history, not current.
   'draughtsman-moe': {
     id: 'draughtsman-moe', name: 'Draughtsman Moe', attack: 3, health: 3, cost: 8,
-    ability: { trigger: 'startOfWave', effect: { kind: 'poisonAllEnemies' } },
+    ability: { trigger: 'whileAlive', effect: { kind: 'poisonFrontEnemyWhileAlive' } },
     tribe: 'plague',
     // Day-2 gate added (Jesper, 2026-08-01) — a deliberate departure from the
     // "day-1, matching Blight-Witch" precedent noted above; holds the
-    // poison-all prestige pick back one day this season.
+    // poison-all prestige pick back one day this season. Kept as-is through
+    // the 2026-08-13 kit rework.
     unlockDay: 2,
   },
   gnawer: {
@@ -1164,6 +1320,18 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     id: 'ward-weaver', name: 'Ward-Weaver', attack: 1, health: 3, cost: 6,
     ability: { trigger: 'startOfBattle', effect: { kind: 'grantArmor', all: true } },
     // Day-1 gate removed (Jesper, 2026-08-01) — see Dire-Rat's note above.
+    //
+    // Retired for the 2026-08-17 season reset (season-to-season census,
+    // see wrad-cross-season-staleness memory): the only true two-season
+    // auto-include — 32/42 S1 board-rounds, 5/5-5/6 boards every day
+    // measured in S2, unmoved by this season's anti-stacking anomaly. The
+    // real fix (`ahead`-only armor variant, #181/#182) is already built and
+    // measured but deliberately held for a later season — this pulls the
+    // unit from the pool in the meantime rather than leave the free
+    // whole-board grant live untouched. Same mechanism/precedent as
+    // Gnawer/Gutter-Acolyte above: out of the shop pool from day 1 on,
+    // carried-in copies still sell at par (`sellRefund`).
+    retireDay: 1,
   },
   // Issue #12: a parallel "Runt" pair (Gutter-Runt precedent) tied to the
   // game's dawn/dusk duality rather than literal noon-splitting — the actual
@@ -1242,8 +1410,10 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   // look — matches the pun on the name) and a glass of Nutella somewhere in
   // the art (see mbp-rat.svg). Stats/ability are a byte-for-byte carryover,
   // not a fresh tune — balance sign-off already covers Slink-Rat's numbers.
+  // (attack was 4 here vs Slink-Rat's 3 — a copy slip against the "byte-for-
+  // byte" claim above, corrected 2026-08-14.)
   'mbp-rat': {
-    id: 'mbp-rat', name: 'MBP Rat', attack: 4, health: 1, cost: 6,
+    id: 'mbp-rat', name: 'MBP Rat', attack: 3, health: 1, cost: 6,
     ability: { trigger: 'startOfWave', effect: { kind: 'backlineDamage' } },
   },
   // Issue #110: single-unit fusion of the Dawn-Runt/Dusk-Runt pair above —
@@ -1412,6 +1582,23 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     id: 'gutter-acolyte', name: 'Gutter-Acolyte', attack: 2, health: 4, cost: 5,
     ability: { trigger: 'startOfWave', effect: { kind: 'poisonResist' } },
     tribe: 'plague',
+    // Retired for the upcoming season (Jesper, 2026-08-13) — same mechanism
+    // and precedent as Gutter-Runt above: `retireDay: 1` drops it from the
+    // shop pool from day 1 on, while the def stays in UNIT_DEFS so golden
+    // logs, stored leaderboard lineups and replays still resolve it.
+    // Par-buyback severance (`sellRefund` in shop.ts) applies, so a copy
+    // carried in from a prior season sells for exactly what was spent.
+    //
+    // This removes the game's ONLY poison counter (`poisonResist` has no
+    // other user), which is deliberate rather than overlooked. The counter
+    // never actually did the job it was built for: #155's own probe showed
+    // adding Acolytes did not change the Acolyte-vs-real-RatMoe-board result
+    // at ANY value of `POISON_RESIST_CAP`, and the 2026-08-13 live-board
+    // measurement found poison is only ~1-4% of damage once real boards
+    // carry 4-6 relics each — so there is very little left to counter. The
+    // `season-pool.test.ts` 'defense' role stays covered by `grantArmor`
+    // (Ward-Weaver) and `revive` (Bone-Priest).
+    retireDay: 1,
   },
 };
 

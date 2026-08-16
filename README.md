@@ -50,6 +50,39 @@ All live in `packages/core/scripts/`, run via `npm run balance:<name>` from the 
 
 **Before quoting any of these numbers:** confirm which branch/commit you ran them against — `master` (prod) and `dev` frequently diverge in balance-relevant ways, and the scripts don't tag their own output with a commit hash. If you need prod's numbers while your working tree is on `dev` (or vice versa), use an isolated `git worktree add ../wrad-tmp <branch>` rather than checking out the other branch into your working tree.
 
+## Boons & anomalies
+
+Source of truth is the code (`BOON_DEFS` in [`packages/core/src/boons.ts`](./packages/core/src/boons.ts), `ANOMALY_DEFS` in [`packages/core/src/anomaly.ts`](./packages/core/src/anomaly.ts)) — this table is a discovery index, kept in sync by hand whenever either changes, same caveat as the balance-scripts table above. Design rationale for each lives in [`docs/design/boons.md`](./docs/design/boons.md).
+
+### Boons (PvP daily pick, one of three offered each dawn)
+
+| Boon | Effect |
+|---|---|
+| **Dragged Forward** | The opponent's hindmost rat is hauled to the front of their line. |
+| **Buried** | The opponent's leading rat is shoved to the back of their line. |
+| **A Body First** | A runt takes the front of your line, absorbing the opponent's opening hit. |
+| **Silence** | The opponent's leading rat loses its ability for the duel; relics untouched. |
+| **Bulwark** | Your leading rat gains health for the duel. |
+| **Blunt** | The opponent's hindmost rat loses attack for the duel. |
+| **Rearguard** | Your hindmost rat gains attack for the duel. |
+| **Deep Scout** | Read every rival's exact roster for the day. |
+| **Guardian** | The first few incoming attacks against your side are absorbed outright. |
+| **Rust** | The opponent's whole line loses flat armor for the duel. |
+| **Barren** | The opponent's summon headroom is cut for the duel. |
+| **Antidote** | Your whole line gains flat poison negation for the duel. |
+| **Stripped** | The opponent's leading rat loses its equipped relics for the duel. |
+| **First Blood** | Your leading rat resolves its opening blow before the return, on the wave's first clash only. |
+
+Rust through First Blood shipped 2026-08-15 ahead of a full magnitude sweep — see the design bank for what's still open. `Echo` (double the first unit summoned) is implemented and tested but deliberately Held out of the daily pool, not listed above; see `HELD_BOONS` in `boons.ts`.
+
+### Anomalies (season-long modifier, one per season once unlocked)
+
+| Anomaly | Effect |
+|---|---|
+| **Grown Past Use** | Taking a rat to ★3 retires its kind from the shop for the rest of the week — compensated with one extra board slot. |
+
+A single-entry pool is intentional, not a placeholder (see `ANOMALY_DEFS`'s doc comment) — the original three-anomaly launch trio was deleted 2026-08-08 for reading as flavour text with no felt mechanical difference.
+
 ## Agents working in this repo
 
 Read `CONTEXT.md` for vocabulary and `docs/adr/` for decisions before making non-trivial changes to `packages/core`. `CLAUDE.md` at the repo root lists the agent skills this project uses (issue tracker, triage labels, domain docs). For balance/tier-list questions or new-content design brainstorming, the `balance-analyst` and `content-designer` subagents in `.claude/agents/` are pre-scoped for those workflows.

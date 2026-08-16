@@ -1,0 +1,18 @@
+{
+  "content": "**the last gate falls tomorrow.** day gate 3 unlocks the final two rats — and from that moment on, every rat in the warren is up for grabs in your shop. no more gates, no more waiting. all drop in after 06:00 CET.",
+  "embeds": [
+    {
+      "title": "🌅 Dawn-Runt — 1/2, cost 4",
+      "description": "thrives in the grey light before the city wakes. battle (before noon): hardens the horde's attack (scales ★).",
+      "color": 5793266,
+      "image": { "url": "attachment://dawn-runt.png" }
+    },
+    {
+      "title": "🌆 Dusk-Runt — 1/2, cost 4",
+      "description": "comes alive as the drains go black again, ahead of the next dawn's ride. battle (after noon): hardens the horde's health (scales ★).\n\na matched pair — Dawn-Runt takes the morning shift, Dusk-Runt clocks in after noon.",
+      "color": 5793266,
+      "image": { "url": "attachment://dusk-runt.png" },
+      "footer": { "text": "we ride at dawn · day gate 3 unlocks 06:00 CET — full shop from here on" }
+    }
+  ]
+}

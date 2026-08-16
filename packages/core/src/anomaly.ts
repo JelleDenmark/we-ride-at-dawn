@@ -30,34 +30,51 @@ import { fnv1a } from './seed';
  *    the primary/secondary budget shares, the pivot wave's floor, or the
  *    per-wave unit cap.
  *
- * 2b. **Do not force an archetype.** Measured 2026-07-29 via
- *    `scripts/anomaly-guardrail.ts`: forcing the primary archetype is not a
- *    variance knob at all, it is a DIFFICULTY knob, because the four
- *    archetypes are not balanced against each other in a front-clash sim.
- *    Forcing swarm lifted a maxed board's average depth by up to +7.3 waves
- *    (a budget spent on cheap chaff is far easier than the same budget spent
- *    on brutes — the same asymmetry ADR-0003 records for armor); forcing
- *    armored dropped p95 from 38 to 30. Both are depth-distorting by a wide
- *    margin. Every knob that leaves the season's OWN rolled primary alone
- *    measured neutral. So an anomaly reshapes how the week is composed and
- *    lets the season keep deciding what it is composed of — which is also
- *    the better design: "the warren commits to one archetype" plays
- *    differently every week, where "this week is armored" plays the same
- *    every time it comes up.
+ * 2b. **Do not force an archetype.** This rule originally rested on two
+ *    independent arguments. ADR-0007 killed the first one; the second still
+ *    stands on its own, so the rule stands.
  *
- *    `GauntletOverrides` therefore has no `primary` field. If a future
- *    distorting anomaly (ROADMAP's Archetype Lock) ever needs one, it must
- *    (a) go behind the season-6 board partition, and (b) resolve the
- *    collision where the forced primary is the archetype the season already
- *    rolled as its secondary — swap the two rather than re-rolling, so the
- *    secondary stays a pure function of the same stream position.
+ *    The DEAD argument (difficulty): measured 2026-07-29 via
+ *    `scripts/anomaly-guardrail.ts`, forcing swarm lifted a maxed board's
+ *    average depth by up to +7.3 waves and forcing armored dropped p95 from
+ *    38 to 30, because the four archetypes are not balanced against each
+ *    other in a front-clash sim. That used to disqualify an anomaly outright.
+ *    Under ADR-0007 it no longer does — a week-wide difficulty shift is
+ *    symmetric across players and the PvP league absorbs it.
+ *
+ *    The LIVE argument (variance): "the warren commits to one archetype"
+ *    plays differently every week, where "this week is armored" plays the
+ *    same every time it comes up. A forced archetype is a fixed puzzle on a
+ *    rotation, not a new one. The 2026-08-08 cull deleted three anomalies for
+ *    exactly this failure — being technically a modifier while being
+ *    functionally the same week — so this argument is now the better
+ *    evidenced of the two, not the weaker one. An anomaly reshapes how the
+ *    week is composed and lets the season keep deciding what it is composed
+ *    of.
+ *
+ *    `GauntletOverrides` therefore still has no `primary` field. If ROADMAP's
+ *    Archetype Lock is ever revived it must answer the variance objection
+ *    first (it is no longer blocked on a board partition, only on being
+ *    interesting), and it must resolve the collision where the forced primary
+ *    is the archetype the season already rolled as its secondary — swap the
+ *    two rather than re-rolling, so the secondary stays a pure function of
+ *    the same stream position.
  *
  * 3. **No carve-outs from the Compounding Law (ADR-0003).** #141 explicitly
  *    rejects candidates like "poison persists across waves this week." The
  *    horde is one persistent object across 45 waves; a weekly exemption from
- *    the cap rule is how you ship the next Warren-Warden. Note that no
- *    anomaly here touches `simulate` — that is deliberate for v1, and it
- *    means the pool carries zero compounding surface by construction.
+ *    the cap rule is how you ship the next Warren-Warden. This rule is
+ *    absolute and ADR-0007 does not touch it.
+ *
+ *    It is NOT the same rule as "never touch `simulate`", though the two
+ *    coincided for as long as every anomaly was a `generateGauntlet`
+ *    override. Now that depth-distorting candidates are back on the table
+ *    (Sudden Death turns revive/heal off, which is a `simulate` change), the
+ *    line worth drawing is: flipping a rule OFF for the week is fine, because
+ *    it cannot compound; adding a repeatable permanent effect is never fine,
+ *    however it is scoped. A `simulate`-touching anomaly needs a
+ *    `compounding-law.test.ts` canary, which is the price of admission for
+ *    that category and the reason the shop-side ones stay cheaper to ship.
  */
 export interface GauntletOverrides {
   /** Fraction of each wave's budget force-spent on the primary (base 0.6). */
@@ -93,16 +110,29 @@ export interface AnomalyDef {
   /** One line, grimy, present tense — matches `scout.ts`'s flavor voice. */
   blurb: string;
   /**
-   * Comparability firewall (ROADMAP: "never let a distorting week write the
-   * global frame"). `false` = depth stays comparable to a clean week, so the
-   * season rides the normal board. `true` = the anomaly moves absolute depth
-   * enough that its scores must be partitioned off the global/all-time board.
+   * Does this anomaly move absolute depth materially against a clean week?
    *
-   * This flag is NOT a guess — it is set from the balance gate
-   * (`balance:maxed-board-guardrail` against the current 43/45 ceiling), and
-   * an anomaly whose measured ceiling moves more than ~±2 waves must be
-   * flipped to `true` and held back until the season-6 board partitioning
-   * exists. See each entry's measured note below.
+   * **This is no longer a ship gate (ADR-0007).** It used to be: anything
+   * past ~±2 waves was held back until a per-week board partition existed,
+   * which shelved every genuinely eventful candidate and left only
+   * composition reshuffles — all three of which were deleted on 2026-08-08
+   * for being too small to notice. The firewall protected max-depth
+   * comparability on a global cross-week board; the nightly PvP league
+   * (#154/#157) is the scoring metric now, and it settles between players
+   * INSIDE one week, so a week-wide difficulty shift is symmetric and comes
+   * out in the wash.
+   *
+   * The flag survives as measured information, not permission: it labels the
+   * week, and it is what a restored depth board (#172) would partition on.
+   * Still set it from `balance:anomaly` rather than guessing, and still keep
+   * each entry's measured note — the number is worth knowing even though it
+   * no longer decides anything.
+   *
+   * What DOES gate an anomaly now: the playability floor (does a realistic
+   * player still have a week worth riding — `balance:realistic`, not the
+   * maxed-board fixture) and the income coupling (depth-proportional income
+   * per ADR-0002 means a harder week shrinks the PvP board everyone can
+   * field). See `scripts/anomaly-guardrail.ts`.
    */
   distorting: boolean;
   gauntlet: GauntletOverrides;
@@ -130,15 +160,23 @@ export interface AnomalyDef {
  * Use" as a result, which is correct.
  *
  * Deliberately NOT here:
- *   - Bounty Run / any scrap multiplier — #141 requires a fresh
- *     `npm run snowball` audit first; economy multipliers are the one
- *     category that can re-open the snowball question.
- *   - The Long Dark (start at wave N), Sudden Death (revive/heal off),
- *     Archetype Lock — all depth-DISTORTING by construction, so they wait
- *     for the season-6 per-week board partition.
+ *   - Bounty Run / any scrap multiplier — two reasons now. #141 requires a
+ *     fresh `npm run snowball` audit (economy multipliers are the one
+ *     category that can re-open the snowball question), and #163 measured a
+ *     surplus already: a day-3 45-clearer banks ~3 000 scrap against a board
+ *     costing 600-1 400. Adding scrap solves nothing anyone has. A scrap
+ *     SINK is the interesting direction — see #176.
  *   - A second `rearguard` per wave — #138 capped that at one on purpose
  *     after an unchecked sweep flooded deep waves with four Sluice-Wardens.
- *     Relaxing a knob with that history is not a launch-week move.
+ *     Relaxing a knob with that history wants its own measured pass.
+ *
+ * No longer parked here, per ADR-0007: The Long Dark (start at wave N) and
+ * Sudden Death (revive/heal off) were held back only because they are
+ * depth-distorting by construction, and distortion stopped being
+ * disqualifying when the PvP league became the scoring frame. They are now
+ * ordinary candidates that need the playability-floor and income measurements
+ * like anything else. Archetype Lock stays out, but on rule 2b's variance
+ * argument rather than its difficulty one.
  *
  * Insertion order is the roll order and is load-bearing: adding an entry in
  * the middle re-maps which anomaly every future season draws. Append only.
@@ -216,6 +254,30 @@ export const ANOMALY_DEFS: Record<string, AnomalyDef> = {
 export const ANOMALY_FIRST_SEASON = '2026-08-10';
 
 /**
+ * First season eligible to draw a clean (no-anomaly) week as an OUTCOME of
+ * the roll, rather than only via the `ANOMALY_FIRST_SEASON` pre-launch gate
+ * above. With `ANOMALY_DEFS` down to a single entry (Grown Past Use, see its
+ * doc comment), every season since launch has drawn the same anomaly by
+ * construction — there was nothing else in the pool to draw. Adding `null`
+ * as a second pool slot below gives the roll a real "off" outcome again
+ * without writing a second anomaly.
+ *
+ * Gated behind its own date for the same reason `ANOMALY_FIRST_SEASON`
+ * exists: `anomalyFor` re-derives live off the CURRENT `ANOMALY_DEFS`, so
+ * widening the pool changes `rng.int(pool.length)` for every season id, not
+ * just future ones. Confirmed by direct computation before shipping this:
+ * with `null` unconditionally in the pool, the then-live 2026-08-10 season
+ * flips from Grown Past Use to a clean week retroactively — unacceptable
+ * mid-week (`retireDay`-style pure-function-of-date bug, see
+ * `docs/agents/*` deploy notes). Gating the second slot behind this date
+ * keeps every season before it exactly as committed. 2026-08-17 (the next
+ * reset after this was built) is deliberately included on the wide side of
+ * the gate — also confirmed by direct computation to still draw Grown Past
+ * Use, so turning the toggle on does not change that week's outcome.
+ */
+export const ANOMALY_NONE_FIRST_SEASON = '2026-08-17';
+
+/**
  * The season's anomaly, or `null` for a clean week.
  *
  * Seeded off a `#anomaly` sub-key of the season id, exactly as
@@ -228,7 +290,9 @@ export const ANOMALY_FIRST_SEASON = '2026-08-10';
  */
 export function anomalyFor(seasonId: string): AnomalyDef | null {
   if (seasonId < ANOMALY_FIRST_SEASON) return null;
-  const pool = Object.values(ANOMALY_DEFS);
+  const defs = Object.values(ANOMALY_DEFS);
+  const pool: (AnomalyDef | null)[] =
+    seasonId >= ANOMALY_NONE_FIRST_SEASON ? [...defs, null] : defs;
   if (pool.length === 0) return null;
   const rng = xorshift128(fnv1a(`${seasonId}#anomaly`));
   return pool[rng.int(pool.length)];

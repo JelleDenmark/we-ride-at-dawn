@@ -57,6 +57,16 @@ async function runSeason(
   console.log(`Fetched boards, ${outcome.dropped.length} dropped as illegal.`);
   for (const d of outcome.dropped) console.log(`  - ${d.name} (${d.device_id})`);
 
+  // Loud on purpose. A legitimate client can only offer what `boonsFor`
+  // derives, so a rejection means either a tampered client or — far more
+  // likely — a client running a different boon pool than this job, which is
+  // what appending to BOON_DEFS mid-week would cause. Either way it is the
+  // only signal that anything is wrong, and it must not scroll past unread.
+  if (outcome.rejectedPicks.length > 0) {
+    console.log(`WARNING: ${outcome.rejectedPicks.length} boon pick(s) not on this day's menu — ignored:`);
+    for (const p of outcome.rejectedPicks) console.log(`  - ${p.device_id} picked "${p.boon_id}"`);
+  }
+
   if (outcome.skipped) {
     console.log(`Only ${outcome.scored} legal board(s) — need 2 to score. Nothing written.`);
     return;

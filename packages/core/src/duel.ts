@@ -1,5 +1,6 @@
 import type { Lineup } from './data/units';
 import { simulateCore, type BattleEvent, type UnitView } from './sim';
+import { boardsForDuel, boonEffect, type BoonNote } from './boons';
 
 /**
  * Outcome of a single symmetric board-vs-board duel — the PvP league's core
@@ -22,6 +23,16 @@ import { simulateCore, type BattleEvent, type UnitView } from './sim';
  */
 export interface DuelResult {
   winner: 'a' | 'b' | 'draw';
+  /**
+   * What each side's daily boon did to the boards before the fight started
+   * (issue #184) — empty when neither side picked one.
+   *
+   * Pre-sim transforms emit no `BattleEvent`s, deliberately, so the replay has
+   * nothing in the log to explain why a rat moved or went quiet. These are the
+   * transform's own account of itself, for the replay to play as a scripted
+   * pre-battle beat before the log begins.
+   */
+  boonNotes: BoonNote[];
   survivorsA: UnitView[];
   survivorsB: UnitView[];
   /** Total remaining health of each side's survivors — the stalemate margin,
@@ -55,9 +66,24 @@ export interface DuelResult {
  */
 export function simulateDuel(
   a: Lineup,
-  b: Lineup
+  b: Lineup,
+  boonA: string | null = null,
+  boonB: string | null = null
 ): { events: BattleEvent[]; result: DuelResult } {
-  const { events, result, enemySurvivors } = simulateCore(a, { kind: 'duel', opponent: b });
+  // Daily boons (issue #184). Default null on both, so every existing caller,
+  // golden log and determinism hash is byte-identical to before boons existed
+  // — a duel with no picks resolves exactly as it always did.
+  //
+  // Taking ids rather than effects is deliberate: the replay reads `boon_id`
+  // straight off a stored result row and hands it here unchanged, so the
+  // client re-runs the identical fight the nightly job scored. An unknown id
+  // resolves to no boon rather than throwing, which keeps a round scored under
+  // a newer pool replayable by an older client.
+  const boards = boardsForDuel(a, boonEffect(boonA), b, boonEffect(boonB), boonA, boonB);
+  const { events, result, enemySurvivors } = simulateCore(boards.a, {
+    kind: 'duel',
+    opponent: boards.b,
+  });
   const survivorsA = result.survivors;
   const survivorsB = enemySurvivors;
   const healthA = survivorsA.reduce((s, u) => s + u.health, 0);
@@ -85,6 +111,7 @@ export function simulateDuel(
     events,
     result: {
       winner,
+      boonNotes: boards.notes,
       survivorsA,
       survivorsB,
       healthA,

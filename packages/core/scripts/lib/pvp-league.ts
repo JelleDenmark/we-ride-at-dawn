@@ -17,6 +17,7 @@
  */
 import { legalEntrants, scoreRound, winPointsForDay, type Lineup } from '../../src/pvp';
 import { weekdayFor } from '../../src/shop';
+import { isBoonOffered } from '../../src/boons';
 
 export const SUPABASE_URL = 'https://wvrllhiktnkvbpclmrpq.supabase.co';
 // Public, publishable anon key — same as packages/app/src/telemetry.ts. Read-only.
@@ -46,6 +47,27 @@ export interface ResultRow {
    * client re-run `simulateDuel` against this row's opponent later and get
    * back the byte-identical fight, with no separate event-log storage. */
   board: Lineup;
+  /**
+   * The boon this device fielded, or null for no pick (issue #184).
+   *
+   * This column IS the reveal. Picks are secret while the round is live —
+   * `pvp_boon_picks` has no anon read at all — and become public here, in a
+   * row anyone can select, once the round is scored and nothing can be
+   * countered any more. Snapshotting it beside `board` for the same reason
+   * `board` is snapshotted: a pick can change the moment the round closes, so
+   * the only trustworthy record of what was actually fielded is the one taken
+   * at scoring time.
+   *
+   * Already validated when it lands here — an off-menu pick is nulled by
+   * `roundResultsFor`, never stored.
+   */
+  boon_id: string | null;
+}
+
+/** One row of pvp_boon_picks. Service-role only; anon cannot read this table. */
+export interface BoonPickRow {
+  device_id: string;
+  boon_id: string;
 }
 
 export interface RoundOutcome {
@@ -56,6 +78,18 @@ export interface RoundOutcome {
   dropped: BoardRow[];
   /** True when fewer than 2 legal boards existed — nothing to score. */
   skipped: boolean;
+  /**
+   * Picks refused because the boon wasn't on that ride-date's derived menu.
+   * The player still rides, just without a boon — an off-menu pick is dropped,
+   * never a reason to drop the board.
+   *
+   * Surfaced rather than swallowed because this is the ONLY signal that
+   * something is wrong: a legitimate client cannot produce one (it offers what
+   * `boonsFor` derives), so a non-empty list means either a tampered client or
+   * — far more likely — a client running a different pool than the job, which
+   * is exactly what appending to `BOON_DEFS` mid-week would cause.
+   */
+  rejectedPicks: { device_id: string; boon_id: string }[];
 }
 
 /**
@@ -68,7 +102,8 @@ export interface RoundOutcome {
 export function roundResultsFor(
   boards: BoardRow[],
   seasonId: string,
-  roundId: string
+  roundId: string,
+  picks: BoonPickRow[] = []
 ): RoundOutcome {
   const nameById = new Map(boards.map((b) => [b.device_id, b.name]));
   // Snapshotted alongside points below — the whole reason this map exists is
@@ -81,7 +116,7 @@ export function roundResultsFor(
   const dropped = boards.filter((b) => !legalIds.has(b.device_id));
 
   if (legal.length < 2) {
-    return { resultRows: [], scored: legal.length, dropped, skipped: true };
+    return { resultRows: [], scored: legal.length, dropped, skipped: true, rejectedPicks: [] };
   }
 
   // roundId is `${seasonId}#${rideDate}` (see this module's doc comment);
@@ -91,7 +126,30 @@ export function roundResultsFor(
   const rideDate = roundId.slice(roundId.indexOf('#') + 1);
   const winPoints = winPointsForDay(weekdayFor(rideDate));
 
-  const resultRows = scoreRound(legal, winPoints).map((s) => ({
+  // The one server-side authority in the boon path (issue #184). Everything
+  // else about a board is client-trusted by design, but the day's menu is a
+  // pure function of the ride-date, so the job can re-derive it and refuse a
+  // pick that was never offered. Re-deriving is sound HERE and only here: it
+  // asks about the round being scored, which is the current day. Do not reuse
+  // this against a historical date — appending to `BOON_DEFS` re-maps past
+  // days' menus, which is why a scored round's picks live in its snapshot
+  // rather than being re-derived on read.
+  const rejectedPicks: { device_id: string; boon_id: string }[] = [];
+  const boonById = new Map<string, string>();
+  for (const p of picks) {
+    // A pick from someone whose board isn't in the round is not a rejection,
+    // just irrelevant — they picked and then didn't field a legal board.
+    if (!legalIds.has(p.device_id)) continue;
+    if (isBoonOffered(rideDate, p.boon_id)) boonById.set(p.device_id, p.boon_id);
+    else rejectedPicks.push({ device_id: p.device_id, boon_id: p.boon_id });
+  }
+
+  // Hand the validated picks to the scorer so the duels actually fight with
+  // them. `legal` came from `legalEntrants`, which preserves input order and
+  // carries no boon, so re-attach by id rather than by position.
+  const legalWithBoons = legal.map((e) => ({ ...e, boon: boonById.get(e.id) ?? null }));
+
+  const resultRows = scoreRound(legalWithBoons, winPoints).map((s) => ({
     round_id: roundId,
     season_id: seasonId,
     device_id: s.id,
@@ -104,8 +162,12 @@ export function roundResultsFor(
     // legal.length >= 2 and boardById is built from the same `boards` legal
     // was derived from, so every legal id has a board — the `!` is safe.
     board: boardById.get(s.id)!,
+    // Explicit null rather than an absent key: these rows go to PostgREST as
+    // one bulk insert, and a heterogeneous key set across rows is exactly how
+    // a bulk insert starts silently dropping columns.
+    boon_id: boonById.get(s.id) ?? null,
   }));
-  return { resultRows, scored: legal.length, dropped, skipped: false };
+  return { resultRows, scored: legal.length, dropped, skipped: false, rejectedPicks };
 }
 
 function anonHeaders(): Record<string, string> {
@@ -161,6 +223,34 @@ export async function fetchBoards(seasonId: string, key: string | undefined): Pr
   return (await res.json()) as BoardRow[];
 }
 
+/**
+ * Every boon pick submitted for one ride-date (issue #184).
+ *
+ * SERVICE-ROLE ONLY, and unlike `fetchBoards` this is not a historical
+ * accident that could be relaxed — `pvp_boon_picks` deliberately has no anon
+ * grant and no read policy, because a readable pick would turn the daily
+ * choice into a counter-picking race. There is no anon fallback to offer.
+ *
+ * Returns empty without a key rather than throwing, so a keyless `--dry`
+ * degrades to "preview with no boons" instead of failing outright. That is a
+ * softer posture than `fetchBoards` takes, and deliberately so: without boards
+ * there is no round at all, whereas without picks there is still a scoreable
+ * round — every entrant simply rides without a boon, which is a legal state.
+ */
+export async function fetchBoonPicks(
+  seasonId: string,
+  rideDate: string,
+  key: string | undefined
+): Promise<BoonPickRow[]> {
+  if (!key) return [];
+  const url =
+    `${SUPABASE_URL}/rest/v1/pvp_boon_picks?season_id=eq.${encodeURIComponent(seasonId)}` +
+    `&ride_date=eq.${encodeURIComponent(rideDate)}&select=device_id,boon_id`;
+  const res = await fetch(url, { headers: serviceHeaders(key) });
+  if (!res.ok) throw new Error(`pvp_boon_picks fetch failed: ${res.status} ${await res.text()}`);
+  return (await res.json()) as BoonPickRow[];
+}
+
 /** Upsert the round's lifecycle row (service-role). We write it straight to
  * `closed` — WRAD has no submission window, so a round is scored the moment it
  * exists. */
@@ -214,7 +304,11 @@ export async function runNightlyRound(
   readKey: string | undefined = writeKey
 ): Promise<RoundOutcome> {
   const boards = await fetchBoards(seasonId, readKey);
-  const outcome = roundResultsFor(boards, seasonId, roundId);
+  // Same ride-date extraction `roundResultsFor` documents; done here too
+  // because the picks query is keyed on it.
+  const rideDate = roundId.slice(roundId.indexOf('#') + 1);
+  const picks = await fetchBoonPicks(seasonId, rideDate, readKey);
+  const outcome = roundResultsFor(boards, seasonId, roundId, picks);
   if (writeKey && !outcome.skipped) {
     const ts = now.toISOString();
     await upsertClosedRound(

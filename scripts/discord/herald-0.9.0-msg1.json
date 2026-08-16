@@ -1,0 +1,12 @@
+{
+  "embeds": [
+    {
+      "title": "v0.9.0 — a choice every dawn (1/2)",
+      "description": "⏳ **24 hours to a new season.** Monday 06:00 CET the board wipes — and for the first time, your PvP night isn't fixed. Every dawn brings a choice.\n\n**NEW — DAILY BOONS**\nEvery player is offered the same three boons each dawn and picks one. It shapes that night's 22:00 league round alone — no stacking, no carry-over, no auto-pick if you sit it out.\nFourteen in the launch pool, three offered at a time — and never the same boon two dawns running.\n• **Dragged Forward / Buried** — haul a rival's hindmost rat to their front, or bury their leader at the back.\n• **A Body First** — a runt takes your front line so nothing better has to.\n• **Silence** — a rival's leader forgets its trick. Its charms still work.\n• **Rust / Stripped** — a rival's whole line loses its guard, or its leader marches out with its trinkets confiscated.\n• **Barren** — a rival's warren has no room left to call up more rats.\n• **Bulwark / Rearguard / Blunt** — thicken your leader, sharpen your rearguard, or dull a rival's.\n• **Antidote** — your line shrugs off poison that would've felled it.\n• **Guardian** — the first blows against your line land on nothing.\n• **First Blood** — your leader strikes before anything can answer. It follows whichever rat ends up at your front, even if a rival's Drag or Buried put it there.\n• **Deep Scout** — read every rival's line before you build yours.",
+      "color": 5793266,
+      "footer": {
+        "text": "we ride at dawn · season resets Monday 06:00 CET"
+      }
+    }
+  ]
+}

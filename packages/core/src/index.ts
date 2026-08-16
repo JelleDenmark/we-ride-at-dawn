@@ -56,6 +56,19 @@ export {
   type GauntletOverrides,
   type ShopOverrides,
 } from './anomaly';
+export {
+  boonsFor,
+  isBoonOffered,
+  boardsForDuel,
+  boonEffect,
+  DECOY_DEF_ID,
+  BOON_DEFS,
+  BOONS_PER_DAY,
+  BOON_FIRST_DATE,
+  type BoonDef,
+  type BoonEffect,
+  type BoonNote,
+} from './boons';
 export { scoutReport, ARCHETYPE_LABEL, type ScoutReport, type ScoutHint } from './scout';
 export {
   newBuild,
@@ -127,7 +140,9 @@ export {
   validateBoard,
   legalEntrants,
   consolationScrap,
+  scoutSummary,
   LOSS_CONSOLATION_DEFAULT,
   type LeagueEntrant,
   type RoundStanding,
+  type ScoutSummary,
 } from './pvp';

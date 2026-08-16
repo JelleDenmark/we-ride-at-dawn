@@ -20,6 +20,8 @@
   import { onMount } from 'svelte';
   import {
     currentRideDate,
+    isBoonOffered,
+    boonsFor,
     dailySeed,
     generateGauntlet,
     anomalyFor,
@@ -73,6 +75,7 @@
     POISON_RESIST_CAP,
     consolationScrap,
     LOSS_CONSOLATION_DEFAULT,
+    scoutSummary,
     simulateDuel,
     unitKeyword,
     relicKeyword,
@@ -109,6 +112,8 @@
     saveInstallNudgeDismissed,
     saveConsolationCredited,
     loadConsolationCredited,
+    saveBoonPick,
+    loadBoonPick,
     type RideLogEntry,
     type LastRide,
   } from './persistence';
@@ -121,6 +126,8 @@
   import { submitScore, fetchTop, fetchRank, defaultName, isMe, type BoardRow } from './leaderboard';
   import {
     submitPvpBoard,
+    submitPvpBoon,
+    fetchMyPvpBoon,
     fetchLatestStandings,
     fetchStandingsForRound,
     fetchSeasonStandings,
@@ -409,6 +416,65 @@
   // Which rival's board the scout panel is expanded to, by player_id (null =
   // collapsed). One at a time keeps the panel phone-sized.
   let scoutedGhost = $state<string | null>(null);
+  // This device's daily boon pick for the current ride-date (issue #184), or
+  // null for no pick — which is a legal state meaning no boon, never an
+  // auto-pick. Read from localStorage on load and reconciled against the
+  // server on every league refresh, because a local write can fail silently
+  // (#180) and a reinstall loses it outright.
+  //
+  // Nothing SETS this yet: the choice screen is phase 6. Until then the boon
+  // path is complete but unreachable, which is the same dormancy
+  // `BOON_FIRST_DATE` enforces on the offer itself.
+  let myBoon = $state<string | null>(
+    loadBoonPick(build.seasonId, currentRideDate())
+  );
+
+  // Deep scouting is a boon, not a setting (issue #178, folded into #184).
+  // Basic scouting — rat count + star total via `scoutSummary` — stays the
+  // default for everyone; picking Deep Scout swaps in the exact-roster
+  // rendering below (`ghostUnits`, the expand-to-chips branch), which has been
+  // wired and dormant behind a hardcoded constant since ce62eaa.
+  //
+  // Gated on `isBoonOffered` rather than on the pick alone, for two reasons
+  // that both matter: while boons are dormant no date offers anything, so this
+  // cannot turn on early even if a pick is somehow present; and a stale pick
+  // from a previous day can never grant today's scouting, since the menu it
+  // was drawn from is a pure function of the ride-date.
+  const scoutLevel = $derived<'basic' | 'deep'>(
+    myBoon === 'deep-scout' && isBoonOffered(currentRideDate(), myBoon) ? 'deep' : 'basic'
+  );
+
+  /**
+   * Record a boon pick: locally first so the UI is instant, then to the server.
+   * Pass null to clear — changing your mind back to nothing is a legal move.
+   *
+   * Safe to call repeatedly right up to the 22:00 round: the pick is secret
+   * until the round is scored, and the nightly job reads whatever stands at
+   * that moment. Wired ahead of the choice screen (phase 6) so the screen only
+   * has to render.
+   */
+  function pickBoon(boonId: string | null): void {
+    const rideDate = currentRideDate();
+    myBoon = boonId;
+    saveBoonPick(build.seasonId, rideDate, boonId);
+    void submitPvpBoon({ seasonId: build.seasonId, rideDate, boonId });
+  }
+
+  // Today's three, derived from the ride-date — identical for every player,
+  // never stored, never rerolled. Empty while the system is dormant, which is
+  // what keeps the whole panel out of the DOM rather than rendering an empty
+  // shell.
+  const todaysBoons = $derived(boonsFor(currentRideDate()));
+
+  // Has tonight's round already been fought? Rounds close at 22:00 but the
+  // ride-date does not roll until 06:00, so there are eight hours where the
+  // player's "today" belongs to a round that is already scored — the same seam
+  // behind the 2026-07-21 no-rides-overnight bug. Picking in that window would
+  // land on a closed round and quietly do nothing, so the cards go inert and
+  // say so instead.
+  const boonRoundClosed = $derived(
+    rounds.some((r) => r.round_id.slice(r.round_id.lastIndexOf('#') + 1) === currentRideDate())
+  );
 
   // Season-long totals (issue #157) alongside the existing single-night view
   // and the restored depth board (issue #171), shown as tabs so the panel's
@@ -533,7 +599,8 @@
   async function refreshLeague() {
     leagueBusy = true;
     try {
-      const [rows, season, roundList, gh, cfg, depthBoard, rank] = await Promise.all([
+      const rideDate = currentRideDate();
+      const [rows, season, roundList, gh, cfg, depthBoard, rank, serverBoon] = await Promise.all([
         fetchLatestStandings(build.seasonId),
         fetchSeasonStandings(build.seasonId),
         fetchRounds(build.seasonId),
@@ -541,7 +608,17 @@
         fetchLeagueConfig(),
         fetchTop(build.seasonId, 20),
         fetchRank(build.seasonId, seasonBest, seasonKills),
+        fetchMyPvpBoon(build.seasonId, rideDate),
       ]);
+      // The server copy of the pick wins when we have nothing locally — a
+      // reinstall, a cleared cache, or a silently-failed localStorage write
+      // (#180). It does NOT overwrite a local pick: a fetch that returns null
+      // is indistinguishable from a read failure by design, so letting it win
+      // would clear a good pick every time the network hiccuped.
+      if (myBoon === null && serverBoon !== null) {
+        myBoon = serverBoon;
+        saveBoonPick(build.seasonId, rideDate, serverBoon);
+      }
       standings = rows;
       seasonStandings = season;
       rounds = roundList;
@@ -631,6 +708,11 @@
   // ENEMY_POOL, not UNIT_DEFS — abilitySentence's summon case needs both.
   const ENEMY_DEFS: Record<string, UnitDef> = Object.fromEntries(ENEMY_POOL.map((e) => [e.id, e]));
 
+  // `allyFaint`/`allySummoned` hardcode "rat" here rather than taking `own`
+  // — no enemy currently has either trigger, but `abilitySentence` renders
+  // for both sides (issue #146), so this table alone would read backwards on
+  // an enemy card the day one does. `triggerText` below overrides both with
+  // the side-correct `own` before ever falling back to this table.
   const TRIGGER_WHEN: Record<string, string> = {
     startOfBattle: 'At the start of the ride,',
     startOfWave: 'At the start of every wave,',
@@ -639,6 +721,7 @@
     allyFaint: 'Whenever a friendly rat faints,',
     allySummoned: 'Whenever a friendly rat is summoned,',
     onHurt: 'When a blow lands on it,',
+    whileAlive: 'While it lives,',
   };
 
   const TIME_OF_DAY_LABEL: Record<string, string> = {
@@ -660,6 +743,21 @@
   // matching the mechanic) before being removed entirely. If a unit ever
   // needs a description again, extend this function, not `UnitDef` — one
   // generator, one place to keep in sync with sim.ts.
+  //
+  // CONVENTION (ADR-0008, added after the 2026-08-10 Gutter Gourmand report):
+  // the generic path below builds every sentence as
+  // `${TRIGGER_WHEN[trigger]} it ${what}${when}.` — the trigger's literal
+  // firing cadence glued onto the effect. That's only honest when the effect
+  // fires EVERY time its trigger condition is met. The moment an effect
+  // gates its own firing tighter than that (fire-once, phase-based, capped,
+  // or conditioned on board state the trigger name doesn't capture), the
+  // generic preamble overpromises a recurrence that never happens. When that's
+  // true, skip the switch below and add a bespoke `if (e.kind === '…') return
+  // …` branch above it instead — lead with what actually happens, not the
+  // trigger frame. `chargeWhileBenched`, `poisonResist`, `blockFrontHits`,
+  // `distributeStatsOnFaint`, and `teamBuffByWave` all do this already; treat
+  // it as the default question to ask before wiring a NEW effect kind through
+  // the generic switch, not just a fix applied after the fact.
 
   // Shared per-star blurb builder: `mult(t)` is the per-tier stat multiplier,
   // which differs by effect (the 3x `tierAttackMultiplier` curve for fire-once
@@ -773,7 +871,12 @@
       // Bespoke sentence (not the generic template below): the shared-budget
       // caveat (issue #131) doesn't fit the `${TRIGGER_WHEN} it ${what}` shape
       // without an awkward bolt-on clause, same reasoning as chargeWhileBenched.
-      return `When it faints, splits its current attack and max health evenly across the surviving horde (any remainder goes to the frontmost survivors first). All your Pack-Callers draw from one shared pool for this, spent across the ride.`;
+      // "the surviving ${team}" / "every ${def.name} on this side" rather than
+      // a hardcoded "horde"/"your Pack-Callers" (only Pack-Caller uses this
+      // kind today, but the sim's own budget is already keyed by `source.side`
+      // generically — see the `distributeStatsOnFaint` case in sim.ts — so
+      // nothing here should assume horde-only either).
+      return `When it faints, splits its current attack and max health evenly across the surviving ${team} (any remainder goes to the frontmost survivors first). Every ${def.name} on this side draws from one shared pool for this, spent across the ride.`;
     }
     if (e.kind === 'poisonResist') {
       // Bespoke sentence (not the generic trigger template below): it's a
@@ -783,6 +886,29 @@
       // "ward, not antidote" caveat too (Jesper, 2026-08-01) — the cap
       // number already says it's partial.
       return `Wards the whole ${team} against poison, blunting every tick by ${poisonResistForTier(1)} (★2 ${poisonResistForTier(2)} · ★3 ${poisonResistForTier(3)}), capped at ${POISON_RESIST_CAP} across multiple casters.`;
+    }
+    if (e.kind === 'teamBuffByWave') {
+      // Bespoke sentence (not the generic trigger/template below): the
+      // generic `${TRIGGER_WHEN['startOfWave']} it ${what}` shape reads "At
+      // the start of every wave, it grants..." — true of the TRIGGER, but
+      // false of the EFFECT. `source.waveBuffPhase` (see sim.ts's
+      // `teamBuffByWave` case) fires this at most twice ever per unit
+      // instance, not every wave; the generic preamble told players to
+      // expect a recurring per-wave grant that never comes (reported
+      // 2026-08-10 against Gutter Gourmand — "nothing happens at the start
+      // of every wave"). Same class of fix as chargeWhileBenched/
+      // poisonResist/blockFrontHits above: when an effect gates its own
+      // firing tighter than its trigger's literal cadence, lead with what
+      // actually happens instead of the trigger frame.
+      return `Grants the whole ${team} ${buffScale(e.early.attack, e.early.health)} on its first wave, plus ${buffScale(e.late.attack, e.late.health)} more from wave ${e.switchWave} onward — both one-time and permanent for the rest of the ride.`;
+    }
+    if (e.kind === 'poisonFrontEnemyWhileAlive') {
+      // Bespoke sentence (not the generic trigger template below): the
+      // refresh-not-stack + "follows whichever enemy is currently at the
+      // front" + "stops applying once it falls but doesn't strip poison
+      // already there" nuance doesn't fit the plain `${TRIGGER_WHEN} it
+      // ${what}` shape, same reasoning as poisonResist/backlineDamage above.
+      return `While it's alive, keeps the frontmost ${foe} rotting at ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) — a refresh each clash tick, not a stack, so it never climbs past that, and it follows whichever ${foe} is currently at the front. Stops topping up once it falls, though poison already on a target doesn't fade with it.`;
     }
     if (e.kind === 'backlineDamage') {
       // Merge scaling grows target count, not per-hit damage (issue #86
@@ -851,7 +977,11 @@
       case 'poisonTarget':
         // Flat `stacks * tier`, NOT poisonStacksForTier — mirrors sim.ts's
         // (flagged-but-live) exemption for this one effect, so the numbers
-        // shown match what the sim actually applies.
+        // shown match what the sim actually applies. "clears entirely when
+        // the wave falls" added alongside the decay clause (was missing
+        // before even though the mechanic was always there — waveClear's
+        // antidote loop clears every horde-side poison source alike, not
+        // just poisonFrontEnemy's).
         what = `applies ${e.stacks} poison (★2 ${e.stacks * 2} · ★3 ${e.stacks * 3}) to whatever it just struck`;
         break;
       case 'gainStats':
@@ -878,9 +1008,6 @@
         break;
       case 'poisonAllEnemies':
         what = `rots every ${foe} in the wave with ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) — ignores armor, clears when the wave falls, capped across multiple casters`;
-        break;
-      case 'teamBuffByWave':
-        what = `grants the whole ${team} ${buffScale(e.early.attack, e.early.health)} on its first wave, plus ${buffScale(e.late.attack, e.late.health)} more from wave ${e.switchWave} onward — both permanent for the rest of the ride`;
         break;
       case 'buffSummoned':
         // [1, 3, 5] per-star curve (2026-07-25 bump) — the trigger repeats
@@ -909,11 +1036,18 @@
       : '';
     // startOfBattle reads "at the start of the ride" for the persistent horde
     // (fires once), but enemies are re-instantiated every wave, so for them it
-    // fires each wave — say so (issue #146 finding #2).
+    // fires each wave — say so (issue #146 finding #2). allyFaint/allySummoned
+    // get the same side-override treatment, but for the "rat" hardcoded into
+    // TRIGGER_WHEN rather than the cadence — no enemy has either trigger yet,
+    // but nothing should have to remember to fix this table when one does.
     const triggerText =
       isEnemy && def.ability.trigger === 'startOfBattle'
         ? 'At the start of each wave,'
-        : TRIGGER_WHEN[def.ability.trigger];
+        : def.ability.trigger === 'allyFaint'
+          ? `Whenever a friendly ${own} faints,`
+          : def.ability.trigger === 'allySummoned'
+            ? `Whenever a friendly ${own} is summoned,`
+            : TRIGGER_WHEN[def.ability.trigger];
     const abilityPart = `${triggerText} it ${what}${when}.`;
     return armorSentence ? `${abilityPart} ${armorSentence}` : abilityPart;
   }
@@ -1938,6 +2072,40 @@
       Your horde duels every rival's at <strong>22:00 CET</strong> — one board does both jobs, riding the drains for scrap by day and fighting the duel at night. Points: <strong>win 2 · draw 1 · loss 0</strong> the first two days, <strong>win 3</strong> after — against each rival, summed. Monday wipes the table.
     </p>
 
+    {#if todaysBoons.length > 0}
+      <div class="boons">
+        <p class="lg-caption">dawn's offer · one rat's favour, until the next dawn</p>
+        <ul class="boon-list">
+          {#each todaysBoons as b (b.id)}
+            {@const chosen = myBoon === b.id}
+            <li>
+              <button
+                class="boon-card"
+                class:chosen
+                aria-pressed={chosen}
+                disabled={boonRoundClosed}
+                onclick={() => pickBoon(chosen ? null : b.id)}
+              >
+                <span class="boon-head">
+                  <span class="boon-name">{b.name}</span>
+                  {#if chosen}<span class="boon-tag">chosen</span>{/if}
+                </span>
+                <span class="boon-blurb">{b.blurb}</span>
+              </button>
+            </li>
+          {/each}
+        </ul>
+        <p class="boon-foot">
+          {boonRoundClosed
+            ? 'tonight’s ride is done — the next offer comes at dawn'
+            : myBoon === null
+              ? 'take one, or ride without — change it until 22:00'
+              : 'change it until the ride, 22:00'}
+        </p>
+        <p class="boon-foot boon-foot-dim">no rival sees your choice until the duel is fought</p>
+      </div>
+    {/if}
+
     <div class="lg-tabs" role="tablist">
       <button
         class="lg-tab"
@@ -2055,15 +2223,19 @@
       {:else}
         <ul class="scout-list">
           {#each ghosts as g (g.player_id)}
-            {@const open = scoutedGhost === g.player_id}
+            {@const summary = scoutSummary(g.board)}
+            {@const open = scoutLevel === 'deep' && scoutedGhost === g.player_id}
             <li class="scout-item">
               <button
                 class="scout-row"
-                aria-expanded={open}
+                aria-expanded={scoutLevel === 'deep' ? open : undefined}
+                disabled={scoutLevel === 'basic'}
                 onclick={() => (scoutedGhost = open ? null : g.player_id)}
               >
                 <span class="scout-name">{g.name}</span>
-                <span class="scout-count">{g.board.units.length} rats {open ? '▾' : '▸'}</span>
+                <span class="scout-count">
+                  {summary.unitCount} rats · {summary.totalStars}★{scoutLevel === 'deep' ? (open ? ' ▾' : ' ▸') : ''}
+                </span>
               </button>
               {#if open}
                 {#if g.board.units.length === 0}
@@ -3882,6 +4054,94 @@
     color: var(--ink-soft);
   }
 
+  .boons {
+    margin: 10px 0 4px;
+  }
+
+  .boon-list {
+    list-style: none;
+    margin: 6px 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  /* Stacked, never a three-across row: at phone width three columns give ~100px
+     each and tap targets below the 44px floor. */
+  .boon-card {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: 100%;
+    min-height: 44px;
+    padding: 9px 10px;
+    font-family: inherit;
+    text-align: left;
+    background: var(--surface);
+    border: 1px solid var(--edge-faint);
+    border-radius: 8px;
+    color: var(--ink);
+    cursor: pointer;
+  }
+
+  .boon-card.chosen {
+    background: var(--surface-raised);
+    border-color: var(--brass);
+  }
+
+  .boon-card:disabled {
+    cursor: default;
+    border-color: var(--edge-faint);
+    color: var(--ink-dim);
+  }
+
+  .boon-head {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+
+  .boon-name {
+    font-size: 14px;
+    color: var(--ink-bright);
+  }
+
+  .boon-card:disabled .boon-name {
+    color: var(--ink-dim);
+  }
+
+  .boon-tag {
+    margin-left: auto;
+    flex: 0 0 auto;
+    font-size: 10px;
+    color: var(--brass);
+    border: 1px solid var(--edge);
+    border-radius: 4px;
+    padding: 1px 5px;
+  }
+
+  .boon-blurb {
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--ink-soft);
+  }
+
+  .boon-card:disabled .boon-blurb {
+    color: var(--ink-faint);
+  }
+
+  .boon-foot {
+    margin: 8px 0 0;
+    font-size: 11px;
+    color: var(--ink-dim);
+  }
+
+  .boon-foot-dim {
+    margin-top: 3px;
+    color: var(--ink-faint);
+  }
+
   .scout {
     margin-top: 4px;
   }
@@ -3913,6 +4173,11 @@
     border: none;
     cursor: pointer;
     text-align: left;
+  }
+
+  .scout-row:disabled {
+    color: var(--ink);
+    cursor: default;
   }
 
   .scout-name {

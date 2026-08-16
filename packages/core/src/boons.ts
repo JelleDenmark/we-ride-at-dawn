@@ -1,0 +1,794 @@
+import { xorshift128 } from './prng';
+import { fnv1a } from './seed';
+import { BOARD_CAP } from './sim';
+import { weekdayFor } from './shop';
+import type { Lineup, LineupUnit } from './data/units';
+
+/**
+ * Daily PvP boons (issue #184, design bank in `docs/design/boons.md`).
+ *
+ * Every dawn, every player is offered the SAME three boons and picks ONE. The
+ * pick applies to that night's league round and nothing else. This module owns
+ * what the pool is and which three a given ride-date offers; it does not apply
+ * anything — the effects are read by the duel path in later phases.
+ *
+ * Four rules this module exists to enforce:
+ *
+ * 1. **Pure function of the ride-date.** Same derivation shape as
+ *    `anomalyFor(seasonId)` and `generateGauntlet`'s theme roll
+ *    (`xorshift128(fnv1a(...))`), so the day's offer is re-derivable anywhere
+ *    with no stored state and no server round-trip. Never wall-clock, never
+ *    per-account, never `Math.random`.
+ *
+ *    A day's offer reads the PREVIOUS day's offer too, to enforce the
+ *    no-consecutive-repeat rule (see `boonsFor`). Still pure and still
+ *    re-derivable from a bare date — the recursion is cut at each season
+ *    boundary, so it is bounded at six levels and never needs history.
+ *
+ *    This is what makes the offer ENFORCEABLE rather than merely shared: the
+ *    nightly job re-derives the trio and rejects a pick that wasn't on it, so
+ *    an edited client can't field a boon it was never offered. That check is
+ *    the only server-side authority in the whole boon path — the board itself
+ *    is client-trusted by design (see `validateBoard`'s note in pvp.ts).
+ *
+ * 2. **PvP-only.** A boon touches `simulateDuel` and nothing else: no gauntlet
+ *    effect, no economy effect, no shop effect. This is load-bearing, not
+ *    tidiness. A duel is ONE wave (see `duel.ts`), so a once-per-battle effect
+ *    has nothing to compound against and ADR-0003's compounding law is
+ *    structurally inapplicable — which is the entire reason combat boons can
+ *    ship at all. The moment a boon reaches the 45-wave gauntlet that argument
+ *    dies and the law applies in full.
+ *
+ * 3. **One end of a line, or the whole line — never an arbitrary slice.**
+ *    Positional boons read `units[0]` or `units[n - 1]` and nothing between.
+ *    They exist to invalidate an opponent's ORDERING, and ordering is the one
+ *    lever a player fully controls; a boon that could reach the middle would
+ *    make every slot need hedging, and the counter-play would collapse from
+ *    "protect your ends" into "field interchangeable rats". Stat boons carry
+ *    no such risk (they move nobody) and are not restricted to the ends. What
+ *    is ruled out for both is the arbitrary slice — neither cheap to reason
+ *    about nor free of reasoning, for no design gain.
+ *
+ * 4. **Insertion order is the roll order and is load-bearing. APPEND ONLY.**
+ *    Same rule as `ANOMALY_DEFS`, with one extra consequence worth knowing:
+ *    because the draw is keyed on the ride-date rather than the season, adding
+ *    an entry re-maps HISTORICAL days too, not just future ones. That is
+ *    harmless only because nothing re-derives a past day's trio — the duel
+ *    replay reveals each entrant's boon from the round's stored snapshot, and
+ *    `isBoonOffered` is only ever asked about the round currently being
+ *    scored. Do not add a caller that re-derives an old date's offer.
+ *
+ *    The no-consecutive-repeat rule sharpens this: a day's offer is drawn from
+ *    the pool MINUS yesterday's three, so a pool change now re-maps every
+ *    later day of that week as well, not just the day it lands on. Same
+ *    conclusion, wider blast radius — still fine because nothing re-derives
+ *    the past, and still a reason not to start.
+ */
+
+/**
+ * What a boon actually does. Nothing consumes this yet — phase 1 (#184) is
+ * plumbing only, and the duel-side application lands in later phases. It is
+ * defined now so the pool is authored against a real shape rather than a
+ * placeholder, and so adding the application is a pure read of data that
+ * already exists.
+ *
+ * Every magnitude below is a PLACEHOLDER. Numbers come from the `pvp:boons`
+ * measurement pass, not from this file — see #184's measurement section, and
+ * note that two entries (`silenceFront`, `deepScout`) resist a fixture sweep
+ * by construction and must not be tuned off it alone.
+ *
+ * `self` / `opponent` in each doc line is which board the effect reads, which
+ * is also the ordering it resolves in: buffs first, opponent-side positional
+ * manipulation LAST, so a displacement can push a buffed rat off the front but
+ * can never erase the buff (#184 rule 2).
+ */
+export type BoonEffect =
+  /** opponent — their `units[n - 1]` moves to `units[0]`. */
+  | { kind: 'dragBackToFront' }
+  /** opponent — their `units[0]` moves to `units[n - 1]`. */
+  | { kind: 'buryFrontToBack' }
+  /**
+   * self — a throwaway body is inserted at `units[0]`.
+   *
+   * Two things make this more than a chump block, both worth preserving when
+   * it is implemented. It eats the enemy front's FIRST-hit relic bonus:
+   * `firstAttackDone` is a per-unit flag that both `bonusOf` and
+   * `ignoresArmorOf` read, so Glass Shard's armour-ignoring opener gets spent
+   * on a worthless body. And it shifts the whole line back one, so an
+   * opponent's `dragBackToFront` pulls a different rat than they aimed at.
+   *
+   * The body must NOT count against `combatCap` (each duel board carries its
+   * own — see `simulateCore`'s cap split), or the boon is dead weight on a
+   * full board, which is most boards by midweek.
+   */
+  | { kind: 'decoyFront' }
+  /**
+   * opponent — their `units[0]` loses its ABILITY for the duel. Relics are
+   * untouched: a silenced rat keeps Marrow-Snap, keeps Glass Shard, and keeps
+   * Weeping Boil, which is a relic rather than a unit ability and so still
+   * detonates on death.
+   *
+   * Aimed at the front on purpose. `buffBehind` buffs the rats behind its
+   * caster, so its carrier wants to stand at or near the front for coverage —
+   * which is exactly where this lands, making it a reliable answer to
+   * position-dependent buffs. Whole-board grants (`teamBuff`,
+   * `teamBuffByWave`, `grantArmor { all: true }`) fire the same from any slot
+   * and are caught only if the player happened to lead with them. The
+   * counter-play that creates — don't lead with your team-buffer — costs
+   * something real, since a `buffBehind` carrier gives up reach by moving
+   * back.
+   */
+  | { kind: 'silenceFront' }
+  /** self — `units[0]` gains health. */
+  | { kind: 'frontHealth'; amount: number }
+  /**
+   * self — `units[n - 1]` gains attack.
+   *
+   * Must be applied as an `attackBuffs` grant rather than a raw `attack`
+   * write. The `backlineDamage` path sums base attack, relics, team attack and
+   * `attackBuffs` while deliberately excluding `tierAttackMultiplier`, so a
+   * raw write would silently fail to reach a backline attacker — the one
+   * board shape this boon is most obviously for.
+   */
+  | { kind: 'backAttack'; amount: number }
+  /** opponent — their `units[n - 1]` loses attack. */
+  | { kind: 'sapBackAttack'; amount: number }
+  /**
+   * self, client-only — reveals every rival's exact roster for the day.
+   *
+   * The single boon with no sim surface at all: it flips `scoutLevel` in the
+   * app from the basic aggregate to the exact-roster render path, which is
+   * already fully wired and dormant behind a hardcoded constant.
+   *
+   * It reveals ROSTERS, not other players' boon picks. Picks are secret until
+   * the round is scored, and keeping them secret from this boon too is what
+   * keeps the pick layer a clean simultaneous reveal for everyone.
+   */
+  | { kind: 'deepScout' }
+  /**
+   * self — the first N incoming attacks on this side are absorbed whole.
+   *
+   * Adopts orphaned plumbing rather than adding any: Ward-Weaver moved to
+   * `grantArmor` on 2026-07-24 and left `blockFrontHits` with its per-side
+   * `blockCharges` pool, its `shieldAbsorbed` event and its replay rendering
+   * wired with zero users. The `Math.max` cap-not-sum rule on that pool exists
+   * to stop a stack of casters and is irrelevant to a single, non-stackable
+   * source, so this seeds the pool directly.
+   */
+  | { kind: 'blockHits'; hits: number }
+  /**
+   * self — the first unit summoned during the duel is summoned twice.
+   *
+   * The only entry here that is a trigger modifier rather than a pre-sim
+   * transform, so it is the only one that needs a once-per-battle flag (the
+   * `raised` pattern) and the only one that lands on the summon-cap coupling
+   * from #105/#148. Per ADR-0007's note on `simulate`-touching content, it
+   * ships with a `compounding-law.test.ts` canary as the price of admission.
+   *
+   * Worthless to a board with no summoner. That is accepted rather than
+   * designed around (Jesper, 2026-08-12): a player holding no summoner picks
+   * one of the other two. Offers are NOT filtered per board — filtering would
+   * cost rule 1's derived offer and the server-side check that rides on it.
+   */
+  | { kind: 'echoFirstSummon' }
+  /**
+   * opponent, whole line — every unit loses `amount` flat armor
+   * (`damageReduction`), floored at 0 per unit.
+   *
+   * The counter to stacked flat-armor grants (Ward-Weaver, Filth Totem)
+   * that nothing else in the game answers. Unlike Silence it cannot be
+   * dodged by standing somewhere else — the whole board is read, not one
+   * end — which is the entire point: the grants worth answering are
+   * precisely the ones that ignore position, so the answer has to as well.
+   * Permitted by the targeting principle as a whole-line stat write, the
+   * same category `frontHealth`/`backAttack`/`sapBackAttack` already are.
+   */
+  | { kind: 'sapArmorAll'; amount: number }
+  /**
+   * opponent — summon headroom (their `combatCap` above however many rats
+   * they actually deployed) cut to `headroom` for the duel, never raised.
+   *
+   * Echo amplifies summoning and nothing in the pool opposes it, while
+   * summoners are the most-fielded board shape of both leagued seasons —
+   * this is that missing half. A cap READ, not a slice, so the targeting
+   * principle's end-vs-whole-line distinction does not apply to it. Worth
+   * nothing against a board with no summoner, same accepted shape as Echo:
+   * offers are not board-filtered.
+   */
+  | { kind: 'capSummonHeadroom'; headroom: number }
+  /**
+   * self, whole line — flat poison negation for the duel.
+   *
+   * Adopts orphaned plumbing rather than adding any: `poisonResistApplied`
+   * is already a per-side, per-wave, cap-not-sum budget (Gutter-Acolyte's
+   * `poisonResist`), so this seeds that same pool instead of reimplementing
+   * it. Doubles as the free-of-body-cost probe issue #155 never ran: it
+   * isolates whether the RESIST is too weak from whether the ACOLYTE's body
+   * is too weak, which no prior change could tell apart.
+   */
+  | { kind: 'poisonNegation'; amount: number }
+  /**
+   * opponent — their `units[0]` loses its EQUIPPED UNIT RELICS for the
+   * duel. Team relics are untouched.
+   *
+   * Relics are unconditional picks on a mature board, and nothing in the
+   * pool denies one. Silence deliberately leaves relics alone (a silenced
+   * rat keeps Marrow-Snap, Glass Shard, Weeping Boil), so this opens the
+   * denial axis Silence stops short of — the two read as a deliberate pair
+   * rather than a redundant one.
+   */
+  | { kind: 'stripRelics' }
+  /**
+   * self — `units[0]` resolves its opening blow before the return, on the
+   * wave's first clash tick only.
+   *
+   * The clash is normally simultaneous, so a 9/1 and a 1/9 trade
+   * identically — both die. This makes attack a DEFENSIVE stat for one
+   * tick, a genuinely new axis rather than more of the existing one, and a
+   * structural counter to 1-attack swarm bodies. A duel is one wave, so
+   * this is bounded to a single clash by construction — the clearest case
+   * yet of the boon layer shipping something the 45-wave gauntlet could not
+   * safely hold. Both sides picking it cancels out rather than compounding,
+   * which is what keeps an identical mirror board a draw.
+   */
+  | { kind: 'firstBlood' };
+
+export interface BoonDef {
+  id: string;
+  /** Shown on the choice card and, after the round, in the duel replay. */
+  name: string;
+  /**
+   * One declarative sentence, present tense, game voice.
+   *
+   * This is the ONLY player-facing explanation a boon ever gets — there is no
+   * rules panel and no tooltip. So it must carry the MECHANIC, not just
+   * atmosphere: which end of which line, and what happens to it. Same lesson
+   * `ANOMALY_DEFS` records the hard way (its pure-flavour launch trio read as
+   * "different flavor text" and was deleted), and the same reason Grown Past
+   * Use's blurb was rewritten to state its rule outright.
+   *
+   * No numbers in the blurb. Magnitudes are placeholders until the measurement
+   * pass, and copy that hardcodes them goes stale silently.
+   */
+  blurb: string;
+  effect: BoonEffect;
+}
+
+/** How many boons a player chooses between each dawn. */
+export const BOONS_PER_DAY = 3;
+
+/**
+ * The pool. APPEND ONLY — see rule 4 above.
+ *
+ * Deliberately NOT here, recorded so they are not re-proposed (full reasoning
+ * in `docs/design/boons.md`):
+ *   - Rotating your own line by one. Strictly dominated by the board editor —
+ *     the player can already build in that order for free. This generalises:
+ *     a boon must do something the player cannot already do for nothing.
+ *   - Swapping the opponent's front two. Too small to notice, which is the
+ *     exact failure that got the original anomaly launch trio deleted on
+ *     2026-08-08 after it had already shipped.
+ *   - Reversing the opponent's whole line ("About Face"). Not rejected —
+ *     held. On any board of three or more it strictly dominates
+ *     `dragBackToFront`, and shipping both would make one of them dead.
+ *   - Granting the backline-damage path to your own rearmost rat ("Long
+ *     Knives"). Also held rather than rejected; good shape, held only to keep
+ *     the launch roster small.
+ */
+export const BOON_DEFS: Record<string, BoonDef> = {
+  drag: {
+    id: 'drag',
+    name: 'Dragged Forward',
+    blurb: "Your rival's hindmost rat is hauled to the front of their line.",
+    effect: { kind: 'dragBackToFront' },
+  },
+  buried: {
+    id: 'buried',
+    name: 'Buried',
+    blurb: "Your rival's leading rat is shoved to the back of their line.",
+    effect: { kind: 'buryFrontToBack' },
+  },
+  'a-body-first': {
+    id: 'a-body-first',
+    name: 'A Body First',
+    blurb: 'A runt takes the front of your line. It dies first, so nothing better does.',
+    effect: { kind: 'decoyFront' },
+  },
+  silence: {
+    id: 'silence',
+    name: 'Silence',
+    blurb: "Your rival's leading rat forgets its trick. Its charms still work.",
+    effect: { kind: 'silenceFront' },
+  },
+  bulwark: {
+    id: 'bulwark',
+    name: 'Bulwark',
+    blurb: 'Your leading rat takes the field heavier than it left the warren.',
+    effect: { kind: 'frontHealth', amount: 10 },
+  },
+  blunt: {
+    id: 'blunt',
+    name: 'Blunt',
+    blurb: "Your rival's hindmost rat comes to the fight with a dulled tooth.",
+    effect: { kind: 'sapBackAttack', amount: 14 },
+  },
+  rearguard: {
+    id: 'rearguard',
+    name: 'Rearguard',
+    blurb: 'Your hindmost rat sharpens up while it waits its turn.',
+    effect: { kind: 'backAttack', amount: 14 },
+  },
+  'deep-scout': {
+    id: 'deep-scout',
+    name: 'Deep Scout',
+    blurb: "You read every rival's line tonight, rat by rat.",
+    effect: { kind: 'deepScout' },
+  },
+  guardian: {
+    id: 'guardian',
+    name: 'Guardian',
+    blurb: 'The first blows against your line land on nothing at all.',
+    effect: { kind: 'blockHits', hits: 2 },
+  },
+  /**
+   * Rust through First Blood below: the 2026-08-12 roster-dimensionality
+   * pass (docs/design/boons.md's Ideas section, issue #181/#182's "one axis"
+   * diagnosis), promoted to the live pool 2026-08-15 (owner call, Jesper) on
+   * the strength of the 2026-08-14 `pvp:boons` pass — no dominance violation
+   * on any of three seeds, either direction. That pass did NOT include a
+   * magnitude sweep, and found Barren/Stripped/First Blood read exactly like
+   * Echo did on its first, condition-free population (conditional by design,
+   * so a general population undersells them). Promoted anyway, deliberately
+   * ahead of that follow-up work — see the design bank for the full
+   * measurement writeup and the still-open magnitude question.
+   */
+  rust: {
+    id: 'rust',
+    name: 'Rust',
+    blurb: "Your rival's whole line takes the field with its guard down.",
+    effect: { kind: 'sapArmorAll', amount: 4 },
+  },
+  barren: {
+    id: 'barren',
+    name: 'Barren',
+    blurb: "Your rival's warren has no room left to call up more rats.",
+    effect: { kind: 'capSummonHeadroom', headroom: 1 },
+  },
+  antidote: {
+    id: 'antidote',
+    name: 'Antidote',
+    blurb: 'Your line shrugs off poison that would have felled it.',
+    effect: { kind: 'poisonNegation', amount: 3 },
+  },
+  stripped: {
+    id: 'stripped',
+    name: 'Stripped',
+    blurb: "Your rival's leading rat marches out with its trinkets confiscated.",
+    effect: { kind: 'stripRelics' },
+  },
+  'first-blood': {
+    id: 'first-blood',
+    name: 'First Blood',
+    blurb: 'Your leading rat lands its strike before anything can answer.',
+    effect: { kind: 'firstBlood' },
+  },
+};
+
+/**
+ * HELD OUT OF THE POOL, not deleted (issue #184).
+ *
+ * Echo measured dead on two independent populations: 2 of 90 duels improved on
+ * summoner boards under seed `boon-matrix-v1`, 3 of 210 under
+ * `alt-population-2`, with every percentile at zero. It is conditional by
+ * design, which was accepted — but conditional was supposed to mean "strong
+ * when it applies", and one extra body in a ONE-WAVE duel almost never flips a
+ * result even on the boards built for it.
+ *
+ * Shipping it anyway would repeat the 2026-08-08 anomaly cull exactly: content
+ * too small to notice, carried for a season, then deleted. The implementation
+ * stays (it is tested, including its compounding-law canary) so restoring it is
+ * moving this entry back into BOON_DEFS above. What it needs first is a reason
+ * to be worth a pick — a magnitude knob, or a bigger effect than one body.
+ */
+export const HELD_BOONS: Record<string, BoonDef> = {
+  echo: {
+    id: 'echo',
+    name: 'Echo',
+    blurb: 'The first rat your warren calls up answers twice.',
+    effect: { kind: 'echoFirstSummon' },
+  },
+};
+
+/**
+ * The first ride-date that offers boons. Compared as a string, which is safe
+ * because ride-dates are zero-padded `YYYY-MM-DD` (`currentRideDate`).
+ *
+ * Set to the 2026-08-17 season reset (was a far-future sentinel while the
+ * effects were being built). Every boon in the pool above applies and has
+ * tests. Nine were measured by `pvp:boons` before shipping; the five added
+ * 2026-08-15 (Rust through First Blood) were promoted off a directional pass
+ * only — no dominance violation, but no magnitude sweep and three of the
+ * five read exactly like Echo did before its own summoner-only population —
+ * see `docs/design/boons.md`'s measurement section for the full story.
+ *
+ * NOTE this only makes boons live on whichever channel ships it. The nightly
+ * job runs on the DEFAULT branch, so nothing reaches players until dev is
+ * merged to master — that merge is the real go-live, and the Supabase
+ * migration must already be applied when it happens.
+ *
+ * Boons launch on a season reset rather than mid-week, deliberately. League
+ * points accumulate across the week, so introducing a new rule on day 5 makes
+ * the standings at either end of one season mean different things.
+ */
+export const BOON_FIRST_DATE = '2026-08-17';
+
+/** The ride-date before `rideDate`. Noon UTC for the same reason `shop.ts`
+ * uses it: it keeps the arithmetic clear of any DST or timezone edge. */
+function previousDate(rideDate: string): string {
+  const d = new Date(`${rideDate}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * The three boons offered on `rideDate` — identical for every player, derived,
+ * never stored.
+ *
+ * Returns an empty array before `BOON_FIRST_DATE`, which is what makes the
+ * feature dormant by construction rather than by a flag someone can forget.
+ *
+ * The draw is a partial Fisher-Yates over pool INDICES, which gives three
+ * distinct boons (a naive three-times-`int(len)` would let a day offer the
+ * same boon twice) while touching the rng exactly `BOONS_PER_DAY` times, so
+ * the sequence stays stable if `BOONS_PER_DAY` ever changes.
+ *
+ * **No boon repeats on consecutive days within a season.** An independent
+ * daily draw clusters harder than it reads: at 14 entries a boon recurs the
+ * very next day about two-thirds of the time, and the launch week as first
+ * derived offered Silence — the pool's strongest entry, and the one with no
+ * magnitude knob to tune it with — on three consecutive days. A player who
+ * sees the same card three dawns running is not being offered a rotation.
+ *
+ * The exclusion is the PREVIOUS DAY'S OFFER, which keeps rule 1 intact: this
+ * is still a pure function of the ride-date, just one that reads one day
+ * further back. It stays cheap and terminating because the chain is cut at
+ * every season boundary — expedition day 1 (Monday, per `weekdayFor`) always
+ * draws from the full pool, so recursion is bounded at six levels and never
+ * walks back to `BOON_FIRST_DATE`.
+ *
+ * Cutting at the boundary rather than chaining indefinitely does mean the
+ * Sunday→Monday pair can repeat a boon. That is the right seam to spend: a
+ * season reset already changes everything else about the week, so a boon
+ * carrying over reads as a new week rather than as a stuck card, and the
+ * alternative is a recursion whose depth grows without bound as the calendar
+ * advances.
+ */
+export function boonsFor(rideDate: string): BoonDef[] {
+  if (rideDate < BOON_FIRST_DATE) return [];
+  const all = Object.values(BOON_DEFS);
+  if (all.length <= BOONS_PER_DAY) return all.slice();
+
+  // Day 1 of a season draws from everything; every later day drops whatever
+  // yesterday offered. Guarded on pool size so a shrunken pool degrades to the
+  // unfiltered draw rather than running out of entries to offer.
+  const canFilter = all.length >= BOONS_PER_DAY * 2;
+  const excluded =
+    canFilter && weekdayFor(rideDate) !== 1
+      ? new Set(boonsFor(previousDate(rideDate)).map((b) => b.id))
+      : new Set<string>();
+  const pool = excluded.size > 0 ? all.filter((b) => !excluded.has(b.id)) : all;
+
+  const rng = xorshift128(fnv1a(`${rideDate}#boons`));
+  const order = pool.map((_, i) => i);
+  for (let i = 0; i < BOONS_PER_DAY; i++) {
+    const j = i + rng.int(order.length - i);
+    const swap = order[i];
+    order[i] = order[j];
+    order[j] = swap;
+  }
+  return order.slice(0, BOONS_PER_DAY).map((i) => pool[i]);
+}
+
+/**
+ * Was `boonId` on `rideDate`'s menu? The server-side authority over a
+ * submitted pick — the nightly job asks this before honouring one, so a client
+ * cannot field a boon it was never offered.
+ *
+ * Only ever ask about the round being scored. Re-deriving an old date's offer
+ * is not sound once the pool has grown (rule 4); a past round's actual picks
+ * live in its stored snapshot, which is also what the duel replay reveals.
+ *
+ * A null/absent pick is legal everywhere — not picking is a valid state and
+ * means no boon, never an auto-pick (#184 rule 7).
+ */
+export function isBoonOffered(rideDate: string, boonId: string | null | undefined): boolean {
+  if (boonId === null || boonId === undefined) return true;
+  return boonsFor(rideDate).some((b) => b.id === boonId);
+}
+
+/**
+ * The body A Body First shoves to the front.
+ *
+ * Gutter Runt rather than a bespoke def: it is already exactly 1/1 and
+ * abilityless, it already has art, and it was retired from the shop pool
+ * outright (issue #109, `retireDay: 1`) — so nobody can buy one, and seeing
+ * one lead a line is itself a signal that something unusual happened. Reusing
+ * a retired rat as the body the warren throws away is also the truer reading
+ * of the boon than minting a new rat for the job.
+ *
+ * Note this is a cost-2 unit, so unlike a cost-0 summon body `validateBoard`
+ * will ACCEPT it on a submitted board. That is not a new hole: the validator
+ * deliberately checks structural legality and not affordability (see its doc
+ * comment), so a hand-edited payload could already field eight ★3 rats. A
+ * free 1/1 is not the exploit worth closing.
+ */
+export const DECOY_DEF_ID = 'gutter-runt';
+
+/**
+ * Which side an effect reads. Self-effects touch the picker's own board;
+ * opponent-effects touch the board across the table.
+ */
+function isSelfEffect(e: BoonEffect): boolean {
+  switch (e.kind) {
+    case 'dragBackToFront':
+    case 'buryFrontToBack':
+    case 'silenceFront':
+    case 'sapBackAttack':
+    case 'sapArmorAll':
+    case 'capSummonHeadroom':
+    case 'stripRelics':
+      return false;
+    default:
+      return true;
+  }
+}
+
+/** Shallow-copies the entry at `index` and hands it to `patch`. Never mutates
+ * the caller's Lineup — `scoreRound` reuses the same board object across every
+ * duel of a round, so an in-place write would leak a boon into the next fight. */
+function patchUnit(
+  lineup: Lineup,
+  index: number,
+  patch: (u: LineupUnit) => LineupUnit
+): Lineup {
+  const units = lineup.units.slice();
+  if (index < 0 || index >= units.length) return lineup;
+  units[index] = patch({ ...units[index] });
+  return { ...lineup, units };
+}
+
+/** Moves the unit at `from` to `to`, preserving the order of everything else. */
+function moveUnit(lineup: Lineup, from: number, to: number): Lineup {
+  const units = lineup.units.slice();
+  if (units.length < 2) return lineup;
+  const [moved] = units.splice(from, 1);
+  units.splice(to, 0, moved);
+  return { ...lineup, units };
+}
+
+/**
+ * What a boon did to a board, in enough detail for the duel replay to SHOW it
+ * rather than merely name it.
+ *
+ * Pre-sim transforms emit no `BattleEvent`s — that is the whole point, and it
+ * is what keeps boons out of `simulateCore` — so without this the replay has
+ * no way to explain itself. It renders the board as already-rearranged, which
+ * reads as the player having placed their rats that way, and a stripped
+ * ability reads as nothing at all. These notes let the replay play a scripted
+ * pre-battle beat off the transform's own account of itself, before the event
+ * log begins, with the sim still untouched.
+ *
+ * Indices are positions in the board AFTER that step ran, so a renderer can
+ * point at the rat it is talking about.
+ */
+export type BoonNoteDetail =
+  | { kind: 'move'; defId: string; from: number; to: number }
+  | { kind: 'insert'; defId: string; index: number }
+  | { kind: 'stat'; defId: string; index: number; attack: number; health: number }
+  | { kind: 'silence'; defId: string; index: number }
+  /** Rust — whole line, not one rat, so no single index to point at. */
+  | { kind: 'lineArmor'; amount: number }
+  /** Stripped — same shape as `silence`, different rat/kind. */
+  | { kind: 'strip'; defId: string; index: number };
+
+export type BoonNote = {
+  /** Which seat's pick caused this. */
+  by: 'a' | 'b';
+  boonId: string;
+  /** Which seat's board it changed — the same seat for a self effect. */
+  target: 'a' | 'b';
+} & BoonNoteDetail;
+
+// The detail union is named rather than inlined because the transforms below
+// return it on its own, and `Omit<BoonNote, ...>` cannot express that: Omit
+// over a union collapses it to the keys every member shares, silently
+// discarding `index`, `from` and `to`. That compiles clean under vitest and
+// vite (both strip types without checking them) and only fails under `tsc`.
+
+/** Apply one boon to the board of the player who picked it. */
+function applySelf(lineup: Lineup, e: BoonEffect): { lineup: Lineup; note?: BoonNoteDetail } {
+  const last = lineup.units.length - 1;
+  switch (e.kind) {
+    case 'frontHealth': {
+      if (lineup.units.length === 0) return { lineup };
+      const out = patchUnit(lineup, 0, (u) => ({ ...u, boonHealth: (u.boonHealth ?? 0) + e.amount }));
+      return {
+        lineup: out,
+        note: { kind: 'stat', defId: out.units[0].defId, index: 0, attack: 0, health: e.amount },
+      };
+    }
+    case 'backAttack': {
+      if (last < 0) return { lineup };
+      const out = patchUnit(lineup, last, (u) => ({ ...u, boonAttack: (u.boonAttack ?? 0) + e.amount }));
+      return {
+        lineup: out,
+        note: { kind: 'stat', defId: out.units[last].defId, index: last, attack: e.amount, health: 0 },
+      };
+    }
+    case 'decoyFront': {
+      // The decoy must not eat a combat-cap slot, or the boon is dead weight
+      // on a full board — which is most boards by midweek. Each duel side
+      // carries its own cap (see simulateCore), so raising this one by exactly
+      // the body we added keeps the picker's real capacity untouched.
+      const cap = (lineup.combatCap ?? BOARD_CAP) + 1;
+      return {
+        lineup: { ...lineup, units: [{ defId: DECOY_DEF_ID }, ...lineup.units], combatCap: cap },
+        note: { kind: 'insert', defId: DECOY_DEF_ID, index: 0 },
+      };
+    }
+    case 'blockHits':
+      return { lineup: { ...lineup, boonBlockHits: (lineup.boonBlockHits ?? 0) + e.hits } };
+    case 'echoFirstSummon':
+      return { lineup: { ...lineup, boonEcho: true } };
+    case 'poisonNegation':
+      return { lineup: { ...lineup, boonPoisonResist: (lineup.boonPoisonResist ?? 0) + e.amount } };
+    case 'firstBlood':
+      return { lineup: { ...lineup, boonFirstBlood: true } };
+    default:
+      // deepScout is the only boon with no sim surface at all — it changes
+      // what the app renders, never what the fight does.
+      return { lineup };
+  }
+}
+
+/** Apply one boon to the board of the player who did NOT pick it. */
+function applyOpponent(lineup: Lineup, e: BoonEffect): { lineup: Lineup; note?: BoonNoteDetail } {
+  const last = lineup.units.length - 1;
+  switch (e.kind) {
+    case 'sapBackAttack': {
+      if (last < 0) return { lineup };
+      const out = patchUnit(lineup, last, (u) => ({ ...u, boonAttack: (u.boonAttack ?? 0) - e.amount }));
+      return {
+        lineup: out,
+        note: { kind: 'stat', defId: out.units[last].defId, index: last, attack: -e.amount, health: 0 },
+      };
+    }
+    case 'silenceFront': {
+      if (lineup.units.length === 0) return { lineup };
+      const out = patchUnit(lineup, 0, (u) => ({ ...u, boonSilenced: true }));
+      return {
+        lineup: out,
+        note: { kind: 'silence', defId: out.units[0].defId, index: 0 },
+      };
+    }
+    case 'dragBackToFront': {
+      if (lineup.units.length < 2) return { lineup };
+      const defId = lineup.units[last].defId;
+      return { lineup: moveUnit(lineup, last, 0), note: { kind: 'move', defId, from: last, to: 0 } };
+    }
+    case 'buryFrontToBack': {
+      if (lineup.units.length < 2) return { lineup };
+      const defId = lineup.units[0].defId;
+      return { lineup: moveUnit(lineup, 0, last), note: { kind: 'move', defId, from: 0, to: last } };
+    }
+    case 'sapArmorAll': {
+      if (lineup.units.length === 0) return { lineup };
+      return {
+        lineup: { ...lineup, boonArmorLoss: (lineup.boonArmorLoss ?? 0) + e.amount },
+        note: { kind: 'lineArmor', amount: e.amount },
+      };
+    }
+    case 'capSummonHeadroom': {
+      // Cuts headroom, never raises it — `Math.min` against whatever the
+      // board already declared (see `combatCapForBuild`: a real board is
+      // `units.length + COMBAT_CAP_BONUS`), same "never a buff in disguise"
+      // shape as every other negative grant in this file.
+      const current = lineup.combatCap ?? BOARD_CAP;
+      const capped = Math.min(current, lineup.units.length + e.headroom);
+      return { lineup: { ...lineup, combatCap: capped } };
+    }
+    case 'stripRelics': {
+      if (lineup.units.length === 0) return { lineup };
+      const out = patchUnit(lineup, 0, (u) => ({ ...u, boonRelicsStripped: true }));
+      return {
+        lineup: out,
+        note: { kind: 'strip', defId: out.units[0].defId, index: 0 },
+      };
+    }
+    default:
+      return { lineup };
+  }
+}
+
+/**
+ * Resolve both boards for a duel, applying each side's boon. THE one place the
+ * ordering rule lives — every caller goes through here so the client replay and
+ * the nightly job cannot disagree about what a fight looked like.
+ *
+ * Order, per #184 rule 2:
+ *   1. each side's SELF effect on its own board;
+ *   2. each side's OPPONENT effect on the other board.
+ *
+ * Buffs therefore land before any displacement, which is what makes a
+ * displacement able to push a buffed rat off the front without ever erasing
+ * the buff — the grant rides on the unit, not on the slot. A board takes at
+ * most one opponent effect (its opponent holds one boon), so step 2 has no
+ * internal ordering to resolve.
+ *
+ * Every read is a SNAPSHOT of the board as submitted (rule 3): `units[0]` and
+ * `units[n - 1]` are resolved against the line as it stands when that step
+ * runs, never against whoever happens to be front once the fight is moving.
+ *
+ * Pure — inputs are never mutated. That matters because `scoreRound` reuses
+ * one board object across every duel of a round-robin, so an in-place write
+ * would leak a boon into the next fight.
+ */
+export function boardsForDuel(
+  a: Lineup,
+  boonA: BoonEffect | null | undefined,
+  b: Lineup,
+  boonB: BoonEffect | null | undefined,
+  idA: string | null = null,
+  idB: string | null = null
+): { a: Lineup; b: Lineup; notes: BoonNote[] } {
+  const notes: BoonNote[] = [];
+  const record = (
+    by: 'a' | 'b',
+    boonId: string | null,
+    target: 'a' | 'b',
+    note: BoonNoteDetail | undefined
+  ): void => {
+    if (note) notes.push({ ...note, by, boonId: boonId ?? '', target } as BoonNote);
+  };
+
+  let outA = a;
+  let outB = b;
+
+  if (boonA && isSelfEffect(boonA)) {
+    const r = applySelf(outA, boonA);
+    outA = r.lineup;
+    record('a', idA, 'a', r.note);
+  }
+  if (boonB && isSelfEffect(boonB)) {
+    const r = applySelf(outB, boonB);
+    outB = r.lineup;
+    record('b', idB, 'b', r.note);
+  }
+  if (boonA && !isSelfEffect(boonA)) {
+    const r = applyOpponent(outB, boonA);
+    outB = r.lineup;
+    record('a', idA, 'b', r.note);
+  }
+  if (boonB && !isSelfEffect(boonB)) {
+    const r = applyOpponent(outA, boonB);
+    outA = r.lineup;
+    record('b', idB, 'a', r.note);
+  }
+
+  return { a: outA, b: outB, notes };
+}
+
+/**
+ * The effect a boon id names, or null for no pick / an unknown id.
+ *
+ * HELD boons resolve too, deliberately. They are finished, tested
+ * implementations that are merely not on offer, and being able to resolve one
+ * is what keeps its tests meaningful and its restoration a one-line move. It
+ * does not make a held boon playable: `isBoonOffered` gates on the day's
+ * derived menu, a held boon is never on it, and the nightly job refuses any
+ * pick that was not offered.
+ */
+export function boonEffect(boonId: string | null | undefined): BoonEffect | null {
+  if (!boonId) return null;
+  return (BOON_DEFS[boonId] ?? HELD_BOONS[boonId])?.effect ?? null;
+}

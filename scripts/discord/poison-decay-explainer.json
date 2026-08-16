@@ -1,0 +1,12 @@
+{
+  "embeds": [
+    {
+      "title": "🧪 poison decay, explained",
+      "description": "v0.8.0's patch notes mentioned it in one line — here's what it actually means for the two rats built around it.\n\n**Draughtsman Moe** and **Plague-Bearer** apply poison that now halves after every tick it deals damage, settling at a floor set by the single strongest dose you land — not a flat wall. Merge still matters: a ★3 lands a bigger dose, so it decays down to a bigger floor. A lone ward can blunt a tick, but can't zero the stack outright.\n\nSame fade applies in reverse when a Plague-Doctor or Midden-Hag rots one of yours.\n\nDay gate 2 dropped this morning — **Draughtsman Moe** (cost 8, plague) is sitting in the shop right now if you want to feel the new curve for yourself.",
+      "color": 5793266,
+      "footer": {
+        "text": "we ride at dawn · season resets monday 06:00 CET"
+      }
+    }
+  ]
+}
