@@ -173,7 +173,7 @@ positional is therefore an array permutation applied before `simulateCore` is ca
 the normal clash, so the backline path is skipped to avoid a double-dip. It fires at
 `startOfWave`, which is *inside* the sim and therefore after every pre-sim transform.
 So dragging a backline attacker to the front disables its ability outright and exposes
-its body. Two units carry it today: Slink-Rat and **MBP Rat** (`attack: 4, health: 1`),
+its body. Two units carry it today: Slink-Rat and **MBP Rat** (`attack: 3, health: 1`),
 which dies to the first clash tick once dragged.
 
 **A Body First eats first-hit relic bonuses.** `firstAttackDone` is a per-unit flag,
@@ -531,14 +531,138 @@ ever needs to resolve a fixed id it already knows about.
   different between the two, given blurbs currently carry no numbers and no
   day information.
 
+## The rotation: pool size, and the no-repeat rule (2026-08-16)
+
+Two of the open questions below are now answered, measured against the real
+`boonsFor` over 520 seasons (`pvp:boon-rotation`).
+
+**Pool size is not the lever, and 14 is already past the useful ceiling.** A
+season is 7 days x 3 offers = 21 slots, so the pool is bigger than one season
+can show. Under the old unfiltered draw a player saw 11.4 of 14 boons a
+season; growing the pool to 18 raises that to 12.9 but doubles what is never
+seen at all (2.7 -> 5.1). Adjacent-day repeats fall only 0.66 -> 0.50 for
+that. **Never add a boon for count. Only ever add one for coverage** — the
+roster-dimensionality argument below is the only admissible reason.
+
+**No boon repeats on consecutive days within a season (built).** An
+independent daily draw clusters much harder than it reads: at 14 entries a
+boon recurred the very next day two-thirds of the time, and launch week as
+first derived offered **Silence on three consecutive dawns** — the pool's
+strongest entry, and the one with no magnitude knob to tune it with. Three
+identical cards in four days is not a rotation, and it would have been the
+first thing players ever saw of the mechanic.
+
+`boonsFor` now draws from the pool minus yesterday's three. This keeps rule 1
+intact: still a pure function of the ride-date, just one that reads one day
+further back. **The chain is cut at each season boundary** — expedition day 1
+(Monday, `weekdayFor`) always draws from the full pool — which bounds the
+recursion at six levels instead of letting it walk back to `BOON_FIRST_DATE`
+and grow a level longer every day the calendar advances. The cost is that
+Sunday->Monday may repeat; that is the right seam to spend, since a reset
+already changes everything else about the week.
+
+Side effect worth having: distinct boons seen per season rose 11.4 -> 12.4,
+and launch week went from offering 11 of 14 to all 14.
+
+**A 2-day exclusion window was measured and rejected.** It zeroes gap-2
+repeats, but makes whole-trio repeats slightly WORSE (6.9% vs 6.5% of
+seasons) while narrowing the daily draw to 8 candidates. The residual — the
+same three cards twice in one week, which launch week does hit on 08-20 and
+08-22 — is a **pool-size artifact, not a rule artifact**, and the only thing
+that shrinks it is a bigger pool. Which loops back to: add for coverage.
+
+## Roster dimensionality: the empty quadrant (2026-08-16)
+
+Classifying the live 14 on two axes — which board a boon touches, and whether
+it needs a particular build to do anything — leaves one cell empty:
+
+| | works on anything | reads opponent's build | reads YOUR build |
+|---|---|---|---|
+| **self** | 5 | 2 (antidote, a-body-first) | **0** |
+| **opponent** | 1 (blunt) | 6 | 0 |
+
+**No boon rewards the board you built.** Opponent-side boons all read the
+rival's build — their abilities (Silence), relics (Stripped), summoners
+(Barren), armor (Rust), backline attacker (Drag). Self-side boons are all
+*mass*: a number, a body, a shield, a timing flip, applied identically
+whether you assembled a summon engine or seven Dire-Rats. So a pick makes you
+think about your rival's board and never about your own, which halves the
+strategic surface the mechanic could have.
+
+**Echo is the only entry ever authored in that empty cell** (self-side, needs
+a summoner) and it measured dead. That is a magnitude failure, not evidence
+the axis is bad — and it matches what this file already concluded, that
+restoring Echo needs "a magnitude knob, or a bigger effect than one body".
+
+Secondary one-sided axes, each a denial with no counterpart: armor (Rust saps,
+nothing grants — and armor scales with HIT COUNT, so it is the natural answer
+to swarm boards, which nothing addresses), poison (Antidote negates, nothing
+applies), summoning (Barren denies, Echo is held), information (Deep Scout
+reveals, nothing conceals).
+
+## A Body First: the design rationale was never on the evidence (2026-08-16)
+
+This boon exists largely to spend the enemy front's FIRST-HIT relic bonus
+(Glass Shard: +4 and ignores armor) on a worthless body. #186 already caught
+one fixture bug here — the first population handed out no relics at all — and
+recorded it as fixed once the population started handing out relics to about
+a third of units.
+
+**It was fixed in letter, not in substance.** A first-hit relic lands on a
+board's FRONT about 5% of the time (33% relic chance x 1 of 7 unit relics),
+and on the primary seed exactly **0 of 30 boards** have one. So the shipped
+`pvp:boons` row for A Body First measures its chump-body and line-shift
+effects only — never the mechanic it was designed around. Same shape as the
+original bug, one level down, and it survived because A Body First is a
+SHIPPING boon and the scrutiny went to the held ones.
+
+Given the field-C treatment (`pvp:boon-fields`, every front carrying Glass
+Shard) the rationale does hold — it improves on all three seeds:
+
+| field | a-body-first | echo |
+|---|---|---|
+| general population | +0.070 / +0.006 / +0.021 | +0.034 / +0.044 / +0.030 |
+| every front has Glass Shard | **+0.114 / +0.038 / +0.043** | +0.028 / +0.046 / +0.028 |
+| every board has a summoner | +0.018 / **−0.029 / −0.018** | +0.049 / +0.045 / +0.026 |
+
+Mean league points per duel, seeds `boon-matrix-v1` / `alt-population-2` /
+`boon-matrix-v3`.
+
+**Two findings that are not about magnitude:**
+
+- **A Body First goes NEGATIVE against summoner boards** on two of three
+  seeds, hurting 18-22 duels of 870. Mechanism NOT isolated — the two obvious
+  candidates both died on inspection (no duel in this population resolves by
+  survivor margin at all; `buffAdjacent` re-targeting is neutral for real
+  units because the shifted carrier keeps its original target and merely wastes
+  a second buff on the runt). A boon that is a trap against the most-fielded
+  board shape of both leagued seasons is a worse problem than a weak boon.
+  Open.
+- **It is not board-agnostic, and the roster table above reflects that.** Its
+  upside is conditional on the opponent's front carrying a first-hit relic and
+  its downside on the opponent having summoners, so it belongs in "reads
+  opponent's build" alongside Antidote, not in the reliable self-side column.
+
+**Versus Echo, since the two look alike on paper (both "one extra body"):**
+they are not the same shape. Echo is tiny but strictly non-negative — it hurts
+0-4 duels of 870, ever. A Body First swings both ways and can genuinely cost
+the duel. Echo's failure is "never worth the pick"; A Body First's risk is
+"sometimes the wrong pick", which is the more dangerous of the two because it
+punishes a player for engaging with the mechanic.
+
 ## Open
 
 - The Silence marker on the board render (see the replay section above) — the
   last unbuilt piece.
-- How large the pool needs to be before the daily rotation reads as a rotation rather
-  than a near-fixed trio.
-- Whether the trio should avoid repeating a boon on adjacent days (the Slay the Spire
-  rule, cited in #165's design refresh).
+- **Why A Body First goes negative against summoner boards** (see above).
+  Unexplained, reproducible on two of three seeds.
+- Whether Barren/Stripped/First Blood look different under `pvp:boon-fields`
+  the way A Body First did — the tool now exists, the pass has not been run.
+- **Coverage, not count: the empty self-side/reads-your-own-build quadrant.**
+  Two or three entries there (an ability re-fire, relic amplification, a
+  summon amplifier with Echo's shape but a magnitude that matters) would also
+  shrink the whole-trio-repeat rate, which is the one rotation artifact the
+  no-repeat rule cannot touch.
 - The overnight/locked screen state.
 - **Day-gated magnitude pairs, scoped for ALL seven flat-magnitude stat
   boons (Bulwark, Blunt, Rearguard, Guardian, Rust, Barren, Antidote) per

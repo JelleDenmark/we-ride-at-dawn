@@ -1,6 +1,7 @@
 import { xorshift128 } from './prng';
 import { fnv1a } from './seed';
 import { BOARD_CAP } from './sim';
+import { weekdayFor } from './shop';
 import type { Lineup, LineupUnit } from './data/units';
 
 /**
@@ -18,6 +19,11 @@ import type { Lineup, LineupUnit } from './data/units';
  *    (`xorshift128(fnv1a(...))`), so the day's offer is re-derivable anywhere
  *    with no stored state and no server round-trip. Never wall-clock, never
  *    per-account, never `Math.random`.
+ *
+ *    A day's offer reads the PREVIOUS day's offer too, to enforce the
+ *    no-consecutive-repeat rule (see `boonsFor`). Still pure and still
+ *    re-derivable from a bare date — the recursion is cut at each season
+ *    boundary, so it is bounded at six levels and never needs history.
  *
  *    This is what makes the offer ENFORCEABLE rather than merely shared: the
  *    nightly job re-derives the trio and rejects a pick that wasn't on it, so
@@ -51,6 +57,12 @@ import type { Lineup, LineupUnit } from './data/units';
  *    replay reveals each entrant's boon from the round's stored snapshot, and
  *    `isBoonOffered` is only ever asked about the round currently being
  *    scored. Do not add a caller that re-derives an old date's offer.
+ *
+ *    The no-consecutive-repeat rule sharpens this: a day's offer is drawn from
+ *    the pool MINUS yesterday's three, so a pool change now re-maps every
+ *    later day of that week as well, not just the day it lands on. Same
+ *    conclusion, wider blast radius — still fine because nothing re-derives
+ *    the past, and still a reason not to start.
  */
 
 /**
@@ -410,6 +422,14 @@ export const HELD_BOONS: Record<string, BoonDef> = {
  */
 export const BOON_FIRST_DATE = '2026-08-17';
 
+/** The ride-date before `rideDate`. Noon UTC for the same reason `shop.ts`
+ * uses it: it keeps the arithmetic clear of any DST or timezone edge. */
+function previousDate(rideDate: string): string {
+  const d = new Date(`${rideDate}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
 /**
  * The three boons offered on `rideDate` — identical for every player, derived,
  * never stored.
@@ -421,11 +441,42 @@ export const BOON_FIRST_DATE = '2026-08-17';
  * distinct boons (a naive three-times-`int(len)` would let a day offer the
  * same boon twice) while touching the rng exactly `BOONS_PER_DAY` times, so
  * the sequence stays stable if `BOONS_PER_DAY` ever changes.
+ *
+ * **No boon repeats on consecutive days within a season.** An independent
+ * daily draw clusters harder than it reads: at 14 entries a boon recurs the
+ * very next day about two-thirds of the time, and the launch week as first
+ * derived offered Silence — the pool's strongest entry, and the one with no
+ * magnitude knob to tune it with — on three consecutive days. A player who
+ * sees the same card three dawns running is not being offered a rotation.
+ *
+ * The exclusion is the PREVIOUS DAY'S OFFER, which keeps rule 1 intact: this
+ * is still a pure function of the ride-date, just one that reads one day
+ * further back. It stays cheap and terminating because the chain is cut at
+ * every season boundary — expedition day 1 (Monday, per `weekdayFor`) always
+ * draws from the full pool, so recursion is bounded at six levels and never
+ * walks back to `BOON_FIRST_DATE`.
+ *
+ * Cutting at the boundary rather than chaining indefinitely does mean the
+ * Sunday→Monday pair can repeat a boon. That is the right seam to spend: a
+ * season reset already changes everything else about the week, so a boon
+ * carrying over reads as a new week rather than as a stuck card, and the
+ * alternative is a recursion whose depth grows without bound as the calendar
+ * advances.
  */
 export function boonsFor(rideDate: string): BoonDef[] {
   if (rideDate < BOON_FIRST_DATE) return [];
-  const pool = Object.values(BOON_DEFS);
-  if (pool.length <= BOONS_PER_DAY) return pool.slice();
+  const all = Object.values(BOON_DEFS);
+  if (all.length <= BOONS_PER_DAY) return all.slice();
+
+  // Day 1 of a season draws from everything; every later day drops whatever
+  // yesterday offered. Guarded on pool size so a shrunken pool degrades to the
+  // unfiltered draw rather than running out of entries to offer.
+  const canFilter = all.length >= BOONS_PER_DAY * 2;
+  const excluded =
+    canFilter && weekdayFor(rideDate) !== 1
+      ? new Set(boonsFor(previousDate(rideDate)).map((b) => b.id))
+      : new Set<string>();
+  const pool = excluded.size > 0 ? all.filter((b) => !excluded.has(b.id)) : all;
 
   const rng = xorshift128(fnv1a(`${rideDate}#boons`));
   const order = pool.map((_, i) => i);

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { boonsFor, isBoonOffered, BOON_DEFS, BOONS_PER_DAY, BOON_FIRST_DATE } from '../src/boons';
+import { weekdayFor } from '../src/shop';
 
 /** Consecutive ride-dates walking forward from a given one. */
 const daysFrom = (start: string, count: number): string[] =>
@@ -51,6 +52,42 @@ describe('boonsFor', () => {
     // does not exist. Same guard anomaly.test.ts runs over seasons.
     const drawn = new Set(DAYS.flatMap((d) => boonsFor(d).map((b) => b.id)));
     expect(drawn).toEqual(new Set(Object.keys(BOON_DEFS)));
+  });
+
+  it('never repeats a boon on consecutive days within a season', () => {
+    // An independent daily draw clusters harder than it reads: the launch week
+    // as first derived put Silence — the strongest entry, and the one with no
+    // magnitude knob — on three consecutive dawns. Same card three days
+    // running is not a rotation.
+    for (let i = 1; i < DAYS.length; i++) {
+      if (weekdayFor(DAYS[i]) === 1) continue; // the chain is cut at each season boundary
+      const today = boonsFor(DAYS[i]).map((b) => b.id);
+      const yesterday = new Set(boonsFor(DAYS[i - 1]).map((b) => b.id));
+      const repeated = today.filter((id) => yesterday.has(id));
+      expect(repeated, `${DAYS[i - 1]} -> ${DAYS[i]}`).toEqual([]);
+    }
+  });
+
+  it('cuts the no-repeat chain at the season boundary', () => {
+    // The cut is what bounds the recursion: if a Monday excluded Sunday's
+    // offer too, the chain would walk back to BOON_FIRST_DATE and grow a level
+    // longer every day the calendar advances. Observable as Sunday->Monday
+    // being the one adjacent pair allowed to repeat — so at least one boundary
+    // in a long run must actually do it.
+    const year = daysFrom(BOON_FIRST_DATE, 365);
+    const boundaryRepeats = year.filter((d, i) => {
+      if (i === 0 || weekdayFor(d) !== 1) return false;
+      const yesterday = new Set(boonsFor(year[i - 1]).map((b) => b.id));
+      return boonsFor(d).some((b) => yesterday.has(b.id));
+    });
+    expect(boundaryRepeats.length).toBeGreaterThan(0);
+  });
+
+  it('stays bounded however far out the date is', () => {
+    // A guard on the recursion depth rather than on the offer: the chain is
+    // cut weekly, so a date decades out costs the same six levels as day 7 of
+    // launch week. An unbounded version would overflow the stack here.
+    expect(boonsFor('2099-12-31')).toHaveLength(BOONS_PER_DAY);
   });
 
   it('does not lean hard on any one boon', () => {
