@@ -1554,8 +1554,12 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   // is reachable from day 2 either way — day-2 buys one day less runway than
   // the old day-3 gate did, not a full mitigation. Worth a real
   // balance-script pass if it turns out to matter in practice.
+  // Health 6→7 (2026-08-08 season pass): the `e9552a8` shop-diversity buff had
+  // a ripple crowd-out side effect on this unit (census 5/16→2/16, verified
+  // same-seed A/B) — health only, not the drain amount (already halved once
+  // per #147 above).
   'grave-leech': {
-    id: 'grave-leech', name: 'Grave-Leech', attack: 3, health: 6, cost: 6,
+    id: 'grave-leech', name: 'Grave-Leech', attack: 3, health: 7, cost: 6,
     ability: { trigger: 'afterAttack', effect: { kind: 'healSelf', amount: 1 } },
     tribe: 'brute',
     unlockDay: 2,
@@ -1567,8 +1571,15 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
   // budget that guarantees that no matter how many are stacked. Tagged
   // plague still fits: an apothecary who works the plague wards, not just
   // the ones who spread it.
+  // Health 3→4 (2026-08-08 season pass): same `e9552a8` ripple as Grave-Leech
+  // (census 7/16→4/16) plus a direct nudge on the still-open #155 PvP
+  // counter-play gap (poison-decay alone barely moved the real RatMoe vs
+  // Well-Dressed-Rat matchup, 73.4%→72.7% — see wrad-pvp-season1-meta memory).
+  // Body stat only, deliberately not touching `poisonResistForTier`/
+  // `POISON_RESIST_CAP` — that lever was already tried and found to have
+  // ~zero effect on the real board.
   'gutter-acolyte': {
-    id: 'gutter-acolyte', name: 'Gutter-Acolyte', attack: 2, health: 3, cost: 5,
+    id: 'gutter-acolyte', name: 'Gutter-Acolyte', attack: 2, health: 4, cost: 5,
     ability: { trigger: 'startOfWave', effect: { kind: 'poisonResist' } },
     tribe: 'plague',
     // Retired for the upcoming season (Jesper, 2026-08-13) — same mechanism
