@@ -1,0 +1,12 @@
+{
+  "embeds": [
+    {
+      "title": "v0.9.0 — a choice every dawn (2/2)",
+      "description": "**THE SHOP**\n• **Ward-Weaver** retires from the stalls — the only rat that rode two straight seasons at 5-in-6 boards, unmoved by this season's own anti-stacking rule. Still rides if you've already got one; the stalls just stop selling him. A real fix is scoped for a later season.\n• **Gutter-Acolyte** retires too — it never did the job it was built for. Board measurements found poison is only 1-4% of real damage once a line carries relics, so an attack-sapper has to earn its slot back on its own merits.\n\n**PVP LEAGUE**\n• Poison decay is reverted — it dulled every poison source to fix one matchup and barely moved that matchup anyway. Poison holds at full strength again until the wave clears, like before last patch.\n• **Draughtsman Moe** reworked instead: she no longer rots your whole line at once. Now she keeps gnawing on whichever rat stands in front of her, refreshing — not stacking — as long as she's alive. One rat rotting at a time, not your whole board.\n• **MBP Rat** — attack corrected: 4 ⇒ **3**, matching the Slink-Rat kit it carries over from. A copy slip from last patch, not a nerf.\n\nnot everything that rode in with this season is written here.",
+      "color": 5793266,
+      "footer": {
+        "text": "we ride at dawn · season resets Monday 06:00 CET"
+      }
+    }
+  ]
+}
