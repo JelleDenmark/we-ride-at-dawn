@@ -61,6 +61,7 @@ export {
   isBoonOffered,
   boardsForDuel,
   boonEffect,
+  boonStatLine,
   DECOY_DEF_ID,
   BOON_DEFS,
   BOONS_PER_DAY,
