@@ -22,6 +22,7 @@
     currentRideDate,
     isBoonOffered,
     boonsFor,
+    boonStatLine,
     dailySeed,
     generateGauntlet,
     anomalyFor,
@@ -2078,6 +2079,7 @@
         <ul class="boon-list">
           {#each todaysBoons as b (b.id)}
             {@const chosen = myBoon === b.id}
+            {@const stat = boonStatLine(b.effect)}
             <li>
               <button
                 class="boon-card"
@@ -2091,6 +2093,7 @@
                   {#if chosen}<span class="boon-tag">chosen</span>{/if}
                 </span>
                 <span class="boon-blurb">{b.blurb}</span>
+                {#if stat}<span class="boon-stat">{stat}</span>{/if}
               </button>
             </li>
           {/each}
@@ -4128,6 +4131,17 @@
   }
 
   .boon-card:disabled .boon-blurb {
+    color: var(--ink-faint);
+  }
+
+  .boon-stat {
+    display: block;
+    margin-top: 6px;
+    font-size: 11px;
+    color: var(--brass);
+  }
+
+  .boon-card:disabled .boon-stat {
     color: var(--ink-faint);
   }
 

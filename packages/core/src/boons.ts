@@ -2,7 +2,7 @@ import { xorshift128 } from './prng';
 import { fnv1a } from './seed';
 import { BOARD_CAP } from './sim';
 import { weekdayFor } from './shop';
-import type { Lineup, LineupUnit } from './data/units';
+import { UNIT_DEFS, type Lineup, type LineupUnit } from './data/units';
 
 /**
  * Daily PvP boons (issue #184, design bank in `docs/design/boons.md`).
@@ -791,4 +791,46 @@ export function boardsForDuel(
 export function boonEffect(boonId: string | null | undefined): BoonEffect | null {
   if (!boonId) return null;
   return (BOON_DEFS[boonId] ?? HELD_BOONS[boonId])?.effect ?? null;
+}
+
+/**
+ * The one concrete number (or body) a boon's blurb deliberately leaves out,
+ * for the choice screen to show alongside the flavour text. Kept out of
+ * `blurb` on purpose rather than folded in: the blurb is prose written once,
+ * while a magnitude can still move in a tuning pass (nine boons measured
+ * pre-launch, five promoted 2026-08-15 off a directional pass only — see this
+ * file's header). Reading the number live off `effect` here, instead of
+ * typing it into a string, is what keeps the display from going stale the
+ * way a hand-copied number would (same lesson as `abilitySentence` in
+ * App.svelte — see [[wrad-copy-vs-engine-audit]]).
+ *
+ * Returns null for effects with no single number to show — a move, a
+ * silence, a relic strip, deep scout — where the blurb already states the
+ * whole mechanic.
+ */
+export function boonStatLine(e: BoonEffect): string | null {
+  switch (e.kind) {
+    case 'frontHealth':
+      return `+${e.amount} health, leading rat`;
+    case 'backAttack':
+      return `+${e.amount} attack, hindmost rat`;
+    case 'sapBackAttack':
+      return `-${e.amount} attack, rival's hindmost rat`;
+    case 'sapArmorAll':
+      return `-${e.amount} armor, rival's whole line`;
+    case 'poisonNegation':
+      return `${e.amount} poison shrugged off`;
+    case 'blockHits':
+      return `blocks the first ${e.hits} hits, either side of the line`;
+    case 'capSummonHeadroom': {
+      const extra = e.headroom === 1 ? '1 rat' : `${e.headroom} rats`;
+      return `rival can summon at most ${extra} beyond their deployed line`;
+    }
+    case 'decoyFront': {
+      const decoy = UNIT_DEFS[DECOY_DEF_ID];
+      return decoy ? `${decoy.attack}/${decoy.health} body, leading slot` : null;
+    }
+    default:
+      return null;
+  }
 }
