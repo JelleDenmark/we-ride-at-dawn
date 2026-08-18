@@ -224,12 +224,19 @@ export async function fetchBoards(seasonId: string, key: string | undefined): Pr
 }
 
 /**
- * Every boon pick submitted for one ride-date (issue #184).
+ * Every CONFIRMED boon pick submitted for one ride-date (issue #184).
  *
  * SERVICE-ROLE ONLY, and unlike `fetchBoards` this is not a historical
  * accident that could be relaxed — `pvp_boon_picks` deliberately has no anon
  * grant and no read policy, because a readable pick would turn the daily
  * choice into a counter-picking race. There is no anon fallback to offer.
+ *
+ * `&confirmed=eq.true` is load-bearing, not a nicety: a pick is a DRAFT until
+ * the player explicitly locks it in (submit_pvp_boon refuses any further
+ * write once confirmed), and an unconfirmed draft must never silently score.
+ * Without this filter the confirm step would be theatre — the job would
+ * still fight whatever was last typed, which is the exact Deep Scout
+ * info-then-swap exploit this confirm design exists to close.
  *
  * Returns empty without a key rather than throwing, so a keyless `--dry`
  * degrades to "preview with no boons" instead of failing outright. That is a
@@ -245,7 +252,7 @@ export async function fetchBoonPicks(
   if (!key) return [];
   const url =
     `${SUPABASE_URL}/rest/v1/pvp_boon_picks?season_id=eq.${encodeURIComponent(seasonId)}` +
-    `&ride_date=eq.${encodeURIComponent(rideDate)}&select=device_id,boon_id`;
+    `&ride_date=eq.${encodeURIComponent(rideDate)}&confirmed=eq.true&select=device_id,boon_id`;
   const res = await fetch(url, { headers: serviceHeaders(key) });
   if (!res.ok) throw new Error(`pvp_boon_picks fetch failed: ${res.status} ${await res.text()}`);
   return (await res.json()) as BoonPickRow[];

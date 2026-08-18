@@ -60,20 +60,34 @@ export async function submitPvpBoard(args: {
 }
 
 /**
- * Set (or clear) this device's boon pick for a ride-date (issue #184).
+ * Set (or clear) this device's boon pick for a ride-date (issue #184), or
+ * confirm it (`confirm: true`, 2026-08-17 confirm-lock rework).
  *
- * Pass `null` to clear — not picking is a legal state that means no boon, and
- * a player who changes their mind back to nothing should be able to say so.
+ * Pass `boonId: null` to clear an unconfirmed draft — not picking is a legal
+ * state that means no boon, and a player who changes their mind back to
+ * nothing should be able to say so, right up until they confirm.
+ *
+ * A CONFIRMED pick is a one-way door: `submit_pvp_boon` refuses any further
+ * write for this (season, ride_date, device) once `confirmed=true`, including
+ * clearing it. This is what actually closes the Deep Scout exploit (docs/
+ * design/boons.md) — the app only reveals Deep Scout's roster view once the
+ * pick reads back as confirmed, so seeing the intel and swapping to a
+ * different boon before the round is scored is no longer possible. Never call
+ * with `confirm: true` on a pick you might still want to change; there is no
+ * undo.
  *
  * Keyed on the RIDE-date (`currentRideDate`, the 06:00 rollover), never the
  * wall-clock date. Between 22:00 and 06:00 the round has already been scored
  * while the ride-date has not yet rolled, so a pick made in that window lands
- * on a round that is already closed — harmless, because the job reads picks
- * once at scoring time and never re-scores, but it is why the caller must pass
- * a ride-date rather than anything derived from the clock.
+ * on a round that is already closed — harmless, because the job reads
+ * confirmed picks once at scoring time and never re-scores, but it is why the
+ * caller must pass a ride-date rather than anything derived from the clock.
  *
  * Fire-and-forget, same posture as `submitPvpBoard`: a failed write leaves the
- * previous pick standing and never blocks play.
+ * previous pick standing and never blocks play. A failed CONFIRM write is more
+ * costly than a failed draft write (the player believes they've locked in),
+ * but the reconciliation in `fetchMyPvpBoon` catches this on the next league
+ * refresh — the server's `confirmed` flag is authoritative and wins on read.
  *
  * Unlike the board, this does NOT go into `pvp_boards` — the pick is secret
  * until the round is scored, and that table is anon-readable. It has its own
@@ -83,6 +97,7 @@ export async function submitPvpBoon(args: {
   seasonId: string;
   rideDate: string;
   boonId: string | null;
+  confirm?: boolean;
 }): Promise<void> {
   try {
     await fetch(`${SUPABASE_URL}/rest/v1/rpc/submit_pvp_boon`, {
@@ -93,6 +108,7 @@ export async function submitPvpBoon(args: {
         p_ride_date: args.rideDate,
         p_device: deviceId(),
         p_boon: args.boonId,
+        p_confirm: args.confirm ?? false,
       }),
       keepalive: true,
     });
@@ -103,16 +119,20 @@ export async function submitPvpBoon(args: {
 }
 
 /**
- * Read back THIS device's own pick for a ride-date. Returns null for no pick,
+ * Read back THIS device's own pick for a ride-date, and whether it's
+ * confirmed (locked) or still a changeable draft. Returns null for no pick,
  * and also null on any failure — a read error is indistinguishable from "no
  * pick" to the caller by design, because both mean the same thing to the UI.
  *
  * Only needed when local state is gone (a reinstall, a cleared cache, a second
  * load of the same device). Nobody can read anyone else's pick: the RPC is
- * scoped to a single (season, ride_date, device) triple and returns a scalar,
- * so it cannot be walked to enumerate rivals.
+ * scoped to a single (season, ride_date, device) triple and returns at most
+ * one row, so it cannot be walked to enumerate rivals.
  */
-export async function fetchMyPvpBoon(seasonId: string, rideDate: string): Promise<string | null> {
+export async function fetchMyPvpBoon(
+  seasonId: string,
+  rideDate: string
+): Promise<{ boonId: string; confirmed: boolean } | null> {
   try {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/my_pvp_boon`, {
       method: 'POST',
@@ -124,8 +144,11 @@ export async function fetchMyPvpBoon(seasonId: string, rideDate: string): Promis
       }),
     });
     if (!res.ok) return null;
-    const value = (await res.json()) as string | null;
-    return typeof value === 'string' && value !== '' ? value : null;
+    const rows = (await res.json()) as { boon_id: string; confirmed: boolean }[];
+    const row = rows[0];
+    return row && typeof row.boon_id === 'string'
+      ? { boonId: row.boon_id, confirmed: !!row.confirmed }
+      : null;
   } catch {
     return null;
   }

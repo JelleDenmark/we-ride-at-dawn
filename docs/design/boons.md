@@ -255,7 +255,15 @@ board jsonb meant no schema change and no new RPC. Secrecy means a new table plu
 write RPC and a read-own RPC, both security-definer and keyed on `device_id` (which is
 no longer published to anon as of `b6489d8` — that is the boundary secrecy leans on).
 
-**Picks stay changeable until 22:00.** The decision survives the secrecy reversal but
+**SUPERSEDED 2026-08-17 — see "Confirm-and-lock" below.** The section that followed
+this one argued picks should stay freely changeable right up to the round. That turned
+out to have a real hole: Deep Scout's information leaks the instant it's picked, so
+"changeable" let a player scout, then swap to a real combat boon before the round
+scored — banking both. Kept below for the historical reasoning (secrecy made the
+original "lock on pick" concern moot), since the NEW design still relies on that same
+conclusion; only the "therefore stay changeable" step is reversed.
+
+~~**Picks stay changeable until 22:00.**~~ The decision survives the secrecy reversal but
 its reasoning does not, so re-deriving it: the original argument was that public picks
 would make "lock on pick" degenerate, since the correct play would be to pick last after
 reading everyone else's commitment, and all six players would sit until 21:59. With
@@ -263,6 +271,53 @@ secret picks that argument is void — nobody can read anyone. What remains is s
 still points the same way: a changeable pick is a pure simultaneous-reveal game with one
 lock moment shared with the board, and there is no longer any downside to weigh against
 it.
+
+### Confirm-and-lock (2026-08-17, owner call, Jesper)
+
+Two bugs, reported together from the same screenshot, turned out to share one root
+cause — the pick stayed mutable, client- and server-side, right up until the nightly job
+happened to read it:
+
+1. **Deep Scout cost nothing.** `scoutLevel` in the app derived the exact-roster reveal
+   from whatever the DRAFT pick currently was, live, with no server round-trip needed to
+   read it. A player could tap Deep Scout, read every rival's line, then tap back to
+   Bulwark before the round scored — banking the scouting AND a real combat boon. Free
+   information plus a combat boon is exactly the "must cost what it costs" failure the
+   `Wheel` rejection already named for a different boon.
+2. **The "until 22:00" copy was false.** `wrad-pvp-cron.yml` fires the nightly job ~22
+   minutes before the advertised 22:00 slot on purpose (anti clock-sniping), and
+   `submit_pvp_boon` deliberately had no close-time lock at all — the migration's own
+   comment called it "a UI affordance, not a security boundary." A pick changed in that
+   22-minute window looked to the player like it landed on time and had actually already
+   missed the round.
+
+**Fix: a pick is a DRAFT until explicitly confirmed, and confirming is a one-way door.**
+`pvp_boon_picks` gained a `confirmed` column; `submit_pvp_boon` refuses any further write
+— a different boon, or clearing back to no-pick — once `confirmed=true` for that
+(season, ride_date, device). The nightly job's `fetchBoonPicks` now filters
+`confirmed=eq.true`, so an unconfirmed draft can never silently score — that's the other
+half of the fix, without it the confirm step would be theatre.
+
+**Deep Scout's reveal is gated on `confirmed`, not on the draft pick.** This is the
+actual fix for bug 1: the app only unlocks the exact-roster view once the pick reads
+back as confirmed, so seeing the intel now IS spending the day's pick on it,
+irrevocably. There is no window where you can look and still walk away with something
+else.
+
+**All boons lock the same way, not just Deep Scout.** Considered and rejected: a
+Deep-Scout-only sticky rule, which closes the one boon with a real information leak but
+leaves every other boon needing its own justification for why IT gets to stay
+changeable. "Pick, then confirm, then it's tonight's boon" is one rule for all fourteen,
+not a special case plus a general case.
+
+**The deadline copy now states the real trigger, ~21:38 CET, instead of 22:00** — matching
+`wrad-pvp-cron.yml`'s 19:38 UTC schedule (22 minutes ahead of the advertised slot, DST
+ignored the same way the rest of this UI already treats "CET" as a year-round label for
+the Copenhagen slot). The tradeoff named when this was scoped still applies: the cron
+trigger has drifted before (this file's own history — GitHub's schedule queue running
+~66 minutes late, a missed night on 2026-08-04) and could again, so a hardcoded clock
+time in the copy can go stale the same way the trigger's own comment already hedges with
+"≈". Accepted anyway, on the owner's explicit call, over dropping the number entirely.
 
 **Copy.** One declarative sentence per card, in the game's voice, no numbers and no
 category tags. Cards stack vertically — three across at phone width gives ~100px

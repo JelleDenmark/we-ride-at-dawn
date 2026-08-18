@@ -115,6 +115,7 @@
     loadConsolationCredited,
     saveBoonPick,
     loadBoonPick,
+    isBoonPickConfirmed,
     type RideLogEntry,
     type LastRide,
   } from './persistence';
@@ -422,12 +423,19 @@
   // auto-pick. Read from localStorage on load and reconciled against the
   // server on every league refresh, because a local write can fail silently
   // (#180) and a reinstall loses it outright.
-  //
-  // Nothing SETS this yet: the choice screen is phase 6. Until then the boon
-  // path is complete but unreachable, which is the same dormancy
-  // `BOON_FIRST_DATE` enforces on the offer itself.
   let myBoon = $state<string | null>(
     loadBoonPick(build.seasonId, currentRideDate())
+  );
+  // Whether today's pick is locked in (2026-08-17 confirm-lock rework, docs/
+  // design/boons.md). A pick is a freely-changeable DRAFT until the player
+  // taps confirm; confirming is a one-way door enforced server-side by
+  // `submit_pvp_boon`, not just here. Replaces the old "changeable until
+  // 22:00" model, which had two problems: the round actually locks ~22
+  // minutes before the advertised 22:00 (wrad-pvp-cron.yml), and it let a
+  // player bank Deep Scout's roster reveal and then swap to a real combat
+  // boon before scoring — see `scoutLevel` below for the actual fix to that.
+  let myBoonConfirmed = $state<boolean>(
+    isBoonPickConfirmed(build.seasonId, currentRideDate())
   );
 
   // Deep scouting is a boon, not a setting (issue #178, folded into #184).
@@ -436,29 +444,51 @@
   // rendering below (`ghostUnits`, the expand-to-chips branch), which has been
   // wired and dormant behind a hardcoded constant since ce62eaa.
   //
-  // Gated on `isBoonOffered` rather than on the pick alone, for two reasons
-  // that both matter: while boons are dormant no date offers anything, so this
-  // cannot turn on early even if a pick is somehow present; and a stale pick
-  // from a previous day can never grant today's scouting, since the menu it
-  // was drawn from is a pure function of the ride-date.
+  // Gated on `myBoonConfirmed` as well as the pick, which is load-bearing, not
+  // redundant: reading rivals' rosters is real information the instant it's
+  // shown, so unlocking it on the mere DRAFT selection let a player scout,
+  // then swap the draft to Bulwark before confirming — banking the intel and
+  // a real combat boon for free. Requiring confirm first means seeing the
+  // roster IS spending the day's pick on it, irrevocably.
+  //
+  // Also gated on `isBoonOffered` rather than on the pick alone, for two
+  // reasons that both matter: while boons are dormant no date offers
+  // anything, so this cannot turn on early even if a pick is somehow present;
+  // and a stale pick from a previous day can never grant today's scouting,
+  // since the menu it was drawn from is a pure function of the ride-date.
   const scoutLevel = $derived<'basic' | 'deep'>(
-    myBoon === 'deep-scout' && isBoonOffered(currentRideDate(), myBoon) ? 'deep' : 'basic'
+    myBoonConfirmed && myBoon === 'deep-scout' && isBoonOffered(currentRideDate(), myBoon)
+      ? 'deep'
+      : 'basic'
   );
 
   /**
-   * Record a boon pick: locally first so the UI is instant, then to the server.
-   * Pass null to clear — changing your mind back to nothing is a legal move.
-   *
-   * Safe to call repeatedly right up to the 22:00 round: the pick is secret
-   * until the round is scored, and the nightly job reads whatever stands at
-   * that moment. Wired ahead of the choice screen (phase 6) so the screen only
-   * has to render.
+   * Change the DRAFT pick: locally first so the UI is instant, then to the
+   * server as an unconfirmed write. Pass null to clear — changing your mind
+   * back to nothing is a legal move. No-ops once confirmed; a confirmed pick
+   * can only be changed by `confirmBoon`'s server-side guard rejecting the
+   * attempt anyway, but bailing here avoids the round-trip and keeps the
+   * button visibly inert.
    */
   function pickBoon(boonId: string | null): void {
+    if (myBoonConfirmed) return;
     const rideDate = currentRideDate();
     myBoon = boonId;
-    saveBoonPick(build.seasonId, rideDate, boonId);
-    void submitPvpBoon({ seasonId: build.seasonId, rideDate, boonId });
+    saveBoonPick(build.seasonId, rideDate, boonId, false);
+    void submitPvpBoon({ seasonId: build.seasonId, rideDate, boonId, confirm: false });
+  }
+
+  /**
+   * Lock today's draft pick in for tonight's round. One-way: the server
+   * refuses any further write for today once this lands, and the app mirrors
+   * that by disabling every boon card. There is no client-side undo.
+   */
+  function confirmBoon(): void {
+    if (myBoon === null || myBoonConfirmed) return;
+    const rideDate = currentRideDate();
+    myBoonConfirmed = true;
+    saveBoonPick(build.seasonId, rideDate, myBoon, true);
+    void submitPvpBoon({ seasonId: build.seasonId, rideDate, boonId: myBoon, confirm: true });
   }
 
   // Today's three, derived from the ride-date — identical for every player,
@@ -601,7 +631,7 @@
     leagueBusy = true;
     try {
       const rideDate = currentRideDate();
-      const [rows, season, roundList, gh, cfg, depthBoard, rank, serverBoon] = await Promise.all([
+      const [rows, season, roundList, gh, cfg, depthBoard, rank, serverPick] = await Promise.all([
         fetchLatestStandings(build.seasonId),
         fetchSeasonStandings(build.seasonId),
         fetchRounds(build.seasonId),
@@ -611,14 +641,24 @@
         fetchRank(build.seasonId, seasonBest, seasonKills),
         fetchMyPvpBoon(build.seasonId, rideDate),
       ]);
-      // The server copy of the pick wins when we have nothing locally — a
-      // reinstall, a cleared cache, or a silently-failed localStorage write
-      // (#180). It does NOT overwrite a local pick: a fetch that returns null
+      // A CONFIRMED server pick is authoritative and always wins, even over a
+      // local draft: confirming is a one-way door (submit_pvp_boon refuses
+      // further writes), so the server can never be stale in a way that a
+      // local draft should override — this is what makes a confirm made on
+      // one device, or before a reinstall, still show as locked afterwards.
+      //
+      // An UNCONFIRMED server pick only fills in when we have nothing locally
+      // (a reinstall, a cleared cache, a silently-failed localStorage write —
+      // #180). It does NOT overwrite a local draft: a fetch that returns null
       // is indistinguishable from a read failure by design, so letting it win
-      // would clear a good pick every time the network hiccuped.
-      if (myBoon === null && serverBoon !== null) {
-        myBoon = serverBoon;
-        saveBoonPick(build.seasonId, rideDate, serverBoon);
+      // would clear a good draft every time the network hiccuped.
+      if (serverPick?.confirmed) {
+        myBoon = serverPick.boonId;
+        myBoonConfirmed = true;
+        saveBoonPick(build.seasonId, rideDate, serverPick.boonId, true);
+      } else if (myBoon === null && serverPick?.boonId != null) {
+        myBoon = serverPick.boonId;
+        saveBoonPick(build.seasonId, rideDate, serverPick.boonId, false);
       }
       standings = rows;
       seasonStandings = season;
@@ -2085,12 +2125,12 @@
                 class="boon-card"
                 class:chosen
                 aria-pressed={chosen}
-                disabled={boonRoundClosed}
+                disabled={boonRoundClosed || myBoonConfirmed}
                 onclick={() => pickBoon(chosen ? null : b.id)}
               >
                 <span class="boon-head">
                   <span class="boon-name">{b.name}</span>
-                  {#if chosen}<span class="boon-tag">chosen</span>{/if}
+                  {#if chosen}<span class="boon-tag">{myBoonConfirmed ? 'locked' : 'chosen'}</span>{/if}
                 </span>
                 <span class="boon-blurb">{b.blurb}</span>
                 {#if stat}<span class="boon-stat">{stat}</span>{/if}
@@ -2098,12 +2138,17 @@
             </li>
           {/each}
         </ul>
+        {#if myBoon !== null && !myBoonConfirmed && !boonRoundClosed}
+          <button class="boon-confirm" onclick={confirmBoon}>Confirm pick — locks it in for tonight</button>
+        {/if}
         <p class="boon-foot">
           {boonRoundClosed
             ? 'tonight’s ride is done — the next offer comes at dawn'
-            : myBoon === null
-              ? 'take one, or ride without — change it until 22:00'
-              : 'change it until the ride, 22:00'}
+            : myBoonConfirmed
+              ? 'locked in for tonight’s ride — no more changes today'
+              : myBoon === null
+                ? 'pick one, or ride without a boon — then confirm before ~21:38 CET'
+                : 'tap confirm above to lock this in — it must be confirmed before ~21:38 CET to count tonight'}
         </p>
         <p class="boon-foot boon-foot-dim">no rival sees your choice until the duel is fought</p>
       </div>
@@ -4143,6 +4188,23 @@
 
   .boon-card:disabled .boon-stat {
     color: var(--ink-faint);
+  }
+
+  .boon-confirm {
+    display: block;
+    width: 100%;
+    min-height: 44px;
+    margin-top: 8px;
+    padding: 9px 10px;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    text-align: center;
+    background: var(--brass);
+    border: 1px solid var(--brass);
+    border-radius: 8px;
+    color: var(--surface);
+    cursor: pointer;
   }
 
   .boon-foot {
