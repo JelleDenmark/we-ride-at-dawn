@@ -15,6 +15,46 @@ export const SHOP_UNIT_SLOTS = 4;
 // nothing else needed touching.
 export const SHOP_RELIC_SLOTS = 1;
 export const MAX_TIER = 3;
+/**
+ * How many relics one rat may carry (issue #195, shipped 2026-08-31).
+ *
+ * Before this cap the only rule was "one of each TYPE per carrier", which with
+ * 6 unit-scoped relics meant a full board could pin up to 48. That is not a
+ * theoretical ceiling — `balance:realistic` ended all 16 simulated seasons
+ * with every single board slot at 4 or 5 relics, and the season post-mortem
+ * (#193) found league standings correlate with relic COUNT rather than with
+ * board quality (Spearman ~0.2 against board strength). In other words the
+ * scored mode was measuring accumulation, and a unit rebalance measured
+ * through it would have been close to invisible.
+ *
+ * 3 takes the observed 4-5 down to 3, which is enough to make relics a CHOICE
+ * (which three, on which rat) instead of a checklist you finish.
+ *
+ * 2 was measured alongside it and deliberately NOT taken (Jesper, 2026-08-31).
+ * Both values fix the accumulation problem; the difference is who pays. On
+ * `balance:realistic`, going from 3 to 2 costs the strong (lookahead) player
+ * another 2 waves of week-max depth while barely moving the casual (greedy)
+ * one, and BOTH values already cost the casual player ~30% of week-max — the
+ * cap inherently punishes simple "always buy the relic" play, because a
+ * lookahead player just substitutes into better units instead. With ~6 live
+ * players and no telemetry, starting at the looser value and tightening next
+ * season is the correction that is cheap to make; shipping 2 and discovering
+ * it overshot means a revert mid-league. Expect this number to be the first
+ * thing retuned once real boards exist.
+ *
+ * The casual knock-on is accepted rather than compensated, because ADR-0002's
+ * diminishing income curve already absorbs most of it: full-rate scrap runs to
+ * `SCRAP_FULL_DEPTH` (8) and casual rides sit near that, so per-ride income
+ * falls only ~10% even as depth falls further.
+ *
+ * Enforced in three places, all of which must agree or the cap leaks:
+ *   - `buyRelic` (the obvious one)
+ *   - `hasValidRelicTarget`, so the UI stops arming "pick a rat" for a board
+ *     with no legal target left
+ *   - `combineAll`'s merge union — three capped ★1s pool up to 6 relics into
+ *     one ★2, so the union is clamped and the overflow refunded
+ */
+export const MAX_RELICS_PER_UNIT = 3;
 export const SEASON_DAYS = 7;
 /** Bench slots: storage for rats outside the fighting horde (never enter
  * `simulate`). Small on purpose — it's for holding merge candidates and
@@ -505,7 +545,7 @@ const fail = (reason: string): ActionResult => ({ ok: false, reason });
  * down, floored at 1 — matching the unit sell rate so neither path lets a
  * player launder power for free.
  */
-function relicRefund(relicId: string): number {
+export function relicRefund(relicId: string): number {
   const cost = RELIC_DEFS[relicId]?.cost;
   return cost === undefined ? 0 : Math.max(1, Math.floor(cost / 2));
 }
@@ -550,8 +590,21 @@ function combineAll(state: BuildState): void {
       for (const [id, count] of counts) {
         if (count > 1) refund += (count - 1) * relicRefund(id);
       }
+      // Merging is the cap's back door (#195): three rats each legally holding
+      // MAX_RELICS_PER_UNIT pool up to 3x that into one veteran, so the
+      // deduped union has to be clamped as well or a player can simply merge
+      // their way past the limit. Overflow is refunded at the same half-cost
+      // rate as the duplicates above — never silently destroyed.
+      //
+      // Which relics survive is deterministic and NOT a judgement call about
+      // value: insertion order, i.e. the first-matched copy's trinkets first
+      // (that copy is also the one that keeps the board slot). Sorting by cost
+      // or power would quietly re-pick the player's build for them.
+      const deduped = [...new Set(allRelics)];
+      const kept = deduped.slice(0, MAX_RELICS_PER_UNIT);
+      for (const id of deduped.slice(MAX_RELICS_PER_UNIT)) refund += relicRefund(id);
       state.scrap += refund;
-      first.u.relicIds = [...new Set(allRelics)];
+      first.u.relicIds = kept;
       // Remove the other two copies from whichever pool they occupy, higher
       // index first so splicing one doesn't shift the other's index.
       for (const rest of [second, third].sort((a, b) => b.idx - a.idx)) {
@@ -608,7 +661,9 @@ export function canRecruit(state: BuildState, slotIndex: number): boolean {
  * to at all), which would otherwise soft-lock the same way.
  */
 export function hasValidRelicTarget(state: BuildState, relicId: string): boolean {
-  return state.board.some((u) => !u.relicIds.includes(relicId));
+  return state.board.some(
+    (u) => !u.relicIds.includes(relicId) && u.relicIds.length < MAX_RELICS_PER_UNIT
+  );
 }
 
 export function buyRelic(state: BuildState, slotIndex: number, targetIndex?: number): ActionResult {
@@ -624,6 +679,14 @@ export function buyRelic(state: BuildState, slotIndex: number, targetIndex?: num
   // are rejected outright rather than sold as traps.
   if (relic.scope === 'unit' && state.board[targetIndex!].relicIds.includes(relic.id)) {
     return fail('that rat already carries one');
+  }
+  // Per-carrier relic cap (#195). Checked AFTER the duplicate rule above so a
+  // player retrying a duplicate still gets the more specific message.
+  if (
+    relic.scope === 'unit' &&
+    state.board[targetIndex!].relicIds.length >= MAX_RELICS_PER_UNIT
+  ) {
+    return fail(`that rat already carries ${MAX_RELICS_PER_UNIT} trinkets`);
   }
   if (relic.scope === 'team' && state.teamRelicIds.includes(relic.id)) {
     return fail('the horde already carries one');
@@ -646,6 +709,40 @@ export function buyRelic(state: BuildState, slotIndex: number, targetIndex?: num
       }
     }
   }
+  return { ok: true, state: s };
+}
+
+/**
+ * Sell a SINGLE relic off a rat, keeping the rat (issue #194).
+ *
+ * Before `MAX_RELICS_PER_UNIT` existed there was no reason to want this: relics
+ * were purely additive, so the only way to "undo" one was `sellUnit`, which
+ * threw the rat away too. With a hard cap, the second pin on a rat is a real
+ * decision that a player can get wrong on day 2 and be stuck with all week —
+ * so the cap and this action ship together, as #194 being a prerequisite of
+ * #195 rather than a follow-up to it.
+ *
+ * Refunds at `relicRefund`'s half-cost rate, matching every other path that
+ * discards a relic (`sellUnit`, `sellBenchUnit`, and the merge-union clamp) —
+ * deliberately NOT the par buyback retired UNITS get, because a relic sold
+ * back by choice is not a unit being taken off the shelf by us.
+ *
+ * Works on board rats only. Bench rats keep their relics untouched; a player
+ * who wants to strip one can move it to the board first, and the cap is only
+ * ever enforced against board slots anyway.
+ */
+export function unequipRelic(
+  state: BuildState,
+  boardIndex: number,
+  relicId: string
+): ActionResult {
+  const unit = state.board[boardIndex];
+  if (!unit) return fail('no rat there');
+  if (!unit.relicIds.includes(relicId)) return fail('that rat is not carrying it');
+  const s = clone(state);
+  const target = s.board[boardIndex];
+  target.relicIds = target.relicIds.filter((id) => id !== relicId);
+  s.scrap += relicRefund(relicId);
   return { ok: true, state: s };
 }
 

@@ -40,6 +40,9 @@
     buyUnit,
     canRecruit,
     buyRelic,
+    unequipRelic,
+    relicRefund,
+    MAX_RELICS_PER_UNIT,
     hasValidRelicTarget,
     sellUnit,
     sellBenchUnit,
@@ -719,6 +722,29 @@
   }
 
   let pendingRelic = $state<number | null>(null);
+
+  /**
+   * Is this board rat a legal carrier for the relic currently being pinned?
+   *
+   * Both rejection reasons come straight from `buyRelic`'s own guards — the
+   * one-of-each-type rule, and `MAX_RELICS_PER_UNIT` (#195). Without this the
+   * board highlights EVERY rat as a pin target and the player only discovers
+   * a rat is full by tapping it and reading the notice, which is a worse
+   * version of the information the highlight is supposed to carry.
+   *
+   * A `pendingSwap` highlights every rat (any of them can be swapped), so this
+   * only narrows the relic case.
+   */
+  function canPinRelicTo(unit: { relicIds: string[] }): boolean {
+    if (pendingRelic === null) return false;
+    const slot = build.shop.slots[pendingRelic];
+    if (!slot || slot.kind !== 'relic') return false;
+    const relic = RELIC_DEFS[slot.relicId];
+    if (relic.scope !== 'unit') return true;
+    return (
+      !unit.relicIds.includes(relic.id) && unit.relicIds.length < MAX_RELICS_PER_UNIT
+    );
+  }
   // Armed "pick a rat to swap out" mode: holds the bench index waiting to be
   // swapped onto the board. Mirrors pendingRelic's armed-selection pattern;
   // only one of the two can be armed at a time (arming either clears both).
@@ -1695,6 +1721,29 @@
     if (apply(benchUnit(build, inspect.index))) inspect = null;
   }
 
+  // Sell one trinket off a rat, keeping the rat (issue #194). Two-tap arm,
+  // matching the sell-a-rat flow above — the refund is only half the cost, so
+  // a mis-tap is a real loss and deserves the same confirmation.
+  //
+  // Keyed by BOTH board index and relic id, for the same reason `sellArmed`
+  // carries an index: two rats can carry the same trinket, and a relic-id-only
+  // key would show the second one pre-armed after arming the first.
+  let relicArmed = $state<{ index: number; relicId: string } | null>(null);
+
+  function isRelicArmed(index: number, relicId: string): boolean {
+    return relicArmed?.index === index && relicArmed.relicId === relicId;
+  }
+
+  function unequipFromCard(relicId: string) {
+    if (inspect?.area !== 'board') return;
+    if (!isRelicArmed(inspect.index, relicId)) {
+      relicArmed = { index: inspect.index, relicId };
+      return;
+    }
+    relicArmed = null;
+    apply(unequipRelic(build, inspect.index, relicId));
+  }
+
   function deployFromCard() {
     if (inspect?.area !== 'bench') return;
     if (apply(deployUnit(build, inspect.index))) inspect = null;
@@ -1860,7 +1909,8 @@
         <button
           class="tile unit-tile"
           class:selected={inspect?.area === 'board' && inspect.index === bi}
-          class:pin-target={pendingRelic !== null || pendingSwap !== null}
+          class:pin-target={(pendingRelic !== null && canPinRelicTo(unit)) ||
+            pendingSwap !== null}
           class:maxed={unit.tier >= MAX_TIER}
           class:front={bi === 0}
           style={familyStyle(def)}
@@ -2404,7 +2454,11 @@
               </div>
             </div>
             <p class="card-ability">{relic.desc}.</p>
-            <p class="card-hint">one of each per {relic.scope === 'team' ? 'horde' : 'rat'} — no stacking duplicates</p>
+            <p class="card-hint">
+              {relic.scope === 'team'
+                ? 'one of each per horde — no stacking duplicates'
+                : `one of each per rat — no stacking duplicates · ${MAX_RELICS_PER_UNIT} trinkets to a rat`}
+            </p>
             <div class="card-actions">
               <button class="primary" disabled={!afford || owned || noTarget} onclick={() => pinRelicFromCard(ins.index)}>
                 {relic.scope === 'team' ? 'Add' : 'Pin'} · ⚙ {relic.cost}
@@ -2433,7 +2487,26 @@
               <p class="card-hint">summoned rats fight beyond your warren's size (up to {combatCapForBuild(build)} in the drains)</p>
             {/if}
             {#if unit.relicIds.length > 0}
-              <p class="card-relics">✦ {unit.relicIds.map((r) => RELIC_DEFS[r].name).join(', ')}</p>
+              <p class="card-relics">
+                ✦ trinkets {unit.relicIds.length}/{MAX_RELICS_PER_UNIT}
+              </p>
+              <div class="card-relic-list">
+                {#each unit.relicIds as relicId (relicId)}
+                  <button
+                    class="relic-row"
+                    class:armed={isRelicArmed(ins.index, relicId)}
+                    onclick={() => unequipFromCard(relicId)}
+                  >
+                    <span class="relic-row-name">{RELIC_DEFS[relicId].name}</span>
+                    <span class="relic-row-sell">
+                      {isRelicArmed(ins.index, relicId) ? 'sure?' : 'sell'} · +{relicRefund(relicId)}
+                    </span>
+                  </button>
+                {/each}
+              </div>
+              {#if relicArmed?.index === ins.index}
+                <div class="card-warn">tap again — you get back half what it cost</div>
+              {/if}
             {/if}
             <div class="card-actions">
               <button disabled={ins.index === 0} onclick={() => moveFromCard(-1)}>front ▶</button>
@@ -3441,6 +3514,49 @@
     font-size: 13px;
     color: var(--brass);
     text-shadow: 0 1px 0 var(--tarnish);
+  }
+
+  /* Per-trinket sell rows (issue #194). One row per relic so each can be
+     armed and sold independently — a plain comma list can't carry an action.
+     Colours come from tokens only (ADR-0006). */
+  .card-relic-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 6px;
+  }
+
+  .card-relic-list .relic-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+    padding: 6px 8px;
+    font: inherit;
+    font-size: 13px;
+    color: var(--brass);
+    background: transparent;
+    border: 1px solid var(--tarnish);
+    border-radius: 4px;
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .card-relic-list .relic-row.armed {
+    color: var(--danger);
+    border-color: var(--danger);
+  }
+
+  .card-relic-list .relic-row-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .card-relic-list .relic-row-sell {
+    flex: none;
+    opacity: 0.85;
   }
 
   .card-actions {
