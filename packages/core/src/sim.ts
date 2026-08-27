@@ -1,5 +1,5 @@
 import type { Side, UnitDef, Ability, Lineup, LineupUnit } from './data/units';
-import { UNIT_DEFS, tierAttackMultiplier, tierHealthMultiplier, reviveHpForTier, blockHitsForTier, poisonStacksForTier, cellarCoilChargeCapForTier, backlineTargetsForTier, wardArmorForTier, buffSummonedForTier, poisonResistForTier, POISON_RESIST_CAP } from './data/units';
+import { UNIT_DEFS, tierAttackMultiplier, tierHealthMultiplier, multiTargetBuffMultiplier, reviveHpForTier, blockHitsForTier, poisonStacksForTier, cellarCoilChargeCapForTier, backlineTargetsForTier, wardArmorForTier, buffSummonedForTier, poisonResistForTier, POISON_RESIST_CAP } from './data/units';
 import { ENEMY_POOL } from './data/enemies';
 import { RELIC_DEFS, type RelicDef } from './data/relics';
 import type { Gauntlet } from './gauntlet';
@@ -719,7 +719,15 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
       case 'buffBehind': {
         const start = removed ? index : index + 1;
         const targets = effect.all ? board.slice(start) : board.slice(start, start + 1);
-        for (const target of targets) buff(target, effect.attack * tierAttackMultiplier(tier), effect.health * tierHealthMultiplier(tier));
+        // Magnitude scales with reach (rebalance, 2026-08-31): the whole-line
+        // `all: true` form takes the flat `multiTargetBuffMultiplier` curve,
+        // while the single-target form keeps the steep `3^(tier-1)` one. Both
+        // are still fire-once-per-instance (`startOfBattle`), so ADR-0003 is
+        // unaffected either way — see `multiTargetBuffMultiplier`'s doc comment
+        // in data/units.ts for why reach, not cadence, is the axis here.
+        const mult = effect.all ? multiTargetBuffMultiplier(tier) : tierAttackMultiplier(tier);
+        const healthMult = effect.all ? multiTargetBuffMultiplier(tier) : tierHealthMultiplier(tier);
+        for (const target of targets) buff(target, effect.attack * mult, effect.health * healthMult);
         break;
       }
       case 'grantArmor': {
@@ -735,7 +743,26 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
         // the `shieldGranted` event (no matching `shieldAbsorbed` needed —
         // that pair only tracked the old per-hit block drain).
         const amount = wardArmorForTier(tier);
-        const targets = effect.all ? board : board.slice(index, index + 1);
+        // `ahead` (#181, drafted 2026-08-12 on `draft/positional-buffs`, landed
+        // 2026-08-31) wards the caster and the line standing in FRONT of it —
+        // the mirror of `buffBehind`'s `board.slice(index + 1)`, plus self. A
+        // ward at slot 0 hardens only itself; the further back it stands the
+        // more of the line it covers, so reach is bought with position instead
+        // of being free. This is the armor cap `wardArmorForTier`'s note had
+        // been deferring: a positional bound rather than a numeric one.
+        //
+        // Self-inclusion is deliberate and was MEASURED, not assumed: the first
+        // cut excluded the caster (`slice(0, index)`) and sent Ward-Weaver from
+        // rank F4 to B16 on `balance:all-unit-value`'s T3 depth efficiency — a
+        // 1/3 body that hardens the line and then fronts naked is not a unit
+        // anyone would buy. Covering self keeps the positional limit
+        // (everything behind it still gets nothing) without making the ward a
+        // sacrifice.
+        const targets = effect.all
+          ? board
+          : effect.ahead
+            ? board.slice(0, index + 1)
+            : board.slice(index, index + 1);
         for (const target of targets) {
           target.damageReduction += amount;
           events.push({ type: 'shieldGranted', targetId: target.instanceId, sourceId: source.instanceId });
@@ -772,7 +799,11 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
         const targets: BattleUnit[] = [];
         if (index > 0) targets.push(board[index - 1]);
         if (index < board.length - 1) targets.push(board[index + 1]);
-        for (const target of targets) buff(target, effect.attack * tierAttackMultiplier(tier), effect.health * tierHealthMultiplier(tier));
+        // Flat tier curve (rebalance, 2026-08-31) — a middle placement buffs
+        // two rats, so this is a multi-target grant by design. See
+        // `multiTargetBuffMultiplier` in data/units.ts.
+        const mult = multiTargetBuffMultiplier(tier);
+        for (const target of targets) buff(target, effect.attack * mult, effect.health * mult);
         break;
       }
       case 'distributeStatsOnFaint': {
@@ -1025,12 +1056,15 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
         // startOfBattle ability (see the Effect doc comment in
         // data/units.ts), which fires once per unit instance, ever — nothing
         // re-applies it on a later wave, so it cannot accumulate across the
-        // 45-wave battle. Issue #58: magnitude now comes from
-        // tierAttackMultiplier/tierHealthMultiplier (1x/3x/9x) instead of a
-        // flat `* tier` (1x/2x/3x), matching the same fire-once reasoning as
-        // buffBehind/buffAdjacent below and the unit's own stat curve
-        // (issue #22) — still non-stacking across waves, just steeper per use.
-        for (const target of board) buff(target, effect.attack * tierAttackMultiplier(tier), effect.health * tierHealthMultiplier(tier));
+        // 45-wave battle.
+        //
+        // Issue #58 moved this from a flat `* tier` to
+        // tierAttackMultiplier/tierHealthMultiplier (1x/3x/9x) on fire-once
+        // reasoning. The 2026-08-31 rebalance moves it BACK to a flat curve,
+        // on different reasoning: fire-once was never the problem, whole-board
+        // REACH is. See `multiTargetBuffMultiplier` in data/units.ts.
+        const mult = multiTargetBuffMultiplier(tier);
+        for (const target of board) buff(target, effect.attack * mult, effect.health * mult);
         break;
       }
       case 'teamBuffByWave': {
@@ -1046,12 +1080,15 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
         // holds the sum of both. See the Effect's doc comment in
         // data/units.ts for the full compounding-law reasoning and why this
         // is deliberately simpler than a revoke-and-reapply swap.
+        // Flat tier curve (rebalance, 2026-08-31) — whole-board reach, same
+        // rule as `teamBuff` above. See `multiTargetBuffMultiplier`.
+        const mult = multiTargetBuffMultiplier(tier);
         if (source.waveBuffPhase === 'none') {
-          for (const target of board) buff(target, effect.early.attack * tierAttackMultiplier(tier), effect.early.health * tierHealthMultiplier(tier));
+          for (const target of board) buff(target, effect.early.attack * mult, effect.early.health * mult);
           source.waveBuffPhase = 'early';
         }
         if (source.waveBuffPhase === 'early' && currentWave >= effect.switchWave) {
-          for (const target of board) buff(target, effect.late.attack * tierAttackMultiplier(tier), effect.late.health * tierHealthMultiplier(tier));
+          for (const target of board) buff(target, effect.late.attack * mult, effect.late.health * mult);
           source.waveBuffPhase = 'both';
         }
         break;
@@ -1134,8 +1171,16 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
         // `source.attack` for every OTHER attack-based effect in this file —
         // omitting it would make a buffed Slink-Rat silently under-hit.
         const def = UNIT_DEFS[source.defId];
+        // `def.attack * tier` — LINEAR (1x/2x/3x), never
+        // `tierAttackMultiplier`'s 3^(tier-1). Added 2026-08-31: reach-only
+        // tiering left a ★3 hitting for ★1 damage at 9x the scrap, which
+        // measured as negative value per scrap. Mirrors `instantiate`'s shape
+        // (tier-scaled base, then FLAT relic/team/buff addends) so a buffed
+        // sniper reads the same way here as everywhere else. See
+        // `backlineTargetsForTier`'s doc comment for why linear and not
+        // exponential.
         const perHitAttack =
-          (def?.attack ?? 0) +
+          (def?.attack ?? 0) * tier +
           source.relics.reduce((s, r) => s + (r.attack ?? 0), 0) +
           teamOf(source.side).attack +
           source.attackBuffs;

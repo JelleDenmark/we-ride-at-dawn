@@ -746,28 +746,29 @@ describe('tiers in battle', () => {
       gauntlet
     );
     const start = events.find((e) => e.type === 'battleStart')!;
-    // Gnawer: attack 3, health 1. Tier 2 -> x3^(2-1)=3 on both => attack 9, health 3.
-    expect(start.type === 'battleStart' && start.horde[0].attack).toBe(9);
+    // Gnawer: attack 4, health 1. Tier 2 -> x3^(2-1)=3 on both => attack 12, health 3.
+    expect(start.type === 'battleStart' && start.horde[0].attack).toBe(12);
     expect(start.type === 'battleStart' && start.horde[0].health).toBe(3);
     expect(start.type === 'battleStart' && start.horde[0].tier).toBe(2);
     // Issue #111 rework: Gnawer's payout is no longer a flat literal scaled
     // by tierAttackMultiplier — it's a live read of its OWN current attack
     // (which is already tier-scaled at instantiation, per the assertion
-    // above: tier-2 attack = 9) plus a capped bonus for the wave it died on.
+    // above: tier-2 attack = 12) plus a capped bonus for the wave it died on.
     // This enemy (attack 1, health 50) chips tier-2 Gnawer's 3 health down
-    // over 3 ticks, so it dies during wave 1: waveBonus = min(1, cap=2*9=18)
-    // = 1, inherited = 9 + 1 = 10. Tiering up still steepens the payout
-    // (a t1 Gnawer here would only bequeath 3 + 1 = 4), just via its own
+    // over 3 ticks, so it dies during wave 1: waveBonus = min(1, cap=2*12=24)
+    // = 1, inherited = 12 + 1 = 13. Tiering up still steepens the payout
+    // (a t1 Gnawer here would only bequeath 4 + 1 = 5), just via its own
     // stat curve rather than a separate ability-magnitude multiplier.
     const buffEvent = events.find((e) => e.type === 'buff')!;
-    expect(buffEvent.type === 'buff' && buffEvent.attack).toBe(10);
+    expect(buffEvent.type === 'buff' && buffEvent.attack).toBe(13);
   });
 
   it('unitStats (shop preview) matches the sim: attack and health both x3^(tier-1)', () => {
     const board = (tier: number) => ({ defId: 'gnawer', tier, relicIds: [] });
-    expect(unitStats(board(1))).toEqual({ attack: 3, health: 1 });
-    expect(unitStats(board(2))).toEqual({ attack: 9, health: 3 });
-    expect(unitStats(board(3))).toEqual({ attack: 27, health: 9 });
+    // Gnawer is attack 4 / health 1 since the 2026-08-31 un-retirement.
+    expect(unitStats(board(1))).toEqual({ attack: 4, health: 1 });
+    expect(unitStats(board(2))).toEqual({ attack: 12, health: 3 });
+    expect(unitStats(board(3))).toEqual({ attack: 36, health: 9 });
   });
 
   it('lineupFromBuild carries tiers and relics into the sim input', () => {
@@ -1448,33 +1449,37 @@ describe('day-gated shop unlocks (issue #12)', () => {
     for (const day of [1, 2, 3, 4, 5, 6, 7]) expect(everAppears(day, 'dire-rat')).toBe(true);
   });
 
-  it('season-3 reskin swap (issue #115) + #149 pool flip: retired reskins never roll; tribute + un-retired anchor do', () => {
+  it('reskin swap (issue #115) + 2026-08-31 pool flip: retired reskins never roll; tribute + live anchor do', () => {
     // Draughtsman Moe reskins Blight-Witch, so Blight-Witch is never
     // purchasable. Draughtsman Moe joins the pool, day-2 gated (Jesper,
     // 2026-08-01 — a deliberate departure from the original day-1/no-
-    // unlockDay precedent that matched the Blight-Witch kit it reskins). Per
-    // #149 (2026-07-25) the Warren-Warden/MD-Rattyfock reskin pair swapped
-    // back: Warren-Warden is now the retired twin and MD Rattyfock is the
-    // purchasable one.
+    // unlockDay precedent that matched the Blight-Witch kit it reskins).
+    //
+    // The Warren-Warden/MD-Rattyfock pair has now flipped TWICE: #149
+    // (2026-07-25) made MD Rattyfock the live twin, and the 2026-08-31
+    // rebalance flips it back to Warren-Warden. The pair is stat- and
+    // ability-identical, so which side is live is pure identity churn — what
+    // this test actually pins is the invariant that EXACTLY ONE of them is
+    // ever purchasable.
     expect(everAppears(1, 'draughtsman-moe')).toBe(false);
     for (const day of [1, 2, 3, 4, 5, 6, 7]) {
       expect(everAppears(day, 'blight-witch')).toBe(false);
-      expect(everAppears(day, 'warren-warden')).toBe(false);
-      expect(everAppears(day, 'md-rattyfock')).toBe(true);
+      expect(everAppears(day, 'md-rattyfock')).toBe(false);
+      expect(everAppears(day, 'warren-warden')).toBe(true);
       if (day >= 2) expect(everAppears(day, 'draughtsman-moe')).toBe(true);
     }
   });
 
-  it('season-3 prestige reskin swap (issue #151): Gutter Gourmand replaces Twilight-Runt, and its own day-3 gate is also removed', () => {
-    // Twilight-Runt is retired in favor of Gutter Gourmand, its exact-kit
-    // reskin — never purchasable on any day (unaffected by the gate
-    // removal below, which only concerns Gutter Gourmand's OWN unlockDay).
-    // Gutter Gourmand's day-3 gate is removed (Jesper, 2026-08-01, see its
-    // own doc comment) — available from day 1 now, same as Dire-Rat/
-    // Ward-Weaver above.
+  it('prestige reskin pair (issue #151) flipped back for 2026-08-31: Twilight-Runt live, Gutter Gourmand benched', () => {
+    // Gutter Gourmand was the season-3 prestige reskin of Twilight-Runt's
+    // exact kit. The 2026-08-31 rebalance flips the pair back, same as the
+    // Warren-Warden/MD-Rattyfock pair above — identity churn to make the shop
+    // read differently on Monday, with zero balance delta because the two defs
+    // are numerically identical. Neither carries an unlockDay any more (the
+    // day-3 gate came off 2026-08-01), so the live side rolls from day 1.
     for (const day of [1, 2, 3, 4, 5, 6, 7]) {
-      expect(everAppears(day, 'twilight-runt')).toBe(false);
-      expect(everAppears(day, 'gutter-gourmand')).toBe(true);
+      expect(everAppears(day, 'gutter-gourmand')).toBe(false);
+      expect(everAppears(day, 'twilight-runt')).toBe(true);
     }
   });
 
@@ -1533,8 +1538,12 @@ describe('day-gated shop retirement (issue #108: retireDay primitive)', () => {
     }
   });
 
-  it('Cellar-Coil (retireDay: 1, retired for the upcoming season 2026-08-01) never appears in the shop pool, on any day', () => {
-    for (const day of [1, 2, 3, 4, 5, 6, 7]) expect(everAppears(day, 'cellar-coil')).toBe(false);
+  it('Cellar-Coil is UN-RETIRED for 2026-08-31 and rolls on every day again', () => {
+    // Retired 2026-08-01 (`retireDay: 1`), brought back in the 2026-08-31
+    // rebalance to give the 'scaling' role a third provider — see its doc
+    // comment in data/units.ts. Stats and cap untouched; this was a roster
+    // decision, not a power change.
+    for (const day of [1, 2, 3, 4, 5, 6, 7]) expect(everAppears(day, 'cellar-coil')).toBe(true);
   });
 
   it('upcomingRetirements never lists Cellar-Coil (already gone before day 1, not "leaving soon")', () => {
@@ -1543,12 +1552,14 @@ describe('day-gated shop retirement (issue #108: retireDay primitive)', () => {
     }
   });
 
-  it('Ward-Weaver (retireDay: 1, retired for the 2026-08-17 season reset) never appears in the shop pool, on any day', () => {
-    // Cross-season census (wrad-cross-season-staleness) found it the only
-    // true two-season auto-include, unmoved by the anti-stacking anomaly;
-    // its real fix (`ahead`-only armor variant, #181/#182) is held for a
-    // later season, so it's pulled from the pool in the meantime.
-    for (const day of [1, 2, 3, 4, 5, 6, 7]) expect(everAppears(day, 'ward-weaver')).toBe(false);
+  it('Ward-Weaver is UN-RETIRED for 2026-08-31 and rolls on every day again', () => {
+    // Retired 2026-08-14 as the only true two-season auto-include. Brought
+    // back in the 2026-08-31 rebalance TOGETHER WITH the fix that retirement
+    // note was waiting on: `grantArmor` moved from the free whole-board `all`
+    // grant to the positional `ahead` one (#181), so the ward is now bounded
+    // by where it stands rather than by being benched. The two changes ship as
+    // a pair — re-listing it without `ahead` would restore the auto-include.
+    for (const day of [1, 2, 3, 4, 5, 6, 7]) expect(everAppears(day, 'ward-weaver')).toBe(true);
   });
 
   it('upcomingRetirements never lists Ward-Weaver (already gone before day 1, not "leaving soon")', () => {

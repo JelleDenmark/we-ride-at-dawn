@@ -237,59 +237,62 @@ describe('unit abilities', () => {
   const filler = (n: number): UnitDef[][] => Array.from({ length: n }, () => [dummy(0, 0)]);
 
   it('Gnawer bequeaths its own current attack (tier-scaled, relic-buffed), not a flat literal', () => {
-    // t1 Gnawer with Rusted Nail (+2 attack): ownAttack = 3 + 2 = 5. Dies on
-    // wave 1, so the wave bonus is min(1, cap=2*5=10) = 1. Inherited = 6.
+    // t1 Gnawer with Rusted Nail (+2 attack): ownAttack = 4 + 2 = 6. Dies on
+    // wave 1, so the wave bonus is min(1, cap=2*6=12) = 1. Inherited = 7.
+    // (Base attack 3 -> 4 in the 2026-08-31 un-retirement.)
     const { events } = simulate(
       lineup({ defId: 'gnawer', relicIds: ['rusted-nail'] }, { defId: 'gutter-runt' }),
       gauntletOf([dummy(50, 1)])
     );
     const buffs = ofType(events, 'buff');
     expect(buffs.length).toBe(1);
-    expect(buffs[0].attack).toBe(6);
-    expect(buffs[0].newAttack).toBe(1 + 6);
+    expect(buffs[0].attack).toBe(7);
+    expect(buffs[0].newAttack).toBe(1 + 7);
     expect(buffs[0].health).toBe(0);
   });
 
   it('Gnawer\'s inherited attack scales with tier via tierAttackMultiplier', () => {
-    // t2 Gnawer: ownAttack = 3 * 3 = 9. Dies wave 1: bonus = min(1, 2*9=18) = 1.
-    // Inherited = 10.
+    // t2 Gnawer: ownAttack = 4 * 3 = 12. Dies wave 1: bonus = min(1, 2*12=24)
+    // = 1. Inherited = 13. Still the exponential `tierAttackMultiplier` — the
+    // 2026-08-31 flat curve applies only to MULTI-TARGET buffs, and
+    // `bequeathAttack` hands its whole payout to exactly one rat.
     const { events } = simulate(
       lineup({ defId: 'gnawer', tier: 2 }, { defId: 'gutter-runt' }),
       gauntletOf([dummy(50, 9)])
     );
     const buffs = ofType(events, 'buff');
     expect(buffs.length).toBe(1);
-    expect(buffs[0].attack).toBe(10);
+    expect(buffs[0].attack).toBe(13);
   });
 
   it('the wave-died-on bonus grows the later Gnawer falls', () => {
-    // t1 Gnawer, ownAttack = 3, cap = 2*3 = 6 (not yet reached). 4 filler
+    // t1 Gnawer, ownAttack = 4, cap = 2*4 = 8 (not yet reached). 4 filler
     // waves auto-clear for free, so Gnawer dies exactly on wave 5:
-    // bonus = min(5, 6) = 5, inherited = 3 + 5 = 8 — strictly more than the
-    // wave-1 payout (4) a lone early death would grant.
+    // bonus = min(5, 8) = 5, inherited = 4 + 5 = 9 — strictly more than the
+    // wave-1 payout (5) a lone early death would grant.
     const { events } = simulate(
       lineup({ defId: 'gnawer' }, { defId: 'gutter-runt' }),
       gauntletOf(...filler(4), [dummy(50, 1)])
     );
     const buffs = ofType(events, 'buff');
     expect(buffs.length).toBe(1);
-    expect(buffs[0].attack).toBe(8);
-    expect(buffs[0].newAttack).toBe(1 + 8);
+    expect(buffs[0].attack).toBe(9);
+    expect(buffs[0].newAttack).toBe(1 + 9);
   });
 
   it('the wave bonus is capped at waveBonusCapMultiplier * ownAttack, however late Gnawer falls', () => {
-    // t1 Gnawer, ownAttack = 3, cap = 2*3 = 6. 9 filler waves auto-clear for
-    // free so Gnawer dies exactly on wave 10 — well past the cap. Uncapped,
-    // the bonus would be 10 (inherited 13); capped, it tops out at 6
-    // (inherited 9).
+    // t1 Gnawer, ownAttack = 4, cap = 2*4 = 8. 9 filler waves auto-clear for
+    // free so Gnawer dies exactly on wave 10 — still past the cap. Uncapped,
+    // the bonus would be 10 (inherited 14); capped, it tops out at 8
+    // (inherited 12).
     const { events } = simulate(
       lineup({ defId: 'gnawer' }, { defId: 'gutter-runt' }),
       gauntletOf(...filler(9), [dummy(50, 1)])
     );
     const buffs = ofType(events, 'buff');
     expect(buffs.length).toBe(1);
-    expect(buffs[0].attack).toBe(9);
-    expect(buffs[0].attack).toBeLessThan(3 + 10);
+    expect(buffs[0].attack).toBe(12);
+    expect(buffs[0].attack).toBeLessThan(4 + 10);
   });
 
   it('Gnawer in the last slot has nobody behind it — the payout evaporates, no crash', () => {
@@ -381,15 +384,20 @@ describe('unit abilities', () => {
     expect(result.survivors.length).toBe(0);
   });
 
-  it('Warren-Warden buffs every rat behind it at start of battle', () => {
+  it('Warren-Warden buffs only the ONE rat directly behind it at start of battle', () => {
     const { events } = simulate(
       lineup({ defId: 'warren-warden' }, { defId: 'gutter-runt' }, { defId: 'dire-rat' }),
       gauntletOf([dummy(0, 1)])
     );
     const clashIdx = events.findIndex((e) => e.type === 'clash');
     const buffs = ofType(events.slice(0, clashIdx), 'buff');
-    expect(buffs.length).toBe(2);
-    expect(buffs.every((b) => b.attack === 2 && b.health === 1)).toBe(true);
+    // `all` dropped on 2026-08-31: with three rats on the board this used to
+    // land two buffs (gutter-runt AND dire-rat); it now lands exactly one, on
+    // the immediate neighbour. That reach change is what finally broke the
+    // 8x-spam board — see the def's doc comment in data/units.ts.
+    expect(buffs.length).toBe(1);
+    expect(buffs[0].attack).toBe(2);
+    expect(buffs[0].health).toBe(1);
   });
 
   it('Rat-Piper summons exactly one pup, once, at battle start (issue #161 rework)', () => {
@@ -443,7 +451,11 @@ describe('unit abilities', () => {
       gauntletOf([dummy(0, 100)])
     );
     const start = ofType(events, 'battleStart')[0];
-    expect(start.horde[0].attack).toBe(3); // Piper itself
+    // Piper's own body is 2 attack since the 2026-08-31 buff (was 1), so
+    // 2 + Rusted Nail's 2 = 4. The PUP is unaffected by that change — it is a
+    // `pup` body (base attack 1) at the caster's tier, plus the inherited
+    // relic, so it stays at 3. That asymmetry is the point of the test.
+    expect(start.horde[0].attack).toBe(4); // Piper itself
     const summons = ofType(events, 'summon');
     expect(summons.length).toBe(1);
     expect(summons[0].unit.attack).toBe(3); // the pup, inherited
@@ -691,8 +703,12 @@ describe('relics', () => {
       gauntletOf([dummy(0, 1)])
     );
     const start = ofType(events, 'battleStart')[0];
-    expect(start.horde[0].attack).toBe(3);
-    expect(start.horde[0].health).toBe(4);
+    // Rat-Piper's body is 2/4 since the 2026-08-31 buff (was 1/2), so the
+    // whole-horde +2/+2 lands it at 4/6. The pup is a separate `pup` body
+    // (1/1) and still reads 3/3 — the relic reaches summons too, which is what
+    // this test is actually about.
+    expect(start.horde[0].attack).toBe(4);
+    expect(start.horde[0].health).toBe(6);
     const summons = ofType(events, 'summon');
     expect(summons[0].unit.attack).toBe(3);
     expect(summons[0].unit.health).toBe(3);
@@ -792,17 +808,24 @@ describe('Twilight-Runt (issue #110: Dawn/Dusk-Runt fusion; 2026-07-16 wave-base
     expect(buffs.filter((b) => b.attack === 1 && b.health === 1)).toHaveLength(2);
   });
 
-  it('scales both doses with tier, like every other teamBuff-family magnitude', () => {
+  it('scales both doses with tier on the FLAT multi-target curve, not the 3x one', () => {
     const { events } = simulate(
       lineup({ defId: 'twilight-runt', tier: 2 }, { defId: 'gutter-runt', tier: 2 }),
       gauntletOf(...Array.from({ length: 15 }, () => [dummy(0, 1)]))
     );
     const buffs = ofType(events, 'buff');
-    // tierAttackMultiplier/tierHealthMultiplier(2) === 3, so early +2atk/+1hp
-    // -> +6atk/+3hp, late +1atk/+1hp -> +3atk/+3hp, both tier-scaled.
+    // `multiTargetBuffMultiplier(2) === 2` (rebalance, 2026-08-31), so early
+    // +2atk/+1hp -> +4atk/+2hp and late +1atk/+1hp -> +2atk/+2hp.
+    //
+    // This deliberately does NOT use tierAttackMultiplier (which would give
+    // +6/+3 and +3/+3): `teamBuffByWave` reaches the whole board, and
+    // whole-board buffs pay for that reach with a flat 1x/2x/3x curve. See
+    // `multiTargetBuffMultiplier`'s doc comment in data/units.ts. A ★3 on the
+    // old curve granted the entire warren +18/+9, which is what made the
+    // wave-buff kit undefeated in the PvP spam ladder.
     expect(buffs.length).toBe(4);
-    expect(buffs.filter((b) => b.attack === 6 && b.health === 3)).toHaveLength(2);
-    expect(buffs.filter((b) => b.attack === 3 && b.health === 3)).toHaveLength(2);
+    expect(buffs.filter((b) => b.attack === 4 && b.health === 2)).toHaveLength(2);
+    expect(buffs.filter((b) => b.attack === 2 && b.health === 2)).toHaveLength(2);
   });
 });
 
@@ -968,6 +991,6 @@ describe('combat cap headroom for summons', () => {
 describe('golden log regression', () => {
   it('the full showcase battle produces the pinned event-log hash', () => {
     const { events } = simulate(TEST_HORDE, generateGauntlet('2026-01-01'));
-    expect(fnv1a(JSON.stringify(events))).toMatchInlineSnapshot(`3491901326`);
+    expect(fnv1a(JSON.stringify(events))).toMatchInlineSnapshot(`1670956981`);
   });
 });

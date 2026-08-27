@@ -282,8 +282,15 @@ const SHOP_UNIT_POOL = Object.values(UNIT_DEFS).filter(
     // without an ever-growing id blocklist.
     u.cost > 0 &&
     u.id !== 'blight-witch' &&
-    u.id !== 'warren-warden' &&
-    u.id !== 'twilight-runt' &&
+    // Twin sides FLIPPED for the 2026-08-31 season (see the reskin note above):
+    // Warren-Warden and Twilight-Runt take back the shelf, MD Rattyfock and
+    // Gutter Gourmand step off it. Both pairs are stat- and ability-identical,
+    // so this is pure identity churn — zero balance delta, zero engine risk —
+    // and it is the cheapest way to make the shop LOOK different on Monday.
+    // The retirement contract is unchanged: every excluded def stays in
+    // UNIT_DEFS, and only one side of a pair is ever purchasable at a time.
+    u.id !== 'md-rattyfock' &&
+    u.id !== 'gutter-gourmand' &&
     u.id !== 'dawn-runt' &&
     u.id !== 'dusk-runt' &&
     u.id !== 'slink-rat'

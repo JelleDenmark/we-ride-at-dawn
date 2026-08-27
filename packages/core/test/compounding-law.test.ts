@@ -264,12 +264,14 @@ describe('compounding-law: Gnawer bequeathAttack + Bone-Priest revive is a bound
     expect(ofType(events, 'revive').length).toBe(1);
     expect(ofType(events, 'revive')[0].unit.defId).toBe('gnawer');
 
-    // Gnawer's own attack (tier 1, no relics) is 3 the whole battle — revive
+    // Gnawer's own attack (tier 1, no relics) is 4 the whole battle — revive
     // resets health/poison, never attack — so both payouts share the same
-    // ownAttack and the same cap: waveBonusCapMultiplier(2) * 3 = 6.
-    const ownAttack = 3;
+    // ownAttack and the same cap: waveBonusCapMultiplier(2) * 4 = 8.
+    // (Base attack 3 -> 4 in the 2026-08-31 un-retirement; the CAP RATIO, which
+    // is what this canary actually guards, is unchanged.)
+    const ownAttack = 4;
     const capMultiplier = 2;
-    const maxSinglePayout = ownAttack + capMultiplier * ownAttack; // 9
+    const maxSinglePayout = ownAttack + capMultiplier * ownAttack; // 12
 
     const buffs = ofType(events, 'buff');
     // Exactly two bequeathAttack payouts landed (Gutter-Runt's wave-6 death
@@ -283,12 +285,12 @@ describe('compounding-law: Gnawer bequeathAttack + Bone-Priest revive is a bound
       expect(b.health).toBe(0);
     }
 
-    // Payout #1 (wave 5, bonus 5 < cap 6): inherited = 3 + 5 = 8.
-    expect(buffs[0].attack).toBe(8);
-    // Payout #2 (wave 12, bonus would be 12 uncapped -> clamped to 6):
-    // inherited = 3 + 6 = 9 = maxSinglePayout, confirming the cap actually
+    // Payout #1 (wave 5, bonus 5 < cap 8): inherited = 4 + 5 = 9.
+    expect(buffs[0].attack).toBe(9);
+    // Payout #2 (wave 12, bonus would be 12 uncapped -> clamped to 8):
+    // inherited = 4 + 8 = 12 = maxSinglePayout, confirming the cap actually
     // engaged rather than merely never being tested.
-    expect(buffs[1].attack).toBe(9);
+    expect(buffs[1].attack).toBe(12);
     expect(buffs[1].attack).toBe(maxSinglePayout);
 
     // The combined double payout is bounded by 2x the single-payout cap —

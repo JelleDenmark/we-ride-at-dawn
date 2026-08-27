@@ -45,17 +45,19 @@ describe('Slink-Rat (issue #86)', () => {
     expect(damages.every((d) => d.amount === 3)).toBe(true);
   });
 
-  it('merge scaling grows target count, not per-hit damage (issue #86 follow-up)', () => {
-    // ★2 hits the first 2 enemies (backlineTargetsForTier), each for the
-    // unit's flat base attack (3) — not one enemy for a tier-multiplied 9.
+  it('merge scaling grows target count AND per-hit damage, both linearly', () => {
+    // ★2 hits the first 2 enemies (backlineTargetsForTier), each for base
+    // attack x tier = 6 — NOT one enemy for a tier-multiplied 9, and not the
+    // old flat 3 either (2026-08-31: reach-only tiering measured as negative
+    // value per scrap at ★3; see `backlineTargetsForTier`'s doc comment).
     const t2 = simulate(
       lineup({ defId: 'dire-rat' }, { defId: 'slink-rat', tier: 2 }),
       gauntletOf([dummy(0, 1000), dummy(0, 1000)])
     );
     const enemies = ofType(t2.events, 'waveStart')[0].enemies;
     const hitOn = (foeId: number) => ofType(t2.events, 'damage').find((d) => d.targetId === foeId);
-    expect(hitOn(enemies[0].instanceId)?.amount).toBe(3);
-    expect(hitOn(enemies[1].instanceId)?.amount).toBe(3);
+    expect(hitOn(enemies[0].instanceId)?.amount).toBe(6);
+    expect(hitOn(enemies[1].instanceId)?.amount).toBe(6);
   });
 
   it('★1 only ever hits the frontmost enemy, even against a multi-enemy wave', () => {

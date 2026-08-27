@@ -15,16 +15,21 @@ describe('MD Rattyfock (issue #23)', () => {
     expect(md.cost).toBe(warren.cost);
   });
 
-  it('has the same ability as Warren-Warden (startOfBattle, +2/+1 to all behind)', () => {
+  it('has the same ability as Warren-Warden (startOfBattle, +2/+1 to the rat behind)', () => {
     const warren = UNIT_DEFS['warren-warden'];
     const md = UNIT_DEFS['md-rattyfock'];
     expect(md.ability).toBeDefined();
     expect(md.ability?.trigger).toBe('startOfBattle');
     expect(md.ability?.effect.kind).toBe('buffBehind');
+    // `all` dropped on 2026-08-31 — the kit is single-target now. Asserted
+    // against the TWIN rather than as a literal, so a future tune of one entry
+    // can never silently desync the pair (which is the whole point of this
+    // file, and see reskin-twins.test.ts for the same check across all pairs).
+    expect(md.ability?.effect).toEqual(warren.ability?.effect);
     if (md.ability?.effect.kind === 'buffBehind') {
       expect(md.ability.effect.attack).toBe(2);
       expect(md.ability.effect.health).toBe(1);
-      expect(md.ability.effect.all).toBe(true);
+      expect(md.ability.effect.all).toBeUndefined();
     }
   });
 

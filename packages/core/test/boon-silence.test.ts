@@ -17,13 +17,25 @@ describe('silence', () => {
   });
 
   it('strips a position-dependent buff it leads with', () => {
-    // buffBehind buffs the rats BEHIND its caster, so its carrier wants to
-    // stand at or near the front for coverage — which is exactly where
-    // front-silence lands. This is why the front slot is the right target.
-    const a = lineup('dire-rat', 'dire-rat', 'dire-rat');
-    const b = () => lineup('md-rattyfock', 'dire-rat', 'dire-rat');
+    // buffBehind buffs the rat BEHIND its caster, so its carrier wants to
+    // stand directly in front of whatever it is pumping — which is exactly
+    // where front-silence lands. This is why the front slot is the right
+    // target. (`all` was dropped from the kit on 2026-08-31, so the grant is
+    // now a single neighbour rather than the whole line; the boon's
+    // interaction with it is unchanged, only the magnitude at stake.)
+    //
+    // B is deliberately the STRONGER board here. The obvious symmetric
+    // matchups (3v3 or 4v4 of the same bodies) all wipe B regardless, which
+    // pins `healthB` at 0 in both branches and makes the assertion pass for
+    // the wrong reason — it has to survive for the silenced margin to be
+    // observable at all.
+    const a: Lineup = { units: [{ defId: 'dire-rat' }, { defId: 'dire-rat' }] };
+    const b = (): Lineup => ({
+      units: [{ defId: 'md-rattyfock', tier: 2 }, { defId: 'dire-rat', tier: 2 }],
+    });
     const plain = simulateDuel(a, b()).result;
     const silenced = simulateDuel(a, b(), 'silence', null).result;
+    expect(plain.healthB).toBeGreaterThan(0);
     expect(silenced.healthB).toBeLessThan(plain.healthB);
   });
 

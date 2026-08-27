@@ -78,19 +78,40 @@ describe('backline damage primitive (issue #85)', () => {
     expect(damages.every((d) => d.amount === 3)).toBe(true);
   });
 
-  it('tier grows target count, NOT per-hit magnitude (issue #86 follow-up)', () => {
-    // Per-hit damage stays flat (3) at every tier — only the number of
-    // enemies hit grows (backlineTargetsForTier: 1/2/3) — so a ★2 sniper
-    // against a 2-enemy wave lands two separate 3-damage hits, not one
-    // 9-damage hit.
+  it('tier grows target count AND per-hit magnitude, both LINEARLY', () => {
+    // Changed 2026-08-31. This test previously pinned per-hit damage flat at
+    // every tier, target count being the sole axis. That made a ★3 sniper cost
+    // 9x the scrap for ★1 damage and measure at NEGATIVE value per scrap on
+    // `balance:all-unit-value` — a unit you were punished for merging.
+    //
+    // Both axes are linear now, so a ★2 sniper lands two separate 6-damage
+    // hits (base 3 x tier 2). The thing the old test was really protecting —
+    // that this never becomes a wave-deleting nuke — is protected by the
+    // LINEARITY, not by the flatness: 3x per hit at ★3, never
+    // tierAttackMultiplier's 9x. The `does not use the exponential curve`
+    // assertion below is the one that guards that, and it still holds.
     const t2 = simulate(
       lineup({ defId: 'dire-rat' }, { defId: 'test-sniper', tier: 2 }),
       gauntletOf([dummy(0, 1000), dummy(0, 1000)])
     );
     const enemies = ofType(t2.events, 'waveStart')[0].enemies;
     const hitOn = (foeId: number) => ofType(t2.events, 'damage').find((d) => d.targetId === foeId);
-    expect(hitOn(enemies[0].instanceId)?.amount).toBe(3);
-    expect(hitOn(enemies[1].instanceId)?.amount).toBe(3);
+    expect(hitOn(enemies[0].instanceId)?.amount).toBe(6);
+    expect(hitOn(enemies[1].instanceId)?.amount).toBe(6);
+  });
+
+  it('per-hit magnitude is LINEAR in tier, never the exponential 3^(tier-1) curve', () => {
+    // The AOE-nuke guard that `backlineTargetsForTier`'s doc comment argues
+    // for, now asserted directly rather than implied by a flat magnitude: a ★3
+    // sniper hits for 3x base, not 9x.
+    const t3 = simulate(
+      lineup({ defId: 'dire-rat' }, { defId: 'test-sniper', tier: 3 }),
+      gauntletOf([dummy(0, 1000), dummy(0, 1000), dummy(0, 1000)])
+    );
+    const foe = ofType(t3.events, 'waveStart')[0].enemies[0].instanceId;
+    const hit = ofType(t3.events, 'damage').find((d) => d.targetId === foe);
+    expect(hit?.amount).toBe(9); // 3 base x tier 3 — linear
+    expect(hit?.amount).toBeLessThan(3 * Math.pow(3, 3 - 1)); // < 27, the exponential curve
   });
 
   it('a ★1 sniper only ever hits the frontmost enemy, even in a multi-enemy wave', () => {
@@ -125,10 +146,13 @@ describe('backline damage primitive (issue #85)', () => {
 
   it('a runtime attack buff (e.g. Warren-Warden buffBehind) raises the per-hit damage, same as any other attack-based effect', () => {
     // Warren-Warden's startOfBattle buffBehind grants +2 attack (tier 1) to
-    // every unit behind it, including a backline sniper. Backline damage
+    // the rat directly behind it — here, the backline sniper. Backline damage
     // recomputes its own flat, tier-multiplier-free magnitude rather than
     // reusing `source.attack` directly (see the `backlineDamage` case in
     // sim.ts) — this guards against silently dropping that live buff again.
+    // The point of the test is that the buff is REFLECTED AT ALL, not its
+    // exact size. (Still a 2-unit board after the 2026-08-31 `all` removal, so
+    // the sniper is the immediate neighbour and still gets the grant.)
     const { events } = simulate(
       lineup({ defId: 'warren-warden' }, { defId: 'test-sniper' }),
       gauntletOf([dummy(0, 1000)])
@@ -389,8 +413,9 @@ describe('backline damage primitive (issue #85)', () => {
       );
       const enemies = ofType(events, 'waveStart')[0].enemies;
       const hitOn = (foeId: number) => ofType(events, 'damage').find((d) => d.targetId === foeId);
-      expect(hitOn(enemies[0].instanceId)?.amount).toBe(7); // base 3 + 4, first target only
-      expect(hitOn(enemies[1].instanceId)?.amount).toBe(3); // base 3, no bonus
+      // ★2 per-hit base is 6 (3 x tier 2) since the 2026-08-31 linear change.
+      expect(hitOn(enemies[0].instanceId)?.amount).toBe(10); // base 6 + 4, first target only
+      expect(hitOn(enemies[1].instanceId)?.amount).toBe(6); // base 6, no bonus
     });
 
     it('a flat-attack relic (Rusted Nail) still adds to every target struck, unlike Glass Shard', () => {
@@ -405,8 +430,10 @@ describe('backline damage primitive (issue #85)', () => {
       );
       const enemies = ofType(events, 'waveStart')[0].enemies;
       const hitOn = (foeId: number) => ofType(events, 'damage').find((d) => d.targetId === foeId);
-      expect(hitOn(enemies[0].instanceId)?.amount).toBe(5); // base 3 + 2
-      expect(hitOn(enemies[1].instanceId)?.amount).toBe(5); // base 3 + 2, both targets
+      // Relic bonus stays FLAT while the base is tier-scaled, mirroring
+      // `instantiate`: ★2 base 6 (3 x 2) + Rusted Nail's flat +2 = 8.
+      expect(hitOn(enemies[0].instanceId)?.amount).toBe(8); // base 6 + 2
+      expect(hitOn(enemies[1].instanceId)?.amount).toBe(8); // base 6 + 2, both targets
     });
   });
 

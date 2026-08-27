@@ -5,6 +5,7 @@ export {
   TEST_HORDE,
   tierAttackMultiplier,
   tierHealthMultiplier,
+  multiTargetBuffMultiplier,
   reviveHpForTier,
   blockHitsForTier,
   wardArmorForTier,

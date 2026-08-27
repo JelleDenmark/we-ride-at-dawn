@@ -65,6 +65,7 @@
     seasonRelicPool,
     tierAttackMultiplier,
     tierHealthMultiplier,
+    multiTargetBuffMultiplier,
     reviveHpForTier,
     poisonStacksForTier,
     cellarCoilChargeCapForTier,
@@ -821,6 +822,20 @@
   }
 
   /**
+   * "+2/+1 (★2 +4/+2 · ★3 +6/+3)" for buffs that land on MORE THAN ONE rat —
+   * whole-team (`teamBuff`, `teamBuffByWave`), whole-line (`buffBehind` with
+   * `all`), and both-neighbours (`buffAdjacent`). Reads
+   * `multiTargetBuffMultiplier`, the same core helper sim.ts scales by, so
+   * display can't drift from the mechanic.
+   *
+   * These used the 3x `buffScale` curve until the 2026-08-31 rebalance; using
+   * it now would over-promise +18/+9 at ★3 where the sim grants +6/+3.
+   */
+  function multiTargetBuffScale(attack: number, health: number): string {
+    return buffScaleWith(attack, health, multiTargetBuffMultiplier);
+  }
+
+  /**
    * "+1/+1 (★2 +2/+2 · ★3 +3/+3)" for the SHALLOW linear (1/2/3) per-star
    * curve. gainStats is the sole buff sim.ts scales by a flat `* tier` rather
    * than `tierAttackMultiplier` (1/3/9): its `allyFaint` trigger repeats every
@@ -894,7 +909,17 @@
       return `Each wave, the ${team} shrugs off the next ${blockHitsForTier(1)} hit outright (★2 ${blockHitsForTier(2)}, ★3 ${blockHitsForTier(3)}) — whichever ${own} is at the front takes the save. Never stacks across multiple casters, and the pool resets every wave.`;
     }
     if (e.kind === 'grantArmor') {
-      const who = e.all ? 'every ' + own : 'itself';
+      // `ahead` (2026-08-31) has to be spelled out rather than folded into the
+      // `all` wording: it is the difference between a free whole-board grant
+      // and a placement decision, so a player who cannot see the direction
+      // cannot play the unit. Named the caster's own position explicitly
+      // ("itself and every rat in front of it") because the mirror-image of
+      // buffBehind is genuinely easy to read backwards.
+      const who = e.all
+        ? 'every ' + own
+        : e.ahead
+          ? `itself and every ${own} in front of it`
+          : 'itself';
       return `At the dawn of battle, wards ${who} with +${wardArmorForTier(1)} armor (★2 +${wardArmorForTier(2)}, ★3 +${wardArmorForTier(3)}) — every hit they take lands for that much less, all ride long, but a hit always lands for at least 1.`;
     }
     if (e.kind === 'chargeWhileBenched') {
@@ -941,7 +966,7 @@
       // poisonResist/blockFrontHits above: when an effect gates its own
       // firing tighter than its trigger's literal cadence, lead with what
       // actually happens instead of the trigger frame.
-      return `Grants the whole ${team} ${buffScale(e.early.attack, e.early.health)} on its first wave, plus ${buffScale(e.late.attack, e.late.health)} more from wave ${e.switchWave} onward — both one-time and permanent for the rest of the ride.`;
+      return `Grants the whole ${team} ${multiTargetBuffScale(e.early.attack, e.early.health)} on its first wave, plus ${multiTargetBuffScale(e.late.attack, e.late.health)} more from wave ${e.switchWave} onward — both one-time and permanent for the rest of the ride.`;
     }
     if (e.kind === 'poisonFrontEnemyWhileAlive') {
       // Bespoke sentence (not the generic trigger template below): the
@@ -998,7 +1023,12 @@
         break;
       }
       case 'buffBehind':
-        what = `grants ${buffScale(e.attack, e.health)} to ${e.all ? `every ${own} behind it` : `the ${own} behind it`}`;
+        // Reach decides the curve (2026-08-31 rebalance): the whole-line form
+        // takes the flat multi-target curve, the single-target form keeps the
+        // steep one — mirroring the `buffBehind` case in sim.ts exactly.
+        what = e.all
+          ? `grants ${multiTargetBuffScale(e.attack, e.health)} to every ${own} behind it`
+          : `grants ${buffScale(e.attack, e.health)} to the ${own} behind it`;
         break;
       case 'bequeathAttack':
         // The last-slot whiff is deliberate — sim.ts's `bequeathAttack` case
@@ -1042,10 +1072,10 @@
         what = `raises the first ${own} to fall — never itself — at ${reviveHpForTier(1)} health (★2 ${reviveHpForTier(2)} · ★3 ${reviveHpForTier(3)}), clean of rot but never past that ${own}’s own max. Once per corpse, and only with room on the board`;
         break;
       case 'buffAdjacent':
-        what = `grants ${buffScale(e.attack, e.health)} to the ${own}(s) beside it — a middle seat buffs both neighbours`;
+        what = `grants ${multiTargetBuffScale(e.attack, e.health)} to the ${own}(s) beside it — a middle seat buffs both neighbours`;
         break;
       case 'teamBuff':
-        what = `grants ${buffScale(e.attack, e.health)} to the whole ${team}, itself included`;
+        what = `grants ${multiTargetBuffScale(e.attack, e.health)} to the whole ${team}, itself included`;
         break;
       case 'poisonAllEnemies':
         what = `rots every ${foe} in the wave with ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) — ignores armor, clears when the wave falls, capped across multiple casters`;
