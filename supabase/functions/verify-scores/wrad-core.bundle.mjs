@@ -70,6 +70,9 @@ function tierAttackMultiplier(tier) {
 function tierHealthMultiplier(tier) {
   return Math.pow(3, tier - 1);
 }
+function multiTargetBuffMultiplier(tier) {
+  return tier;
+}
 function reviveHpForTier(tier) {
   const table = [1, 10, 20];
   return table[tier - 1] ?? table[table.length - 1];
@@ -132,11 +135,21 @@ var UNIT_DEFS = {
   // The pup also inherits a copy of whatever unit relic(s) Piper itself
   // wears (issue #161 follow-up) — makes Piper's own relic pick do double
   // duty, e.g. a Glass-Shard Piper fields TWO armor-breaking alpha strikers.
+  // Body 1/2 -> 2/4 (2026-08-31 rebalance), cost unchanged at 4. A ★1 Piper
+  // measured **0.0** waves per 100 scrap on `balance:all-unit-value` — the
+  // literal zero-line, tied with the ability-less control filler — because the
+  // whole 4-scrap package was a 1/2 body plus a 1/1 pup, which loses to
+  // Plague-Bearer's 2/2 at the same price before its ability is even counted.
+  // A broken cheap entry point matters more than its rank suggests: Piper is
+  // one of only two `summon`-role units in the pool, and Squeak-Sensei's
+  // `allySummoned` kit is a dead card without a summoner on the board (the
+  // dependency `season-pool.test.ts` explicitly guards). The pup and its
+  // tier-scaling are untouched — this is a body fix, not a kit change.
   "rat-piper": {
     id: "rat-piper",
     name: "Rat-Piper",
-    attack: 1,
-    health: 2,
+    attack: 2,
+    health: 4,
     cost: 4,
     ability: { trigger: "startOfBattle", effect: { kind: "summonScaledPup", unitId: "pup", count: 1 } },
     tribe: "swarm"
@@ -227,12 +240,31 @@ var UNIT_DEFS = {
   // day-2 gate, and tribe are unchanged; only the kit moved, so Moe no
   // longer numerically mirrors Blight-Witch and #116's "tune the shared kit
   // there, since Moe IS that kit" note is now stale history, not current.
+  // 2026-08-31 rebalance: health 3 -> 5, cost 8 -> 7. The KIT IS DELIBERATELY
+  // UNTOUCHED, and that is a reversal of this rebalance's own first draft,
+  // which had proposed handing Moe the `poisonAllEnemies` kit back on the
+  // grounds that Blight-Witch measures far better in PvP. Reading the
+  // 2026-08-13 history above is what killed that idea: poison-all is better in
+  // duels *because* it is a PvP outlier (41.5% of Moe's outgoing damage in an
+  // isolated duel vs 1.8% across a 45-wave gauntlet), poison decay was already
+  // tried as the alternative fix and reverted by owner call, and Blight-Witch
+  // is the last unit `pvp:matrix` Lens B still tags `generic` — positive
+  // against all four opponent archetypes. Making the one no-counterplay kit
+  // purchasable again would undo the main thing this rebalance achieved.
+  //
+  // Moe's measured problem is not her kit's shape, it's that she never lives
+  // long enough to use it: `whileAlive` pays out per COMBAT TICK she survives,
+  // so survivability IS her damage, and a 3/3 body at cost 8 is the worst
+  // scrap-for-value line in the roster (`balance:all-unit-value` T2/T3 rank
+  // #14 of 16; `pvp:matrix` Lens B `dead`; 1/16 boards in the realistic
+  // census). Health is therefore the correct knob — it buys ticks — and the
+  // cost cut brings a still-premium unit nearer the rest of the ladder.
   "draughtsman-moe": {
     id: "draughtsman-moe",
     name: "Draughtsman Moe",
     attack: 3,
-    health: 3,
-    cost: 8,
+    health: 5,
+    cost: 7,
     ability: { trigger: "whileAlive", effect: { kind: "poisonFrontEnemyWhileAlive" } },
     tribe: "plague",
     // Day-2 gate added (Jesper, 2026-08-01) — a deliberate departure from the
@@ -242,26 +274,35 @@ var UNIT_DEFS = {
     unlockDay: 2
   },
   gnawer: {
+    // UN-RETIRED for 2026-08-31, with attack 3 -> 4 and cost 4 -> 3.
+    //
+    // The 2026-08-01 retirement note (below) is still correct about WHY it was
+    // weak: `bequeathAttack` pays `ownAttack + min(currentWave, mult *
+    // ownAttack)`, and a duel is a single wave, so the wave term is ~0 in the
+    // scored PvP mode. The fix therefore has to come from the term that does
+    // survive a one-wave fight — the caster's own attack — not from the wave
+    // bonus or its cap (raising `waveBonusCapMultiplier` would only feed the
+    // 45-wave ladder it was already overfit to).
+    //
+    // Cost 4 -> 3 is the other half: Gnawer's whole identity is a body that
+    // dies on purpose, and its single best partner on `balance:combos` is
+    // Ward-Weaver — which returns to the pool in this same cut. A cheap
+    // sacrifice is also what day 1 is short of (season-pool.test.ts wants >= 4
+    // units at cost <= 5 on day 1, and the pool has been running thin there).
     id: "gnawer",
     name: "Gnawer",
-    attack: 3,
+    attack: 4,
     health: 1,
-    cost: 4,
+    cost: 3,
     // Issue #111 rework: was a flat `buffBehind` +2 that never aged. Now a
     // `bequeathAttack` (own live attack + capped wave-died-on bonus) — see
     // that effect kind's doc comment above for the full formula and the
     // compounding-law/Cellar-Coil reasoning behind the cap living here.
     ability: { trigger: "faint", effect: { kind: "bequeathAttack", waveBonusCapMultiplier: 2 } },
-    tribe: "runt",
-    // Retired for the upcoming season (Jesper, 2026-08-01, issue #161), same
-    // mechanism/precedent as Gutter-Runt/Cellar-Coil above — out of the shop
-    // pool from day 1 on, carried-in copies still sell at par (`sellRefund`).
-    // Rationale: `pvp:matrix` measures Gnawer duel-dead at every tier —
-    // `bequeathAttack`'s wave-died-on bonus is near-zero in a duel's single
-    // wave, so it was tuned purely for the (now economy-only) depth ladder
-    // and contributes nothing to the scored PvP mode. Rat-Piper, reworked,
-    // takes its roster slot (see Rat-Piper's own note above).
-    retireDay: 1
+    tribe: "runt"
+    // Retired 2026-08-01 (issue #161) because `pvp:matrix` measured Gnawer
+    // duel-dead at every tier — kept here as the reasoning the un-retirement
+    // above had to answer, not as a live gate.
   },
   "corpse-glutton": {
     id: "corpse-glutton",
@@ -280,19 +321,40 @@ var UNIT_DEFS = {
     ability: { trigger: "faint", effect: { kind: "revive" } }
   },
   "warren-warden": {
-    // #149 (Jesper: "feels underwhelming"): attack 2 -> 3. The `buffBehind`
-    // amount is deliberately left alone — it's already exponential via
-    // `tierAttackMultiplier`'s 3^(tier-1) (a flat +1/+1 is +9/+9 to the whole
-    // team behind it at T3, see all-unit-value's T2/T3 rank), so bumping the
-    // ability would compound into an outlier at high tier. A flat +1 own
-    // attack is linear, fixes the early-game "does nothing itself" feel
-    // without touching the part of the kit that already tops the tier list.
+    // #149 (Jesper: "feels underwhelming"): attack 2 -> 3. That change left the
+    // `buffBehind` amount alone on the grounds that it was already exponential
+    // via `tierAttackMultiplier`, so bumping it would compound at high tier.
+    // The 2026-08-31 rebalance removed that exponent (whole-line buffs now take
+    // `multiTargetBuffMultiplier`'s flat curve), which retires the old
+    // reasoning — the magnitude is a normal tuning knob again.
+    //
+    // The kit also loses `all` in that pass, becoming a SINGLE-TARGET buff of
+    // the one rat directly behind — and takes back the steep `3^(tier-1)`
+    // curve as a result, per `multiTargetBuffMultiplier`'s "magnitude scales
+    // with reach" rule.
+    //
+    // Two flatter nerfs were tried first and both failed, which is why the
+    // reach had to move instead of the number:
+    //   1. Flat tier curve (the W1 change): survDiff +9367 -> +6292, still
+    //      UNDEFEATED in `pvp:matrix`'s ★3 spam ladder.
+    //   2. Magnitude 2/1 -> 1/1 on top of that: briefly 22-2-1, then straight
+    //      back to 23-2-0 undefeated once Ward-Weaver — which turned out to be
+    //      this board's only real counter — was itself bounded by `ahead`.
+    //
+    // The reason no magnitude survives is that `all` makes value grow with
+    // BOARD WIDTH *and* stack per caster: on an 8-wide mirror, caster 0 buffs
+    // 7 rats, caster 1 buffs 6, and so on — 28 grants from 8 bodies, quadratic
+    // in board size. Halving a quadratic still leaves a quadratic. Dropping
+    // `all` makes it 7 grants from 8 bodies: linear, and it turns the unit
+    // into a placement decision (who do you stand it in front of?) rather than
+    // a free team aura, which is the same direction #181 argues for and the
+    // same shape Ward-Weaver's `ahead` now has.
     id: "warren-warden",
     name: "Warren-Warden",
     attack: 3,
     health: 6,
     cost: 6,
-    ability: { trigger: "startOfBattle", effect: { kind: "buffBehind", attack: 2, health: 1, all: true } },
+    ability: { trigger: "startOfBattle", effect: { kind: "buffBehind", attack: 2, health: 1 } },
     tribe: "brute"
   },
   "dire-rat": {
@@ -320,7 +382,11 @@ var UNIT_DEFS = {
     attack: 3,
     health: 6,
     cost: 6,
-    ability: { trigger: "startOfBattle", effect: { kind: "buffBehind", attack: 2, health: 1, all: true } },
+    // Mirrors Warren-Warden's 2026-08-31 move to a single-target `buffBehind`
+    // — see the twin's doc comment for the spam-ladder reasoning. Twin parity
+    // is asserted by md-rattyfock.test.ts and reskin-twins.test.ts; move both
+    // entries together or those fail.
+    ability: { trigger: "startOfBattle", effect: { kind: "buffBehind", attack: 2, health: 1 } },
     // unlockDay dropped (#149, 2026-07-25): MD Rattyfock is now the live twin
     // of this reskin pair, taking over Warren-Warden's old day-1-available
     // role — a straight swap, not a partial one.
@@ -354,20 +420,26 @@ var UNIT_DEFS = {
     attack: 1,
     health: 3,
     cost: 6,
-    ability: { trigger: "startOfBattle", effect: { kind: "grantArmor", all: true } },
-    // Day-1 gate removed (Jesper, 2026-08-01) — see Dire-Rat's note above.
+    // UN-RETIRED for the 2026-08-31 season, and simultaneously moved from the
+    // free whole-board `all` grant to the positional `ahead` one (#181).
     //
-    // Retired for the 2026-08-17 season reset (season-to-season census,
-    // see wrad-cross-season-staleness memory): the only true two-season
-    // auto-include — 32/42 S1 board-rounds, 5/5-5/6 boards every day
-    // measured in S2, unmoved by this season's anti-stacking anomaly. The
-    // real fix (`ahead`-only armor variant, #181/#182) is already built and
-    // measured but deliberately held for a later season — this pulls the
-    // unit from the pool in the meantime rather than leave the free
-    // whole-board grant live untouched. Same mechanism/precedent as
-    // Gnawer/Gutter-Acolyte above: out of the shop pool from day 1 on,
-    // carried-in copies still sell at par (`sellRefund`).
-    retireDay: 1
+    // It was retired on 2026-08-14 as the only true two-season auto-include
+    // (32/42 S1 board-rounds; 5/5-5/6 boards every day measured in S2), with
+    // that comment noting the `ahead` variant was "already built and measured
+    // but deliberately held for a later season". This IS that later season:
+    // shipping the fix is strictly better than continuing to bench the unit,
+    // because Ward-Weaver is also the single best ENABLER in the roster — it
+    // appears in 6 of the top-14 synergy pairs on `balance:combos` (with
+    // gnawer, blight-witch, pack-caller, bone-priest, corpse-glutton and
+    // warren-warden) while ranking near the bottom on solo value (+1.32
+    // waves). A roster whose only high-synergy partner is on the shelf is
+    // exactly the stale meta this rebalance is aimed at.
+    //
+    // `ahead` bounds the ward by POSITION rather than by a smaller number:
+    // slot 0 wards only itself, the back seat wards the whole line. That
+    // makes placement the cost of reach and retires the "the whole warren
+    // hardens for free" shape without touching `wardArmorForTier`.
+    ability: { trigger: "startOfBattle", effect: { kind: "grantArmor", ahead: true } }
   },
   // Issue #12: a parallel "Runt" pair (Gutter-Runt precedent) tied to the
   // game's dawn/dusk duality rather than literal noon-splitting — the actual
@@ -507,8 +579,12 @@ var UNIT_DEFS = {
         late: { attack: 1, health: 1 },
         switchWave: 15
       }
-    },
-    unlockDay: 3
+    }
+    // Day-3 gate REMOVED for 2026-08-31, when this side of the pair took back
+    // the shelf. Gutter Gourmand's identical gate came off on 2026-08-01 but
+    // the benched twin's was never updated to match — a reskin pair has to
+    // stay numerically identical (that is the entire premise of flipping which
+    // side is live being a zero-balance change), and `shop.test.ts` pins it.
   },
   // Season-3 prestige reskin (issue #151): Gutter Gourmand reskins
   // Twilight-Runt's exact kit/stats/unlockDay — same reskin-replacement
@@ -566,13 +642,20 @@ var UNIT_DEFS = {
       trigger: "startOfWave",
       effect: { kind: "chargeWhileBenched", attackPerWave: 1 },
       condition: { notFront: true }
-    },
-    // Retired outright for the upcoming season (Jesper, 2026-08-01), same
-    // mechanism/precedent as Gutter-Runt/Rat-Piper above — out of the shop
-    // pool from day 1 on. Par-buyback severance (`sellRefund` in shop.ts)
-    // still applies, so any copy carried in from a prior season sells for
-    // exactly what was spent, never a loss.
-    retireDay: 1
+    }
+    // UN-RETIRED for 2026-08-31 (was `retireDay: 1`, Jesper 2026-08-01).
+    // Stats and cap deliberately UNCHANGED — this is a pure roster decision,
+    // not a rebalance of the unit.
+    //
+    // The reason it comes back is structural rather than power-level: with
+    // Cellar-Coil out, the 'scaling' role had exactly two providers
+    // (corpse-glutton, grave-leech) and 'defense' had ONE. Every live unit
+    // owning a unique effect kind is what made the pool impossible to rotate —
+    // cutting any single unit deleted a capability outright and tripped
+    // season-pool.test.ts. Restoring this one (plus Ward-Weaver and
+    // Gutter-Acolyte) is what buys the roster enough redundancy to rotate at
+    // all. Its back-slot-patience niche is also the one axis nothing else
+    // live rewards.
   },
   // ---- Season 4 (issues #133-#135, #137) — every stat line below is a
   // placeholder pending Jesper's balance sign-off, same as every other new
@@ -629,11 +712,45 @@ var UNIT_DEFS = {
   // is reachable from day 2 either way — day-2 buys one day less runway than
   // the old day-3 gate did, not a full mitigation. Worth a real
   // balance-script pass if it turns out to matter in practice.
+  // Health 6→7 (2026-08-08 season pass): the `e9552a8` shop-diversity buff had
+  // a ripple crowd-out side effect on this unit (census 5/16→2/16, verified
+  // same-seed A/B) — health only, not the drain amount (already halved once
+  // per #147 above).
+  // STATS DELIBERATELY UNCHANGED in the 2026-08-31 rebalance, after measuring
+  // two alternatives and rejecting both. Worth recording, because this unit
+  // looked like the most overdue nerf in the roster and turned out to be a
+  // symptom rather than the cause.
+  //
+  // What the pass found: once the multi-target buffers were flattened,
+  // Grave-Leech did NOT shrink by context as expected — it became MORE
+  // dominant relatively, reaching #1 at every tier on `balance:all-unit-value`
+  // by roughly 2x (T3 depth efficiency 10.7 against 5.0 for the next unit).
+  //
+  // The actual cause was an ENGINE bug, not this def's numbers. The tick
+  // loop's net-damage floor promises that armor plus healing can never
+  // manufacture an immortal front, but its clamp ran inside the strike
+  // closures — i.e. BEFORE `afterAttack` fires — so this unit's drain, the
+  // only post-clash heal in the game, healed straight back through it. With
+  // Ward-Weaver un-retired in this same cut, a ★3 board of 4x Leech + 4x Ward
+  // cleared 44.8 of 45 waves and a single ward behind a ★3 Leech was worth
+  // +14.0 waves. See the second-pass clamp in sim.ts's tick loop.
+  //
+  // With that fixed, Grave-Leech sits at 5.1 against a 5.0 runner-up — a tie
+  // for first, not a 2x outlier — on its ORIGINAL cost of 6. A cost bump to 8
+  // was drafted and measured first; it drove the unit to #6 (3.9) and would
+  // have been a second nerf stacked on a correctness fix that had already done
+  // the job. Health stays 7 for the same reason: the 2026-08-08 bump to 7 was
+  // a shop-crowd-out fix, and this cut addressed crowd-out from the other side
+  // by putting four units back in the pool.
+  //
+  // The day-2 gate stays. Its stated purpose was to limit the blast radius of
+  // exactly the warded-Leech interaction above; that interaction is now bounded
+  // at the engine level, but the gate is also just good roster texture.
   "grave-leech": {
     id: "grave-leech",
     name: "Grave-Leech",
     attack: 3,
-    health: 6,
+    health: 7,
     cost: 6,
     ability: { trigger: "afterAttack", effect: { kind: "healSelf", amount: 1 } },
     tribe: "brute",
@@ -646,31 +763,105 @@ var UNIT_DEFS = {
   // budget that guarantees that no matter how many are stacked. Tagged
   // plague still fits: an apothecary who works the plague wards, not just
   // the ones who spread it.
+  // Health 3→4 (2026-08-08 season pass): same `e9552a8` ripple as Grave-Leech
+  // (census 7/16→4/16) plus a direct nudge on the still-open #155 PvP
+  // counter-play gap (poison-decay alone barely moved the real RatMoe vs
+  // Well-Dressed-Rat matchup, 73.4%→72.7% — see wrad-pvp-season1-meta memory).
+  // Body stat only, deliberately not touching `poisonResistForTier`/
+  // `POISON_RESIST_CAP` — that lever was already tried and found to have
+  // ~zero effect on the real board.
   "gutter-acolyte": {
     id: "gutter-acolyte",
     name: "Gutter-Acolyte",
     attack: 2,
-    health: 3,
+    health: 4,
     cost: 5,
     ability: { trigger: "startOfWave", effect: { kind: "poisonResist" } },
-    tribe: "plague",
-    // Retired for the upcoming season (Jesper, 2026-08-13) — same mechanism
-    // and precedent as Gutter-Runt above: `retireDay: 1` drops it from the
-    // shop pool from day 1 on, while the def stays in UNIT_DEFS so golden
-    // logs, stored leaderboard lineups and replays still resolve it.
-    // Par-buyback severance (`sellRefund` in shop.ts) applies, so a copy
-    // carried in from a prior season sells for exactly what was spent.
+    tribe: "plague"
+    // UN-RETIRED for 2026-08-31 (was `retireDay: 1`, Jesper 2026-08-13).
+    // Stats and `poisonResistForTier`/`POISON_RESIST_CAP` all unchanged.
     //
-    // This removes the game's ONLY poison counter (`poisonResist` has no
-    // other user), which is deliberate rather than overlooked. The counter
-    // never actually did the job it was built for: #155's own probe showed
-    // adding Acolytes did not change the Acolyte-vs-real-RatMoe-board result
-    // at ANY value of `POISON_RESIST_CAP`, and the 2026-08-13 live-board
-    // measurement found poison is only ~1-4% of damage once real boards
-    // carry 4-6 relics each — so there is very little left to counter. The
-    // `season-pool.test.ts` 'defense' role stays covered by `grantArmor`
-    // (Ward-Weaver) and `revive` (Bone-Priest).
-    retireDay: 1
+    // The 2026-08-13 retirement rested on a measurement whose PREMISE this
+    // same cut removes. The note read: the counter "never actually did the job
+    // it was built for ... the 2026-08-13 live-board measurement found poison
+    // is only ~1-4% of damage once real boards carry 4-6 relics each — so
+    // there is very little left to counter."
+    //
+    // That is a statement about relics, not about poison. #195's per-unit
+    // relic cap ships in this same season and takes real boards from 4-6
+    // relics down to the cap, which raises every non-relic damage source —
+    // poison included — as a share of the total. Retiring the only counter to
+    // a damage type that is about to get proportionally larger would be
+    // backwards.
+    //
+    // It also gives the 'defense' role a third provider (alongside
+    // `grantArmor` and `revive`), and `pvp:matrix` Lens B already scores it
+    // the single sharpest counter-pick in the game (+77 vs the poison panel,
+    // strongly negative elsewhere) — exactly the non-`generic` shape this
+    // rebalance is trying to add more of.
+  },
+  // ---- 2026-08-31 rebalance: one new rat.
+  //
+  // Built ENTIRELY from effect kinds the engine already has — no new `Effect`
+  // member, no new trigger, no sim work. The novelty is that count-scaled
+  // `summon` has never been on a purchasable rat outside Brood-Mother's faint
+  // cascade. ADR-0004's one-engine rule is what makes that free.
+  //
+  // Every number below is a PLACEHOLDER pending a live read, same as every
+  // other new magnitude in this file.
+  //
+  // A SECOND unit was built and cut before shipping — recorded here so nobody
+  // rebuilds it. "Rot-Fang" was an anti-BULK counter-pick aimed at the one
+  // empty column in `pvp:matrix` Lens B (going into this pass the panel read
+  // 4x `vs swarm`, 2x `vs glass`, 1x `vs poison`, zero `vs bulk`). The premise
+  // was that poison is the natural answer to bulk, because it is the one
+  // damage type armor does not touch (`applyDamage`: "Armor blunts attacks
+  // only — poison is rot, it goes around the hide").
+  //
+  // The premise was wrong at the MECHANIC level, not the tuning level, and it
+  // took three measurements to see it:
+  //   - `afterAttack` + `poisonTarget` (Midden-Hag's kit) poisons the front foe
+  //     you are ALREADY killing with the clash, so the rot is wasted: a solo
+  //     PvE ride produced ZERO `poisonTick` events.
+  //   - Doubling the stacks changed the Lens B row not at all.
+  //   - Moving it to `startOfWave` + `poisonFrontEnemy`, so the poison lands
+  //     before the clash and has time to tick, ALSO changed nothing.
+  // The tell was that Plague-Bearer and Draughtsman Moe — the two poison units
+  // that already ship — sit at `dead` in that same lens with the same profile.
+  // Poison as a damage type does not register there at all, so no poison unit
+  // will ever read as a bulk counter, however it is tuned.
+  //
+  // The gap is real and still open: countering bulk needs armor PIERCING, and
+  // there is no unit-side effect kind for it (Glass Shard and Marrow-Snap are
+  // relics). That is an engine primitive and was out of scope for this week.
+  "bilge-nurse": {
+    // The third `bodies` provider. After this cut refilled 'defense' (1 -> 3)
+    // and 'scaling' (2 -> 4), 'bodies' was left as the thinnest role at two —
+    // and one of those two, Squeak-Sensei's `allySummoned` partner, is the
+    // dependency `season-pool.test.ts` explicitly guards against stranding.
+    //
+    // Deliberately NOT another Rat-Piper. Piper's `summonScaledPup` puts tier
+    // into the pup's BODY (one pup, 9/9 at ★3); this puts tier into the COUNT
+    // (three 1/1 pups at ★3). Same role, opposite knob, and they play
+    // differently: Piper wants relics to duplicate onto one strong body, this
+    // wants payoffs that count EVENTS — three `allySummoned` triggers for
+    // Squeak-Sensei, three more deaths for Corpse-Glutton.
+    //
+    // Count 1 (not 2) is a direct concession to #182, which flags the
+    // summon/faint cascade as "the multiplier every faint/summon payoff feeds
+    // on". Summoning `pup` rather than `brood-broodling` is the other half of
+    // that: pup is a 1/1 with NO ability, so this adds bodies without adding a
+    // second cascade rung. Tune the count up only with the combo matrix open.
+    //
+    // Compounding-law: `startOfBattle` fires once per unit instance ever, so
+    // the litter cannot be re-summoned wave after wave.
+    id: "bilge-nurse",
+    name: "Bilge-Nurse",
+    attack: 1,
+    health: 5,
+    cost: 5,
+    ability: { trigger: "startOfBattle", effect: { kind: "summon", unitId: "pup", count: 1 } },
+    tribe: "swarm"
   }
 };
 var TEST_HORDE = {
@@ -1296,12 +1487,14 @@ function simulateCore(lineup, mode) {
       case "buffBehind": {
         const start = removed ? index : index + 1;
         const targets = effect.all ? board.slice(start) : board.slice(start, start + 1);
-        for (const target of targets) buff(target, effect.attack * tierAttackMultiplier(tier), effect.health * tierHealthMultiplier(tier));
+        const mult = effect.all ? multiTargetBuffMultiplier(tier) : tierAttackMultiplier(tier);
+        const healthMult = effect.all ? multiTargetBuffMultiplier(tier) : tierHealthMultiplier(tier);
+        for (const target of targets) buff(target, effect.attack * mult, effect.health * healthMult);
         break;
       }
       case "grantArmor": {
         const amount = wardArmorForTier(tier);
-        const targets = effect.all ? board : board.slice(index, index + 1);
+        const targets = effect.all ? board : effect.ahead ? board.slice(0, index + 1) : board.slice(index, index + 1);
         for (const target of targets) {
           target.damageReduction += amount;
           events.push({ type: "shieldGranted", targetId: target.instanceId, sourceId: source.instanceId });
@@ -1321,7 +1514,8 @@ function simulateCore(lineup, mode) {
         const targets = [];
         if (index > 0) targets.push(board[index - 1]);
         if (index < board.length - 1) targets.push(board[index + 1]);
-        for (const target of targets) buff(target, effect.attack * tierAttackMultiplier(tier), effect.health * tierHealthMultiplier(tier));
+        const mult = multiTargetBuffMultiplier(tier);
+        for (const target of targets) buff(target, effect.attack * mult, effect.health * mult);
         break;
       }
       case "distributeStatsOnFaint": {
@@ -1431,16 +1625,18 @@ function simulateCore(lineup, mode) {
         break;
       }
       case "teamBuff": {
-        for (const target of board) buff(target, effect.attack * tierAttackMultiplier(tier), effect.health * tierHealthMultiplier(tier));
+        const mult = multiTargetBuffMultiplier(tier);
+        for (const target of board) buff(target, effect.attack * mult, effect.health * mult);
         break;
       }
       case "teamBuffByWave": {
+        const mult = multiTargetBuffMultiplier(tier);
         if (source.waveBuffPhase === "none") {
-          for (const target of board) buff(target, effect.early.attack * tierAttackMultiplier(tier), effect.early.health * tierHealthMultiplier(tier));
+          for (const target of board) buff(target, effect.early.attack * mult, effect.early.health * mult);
           source.waveBuffPhase = "early";
         }
         if (source.waveBuffPhase === "early" && currentWave >= effect.switchWave) {
-          for (const target of board) buff(target, effect.late.attack * tierAttackMultiplier(tier), effect.late.health * tierHealthMultiplier(tier));
+          for (const target of board) buff(target, effect.late.attack * mult, effect.late.health * mult);
           source.waveBuffPhase = "both";
         }
         break;
@@ -1468,7 +1664,7 @@ function simulateCore(lineup, mode) {
       case "backlineDamage": {
         if (index === 0) break;
         const def = UNIT_DEFS[source.defId];
-        const perHitAttack = (def?.attack ?? 0) + source.relics.reduce((s, r) => s + (r.attack ?? 0), 0) + teamOf(source.side).attack + source.attackBuffs;
+        const perHitAttack = (def?.attack ?? 0) * tier + source.relics.reduce((s, r) => s + (r.attack ?? 0), 0) + teamOf(source.side).attack + source.attackBuffs;
         if (perHitAttack <= 0) break;
         const firstHitBonus = source.firstAttackDone ? 0 : source.relics.reduce((s, r) => s + (r.firstHitBonus ?? 0), 0);
         const ignoresArmor = !source.firstAttackDone && source.relics.some((r) => r.firstHitIgnoresArmor);
@@ -1704,6 +1900,12 @@ function simulateCore(lineup, mode) {
       tryCleave(foe, front);
       if (frontStruck && front.ability?.trigger === "afterAttack") applyEffect(front, 0, false);
       if (foeStruck && foe.ability?.trigger === "afterAttack") applyEffect(foe, 0, false);
+      if (frontTookBlow && frontStartHealth > MIN_ATTACK_DAMAGE) {
+        front.health = Math.min(front.health, frontStartHealth - MIN_ATTACK_DAMAGE);
+      }
+      if (foeTookBlow && foeStartHealth > MIN_ATTACK_DAMAGE) {
+        foe.health = Math.min(foe.health, foeStartHealth - MIN_ATTACK_DAMAGE);
+      }
       if (frontTookBlow && front.ability?.trigger === "onHurt") applyTargetedEffect(front, foe);
       if (foeTookBlow && foe.ability?.trigger === "onHurt") applyTargetedEffect(foe, front);
       fireWhileAliveTriggers(horde);
@@ -1754,6 +1956,7 @@ var REROLL_COST = 2;
 var SHOP_UNIT_SLOTS = 4;
 var SHOP_RELIC_SLOTS = 1;
 var MAX_TIER = 3;
+var MAX_RELICS_PER_UNIT = 3;
 var SEASON_DAYS = 7;
 var BENCH_SIZE = 5;
 var SCRAP_PER_DEPTH = 1;
@@ -1816,7 +2019,14 @@ var SHOP_UNIT_POOL = Object.values(UNIT_DEFS).filter(
     // brood-runt cascade) are all cost-0 and must never be shop-rollable or
     // browsable — excluding by cost covers every current and future one
     // without an ever-growing id blocklist.
-    u.cost > 0 && u.id !== "blight-witch" && u.id !== "warren-warden" && u.id !== "twilight-runt" && u.id !== "dawn-runt" && u.id !== "dusk-runt" && u.id !== "slink-rat"
+    u.cost > 0 && u.id !== "blight-witch" && // Twin sides FLIPPED for the 2026-08-31 season (see the reskin note above):
+    // Warren-Warden and Twilight-Runt take back the shelf, MD Rattyfock and
+    // Gutter Gourmand step off it. Both pairs are stat- and ability-identical,
+    // so this is pure identity churn — zero balance delta, zero engine risk —
+    // and it is the cheapest way to make the shop LOOK different on Monday.
+    // The retirement contract is unchanged: every excluded def stays in
+    // UNIT_DEFS, and only one side of a pair is ever purchasable at a time.
+    u.id !== "md-rattyfock" && u.id !== "gutter-gourmand" && u.id !== "dawn-runt" && u.id !== "dusk-runt" && u.id !== "slink-rat"
   )
 );
 var SHOP_RELIC_POOL = Object.values(RELIC_DEFS).filter((r) => r.id !== "rusted-nail");
@@ -1923,8 +2133,11 @@ function combineAll(state) {
       for (const [id, count] of counts) {
         if (count > 1) refund += (count - 1) * relicRefund(id);
       }
+      const deduped = [...new Set(allRelics)];
+      const kept = deduped.slice(0, MAX_RELICS_PER_UNIT);
+      for (const id of deduped.slice(MAX_RELICS_PER_UNIT)) refund += relicRefund(id);
       state.scrap += refund;
-      first.u.relicIds = [...new Set(allRelics)];
+      first.u.relicIds = kept;
       for (const rest of [second, third].sort((a, b) => b.idx - a.idx)) {
         (rest.pool === "board" ? state.board : state.bench).splice(rest.idx, 1);
       }
@@ -1956,7 +2169,9 @@ function canRecruit(state, slotIndex) {
   return buyUnit(state, slotIndex).ok;
 }
 function hasValidRelicTarget(state, relicId) {
-  return state.board.some((u) => !u.relicIds.includes(relicId));
+  return state.board.some(
+    (u) => !u.relicIds.includes(relicId) && u.relicIds.length < MAX_RELICS_PER_UNIT
+  );
 }
 function buyRelic(state, slotIndex, targetIndex) {
   const slot = state.shop.slots[slotIndex];
@@ -1968,6 +2183,9 @@ function buyRelic(state, slotIndex, targetIndex) {
   }
   if (relic.scope === "unit" && state.board[targetIndex].relicIds.includes(relic.id)) {
     return fail("that rat already carries one");
+  }
+  if (relic.scope === "unit" && state.board[targetIndex].relicIds.length >= MAX_RELICS_PER_UNIT) {
+    return fail(`that rat already carries ${MAX_RELICS_PER_UNIT} trinkets`);
   }
   if (relic.scope === "team" && state.teamRelicIds.includes(relic.id)) {
     return fail("the horde already carries one");
@@ -1987,6 +2205,16 @@ function buyRelic(state, slotIndex, targetIndex) {
       }
     }
   }
+  return { ok: true, state: s };
+}
+function unequipRelic(state, boardIndex, relicId) {
+  const unit = state.board[boardIndex];
+  if (!unit) return fail("no rat there");
+  if (!unit.relicIds.includes(relicId)) return fail("that rat is not carrying it");
+  const s = clone(state);
+  const target = s.board[boardIndex];
+  target.relicIds = target.relicIds.filter((id) => id !== relicId);
+  s.scrap += relicRefund(relicId);
   return { ok: true, state: s };
 }
 function sellUnit(state, boardIndex) {
@@ -2529,6 +2757,32 @@ function boonEffect(boonId) {
   if (!boonId) return null;
   return (BOON_DEFS[boonId] ?? HELD_BOONS[boonId])?.effect ?? null;
 }
+function boonStatLine(e) {
+  switch (e.kind) {
+    case "frontHealth":
+      return `+${e.amount} health, leading rat`;
+    case "backAttack":
+      return `+${e.amount} attack, hindmost rat`;
+    case "sapBackAttack":
+      return `-${e.amount} attack, rival's hindmost rat`;
+    case "sapArmorAll":
+      return `-${e.amount} armor, rival's whole line`;
+    case "poisonNegation":
+      return `${e.amount} poison shrugged off`;
+    case "blockHits":
+      return `blocks the first ${e.hits} hits, either side of the line`;
+    case "capSummonHeadroom": {
+      const extra = e.headroom === 1 ? "1 rat" : `${e.headroom} rats`;
+      return `rival can summon at most ${extra} beyond their deployed line`;
+    }
+    case "decoyFront": {
+      const decoy = UNIT_DEFS[DECOY_DEF_ID];
+      return decoy ? `${decoy.attack}/${decoy.health} body, leading slot` : null;
+    }
+    default:
+      return null;
+  }
+}
 
 // packages/core/src/scout.ts
 var ARCHETYPE_LABEL = {
@@ -2755,6 +3009,7 @@ export {
   FAMILY_TEXT_ON,
   KEYWORD_FAMILIES,
   LOSS_CONSOLATION_DEFAULT,
+  MAX_RELICS_PER_UNIT,
   MAX_TIER,
   MIN_ATTACK_DAMAGE,
   POISON_RESIST_CAP,
@@ -2776,6 +3031,7 @@ export {
   boardCapForDay,
   boardsForDuel,
   boonEffect,
+  boonStatLine,
   boonsFor,
   buffSummonedForTier,
   buyBoardSlot,
@@ -2801,11 +3057,13 @@ export {
   legalEntrants,
   lineupFromBuild,
   moveUnit,
+  multiTargetBuffMultiplier,
   newBuild,
   nextSlotPrice,
   poisonResistForTier,
   poisonStacksForTier,
   relicKeyword,
+  relicRefund,
   rerollShop,
   reviveHpForTier,
   rollOfferings,
@@ -2827,6 +3085,7 @@ export {
   tierAttackMultiplier,
   tierHealthMultiplier,
   toggleFreeze,
+  unequipRelic,
   unitKeyword,
   unitStats,
   upcomingRetirements,
