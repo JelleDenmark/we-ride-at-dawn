@@ -1763,6 +1763,65 @@ export const UNIT_DEFS: Record<string, UnitDef> = {
     // strongly negative elsewhere) — exactly the non-`generic` shape this
     // rebalance is trying to add more of.
   },
+  // ---- 2026-08-31 rebalance: one new rat.
+  //
+  // Built ENTIRELY from effect kinds the engine already has — no new `Effect`
+  // member, no new trigger, no sim work. The novelty is that count-scaled
+  // `summon` has never been on a purchasable rat outside Brood-Mother's faint
+  // cascade. ADR-0004's one-engine rule is what makes that free.
+  //
+  // Every number below is a PLACEHOLDER pending a live read, same as every
+  // other new magnitude in this file.
+  //
+  // A SECOND unit was built and cut before shipping — recorded here so nobody
+  // rebuilds it. "Rot-Fang" was an anti-BULK counter-pick aimed at the one
+  // empty column in `pvp:matrix` Lens B (going into this pass the panel read
+  // 4x `vs swarm`, 2x `vs glass`, 1x `vs poison`, zero `vs bulk`). The premise
+  // was that poison is the natural answer to bulk, because it is the one
+  // damage type armor does not touch (`applyDamage`: "Armor blunts attacks
+  // only — poison is rot, it goes around the hide").
+  //
+  // The premise was wrong at the MECHANIC level, not the tuning level, and it
+  // took three measurements to see it:
+  //   - `afterAttack` + `poisonTarget` (Midden-Hag's kit) poisons the front foe
+  //     you are ALREADY killing with the clash, so the rot is wasted: a solo
+  //     PvE ride produced ZERO `poisonTick` events.
+  //   - Doubling the stacks changed the Lens B row not at all.
+  //   - Moving it to `startOfWave` + `poisonFrontEnemy`, so the poison lands
+  //     before the clash and has time to tick, ALSO changed nothing.
+  // The tell was that Plague-Bearer and Draughtsman Moe — the two poison units
+  // that already ship — sit at `dead` in that same lens with the same profile.
+  // Poison as a damage type does not register there at all, so no poison unit
+  // will ever read as a bulk counter, however it is tuned.
+  //
+  // The gap is real and still open: countering bulk needs armor PIERCING, and
+  // there is no unit-side effect kind for it (Glass Shard and Marrow-Snap are
+  // relics). That is an engine primitive and was out of scope for this week.
+  'bilge-nurse': {
+    // The third `bodies` provider. After this cut refilled 'defense' (1 -> 3)
+    // and 'scaling' (2 -> 4), 'bodies' was left as the thinnest role at two —
+    // and one of those two, Squeak-Sensei's `allySummoned` partner, is the
+    // dependency `season-pool.test.ts` explicitly guards against stranding.
+    //
+    // Deliberately NOT another Rat-Piper. Piper's `summonScaledPup` puts tier
+    // into the pup's BODY (one pup, 9/9 at ★3); this puts tier into the COUNT
+    // (three 1/1 pups at ★3). Same role, opposite knob, and they play
+    // differently: Piper wants relics to duplicate onto one strong body, this
+    // wants payoffs that count EVENTS — three `allySummoned` triggers for
+    // Squeak-Sensei, three more deaths for Corpse-Glutton.
+    //
+    // Count 1 (not 2) is a direct concession to #182, which flags the
+    // summon/faint cascade as "the multiplier every faint/summon payoff feeds
+    // on". Summoning `pup` rather than `brood-broodling` is the other half of
+    // that: pup is a 1/1 with NO ability, so this adds bodies without adding a
+    // second cascade rung. Tune the count up only with the combo matrix open.
+    //
+    // Compounding-law: `startOfBattle` fires once per unit instance ever, so
+    // the litter cannot be re-summoned wave after wave.
+    id: 'bilge-nurse', name: 'Bilge-Nurse', attack: 1, health: 5, cost: 5,
+    ability: { trigger: 'startOfBattle', effect: { kind: 'summon', unitId: 'pup', count: 1 } },
+    tribe: 'swarm',
+  },
 };
 
 /** Hardcoded showcase lineup until the shop lands (milestone 4). Index 0 = front. */

@@ -50,6 +50,11 @@ const ROLE_OF_EFFECT: Record<string, string> = {
   poisonLastEnemy: 'reach',
   poisonAllEnemies: 'reach',
   poisonFrontEnemyWhileAlive: 'reach',
+  // `poisonTarget` is enemy-only (Midden-Hag) and has no live player unit, so
+  // it is deliberately absent here — this table is the PLAYER pool's role map.
+  // A 2026-08-31 candidate (Rot-Fang, `afterAttack` + `poisonTarget`) was
+  // built, measured and cut before shipping; see the note at the end of
+  // UNIT_DEFS for why. Add a row here if a player unit ever takes this kind.
   // Survive the clash.
   grantArmor: 'defense',
   revive: 'defense',

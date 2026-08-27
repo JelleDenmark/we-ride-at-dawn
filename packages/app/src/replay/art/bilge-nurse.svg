@@ -1,0 +1,38 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <!-- Bilge-Nurse (2026-08-31 rebalance): the third 'bodies' rat — brings a
+       pup up out of the bilges at the dawn of battle. Read is "carrying
+       something": an upright, hunched carer with a bundled pup held against
+       the chest, and a second small shape tucked at the hem so the litter
+       reads even when the summon hasn't fired yet.
+
+       Warm ramp per sprite-ramps.test.ts: fur (#8a5a34/#a57040), the sacking
+       apron (#9c6b3f) and the rope (#b98a4e) hold the warm majority. The
+       summon family's colour (issue #166 / ADR-0005) is the muted teal
+       (#3f7f86) on the apron band and the pup's swaddle — kept to two small
+       areas so it cannot outweigh the browns, since teal buckets COOL. -->
+  <!-- tail curling down behind -->
+  <path d="M17 52 Q7 54 7 45 Q7 39 12 37" fill="none" stroke="#6b4426" stroke-width="2.4" stroke-linecap="round"/>
+  <!-- hunched upright body -->
+  <path d="M20 55 C16 44 18 30 28 25 C36 21 44 25 45 33 C46 41 43 50 41 55 Z"
+        fill="#8a5a34" stroke="#201209" stroke-width="1.5" stroke-linejoin="round"/>
+  <!-- sacking apron -->
+  <path d="M21 52 C24 44 38 44 41 52 L41 55 L20 55 Z" fill="#9c6b3f" stroke="#201209" stroke-width="1.2" stroke-linejoin="round"/>
+  <!-- apron band, summon family colour -->
+  <path d="M22 47.5 L40 47.5" fill="none" stroke="#3f7f86" stroke-width="2.1" stroke-linecap="round"/>
+  <!-- head, tipped down toward the bundle -->
+  <path d="M28 25 C25 19 30 14 36 15 C42 16 44 21 42 26 Z" fill="#a57040" stroke="#201209" stroke-width="1.4" stroke-linejoin="round"/>
+  <!-- ear -->
+  <circle cx="31" cy="16.5" r="3.4" fill="#a57040" stroke="#201209" stroke-width="1.2"/>
+  <!-- eye, downcast -->
+  <circle cx="38" cy="22" r="1.5" fill="#201209"/>
+  <!-- cradling arm -->
+  <path d="M24 34 Q29 41 37 39" fill="none" stroke="#8a5a34" stroke-width="3.4" stroke-linecap="round"/>
+  <!-- the carried pup: swaddle + snout + rope sling -->
+  <ellipse cx="33" cy="36" rx="7.5" ry="5.2" fill="#3f7f86" stroke="#201209" stroke-width="1.3"/>
+  <circle cx="38.5" cy="35" r="2.4" fill="#a57040" stroke="#201209" stroke-width="1"/>
+  <circle cx="39.6" cy="34.4" r="0.9" fill="#201209"/>
+  <path d="M26 31 Q33 28 41 32" fill="none" stroke="#b98a4e" stroke-width="1.6" stroke-linecap="round"/>
+  <!-- a second pup tucked at the hem -->
+  <circle cx="24" cy="52" r="3.2" fill="#a57040" stroke="#201209" stroke-width="1.1"/>
+  <circle cx="22.6" cy="51.4" r="0.8" fill="#201209"/>
+</svg>
