@@ -1851,6 +1851,32 @@ export function simulateCore(lineup: Lineup, mode: BattleMode): CoreOutput {
       if (frontStruck && front.ability?.trigger === 'afterAttack') applyEffect(front, 0, false);
       if (foeStruck && foe.ability?.trigger === 'afterAttack') applyEffect(foe, 0, false);
 
+      // Net-damage floor, SECOND pass (2026-08-31). The first pass runs inside
+      // the strike closures above, which is before `afterAttack` fires — so a
+      // drain like Grave-Leech's `healSelf` healed straight back through it and
+      // the floor's own guarantee ("per-tick healing can never fully offset the
+      // armor floor and manufacture an immortal front") did not actually hold
+      // for the one unit in the game whose healing is post-clash.
+      //
+      // Measured before the fix: a ★3 board of 4x Grave-Leech + 4x Ward-Weaver
+      // cleared 44.8 of 45 waves, and a single ward behind a ★3 leech was worth
+      // +14.0 waves over a filler. Stacked flat armor drove incoming damage to
+      // MIN_ATTACK_DAMAGE (1) while the drain returned `amount * tier` (3), so
+      // the front gained 2 health per clash, forever. That is the Warren-Warden
+      // incident shape ADR-0003 exists to catch, reachable from day 2.
+      //
+      // Same clamp, same guards as the first pass: only for a side whose blow
+      // actually landed, only for a unit that STARTED above the floor (so a
+      // Tail-Charm surviveLethal rescue is never bypassed), and `Math.min` only
+      // ever removes health gained THIS tick — it can never deal fresh damage
+      // past the raw clash or front-run a faint.
+      if (frontTookBlow && frontStartHealth > MIN_ATTACK_DAMAGE) {
+        front.health = Math.min(front.health, frontStartHealth - MIN_ATTACK_DAMAGE);
+      }
+      if (foeTookBlow && foeStartHealth > MIN_ATTACK_DAMAGE) {
+        foe.health = Math.min(foe.health, foeStartHealth - MIN_ATTACK_DAMAGE);
+      }
+
       // `onHurt` reflect (issue #134: Steel-Whisker) resolves HERE — after
       // the execute (Marrow-Snap) and cleave (Gore-Cleaver) blocks above,
       // alongside the other post-clash triggers — deliberately, so the
