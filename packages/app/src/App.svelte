@@ -735,6 +735,28 @@
    * A `pendingSwap` highlights every rat (any of them can be swapped), so this
    * only narrows the relic case.
    */
+  /**
+   * WHY a unit-scoped relic has no legal carrier — the two reasons read very
+   * differently to a player and must not share a message.
+   *
+   * `hasValidRelicTarget` ORs them together, and when #195's per-rat cap was
+   * added to that predicate the copy was not widened to match. The result: a
+   * player whose only rat is full got told "every rat already carries this"
+   * about a trinket they did not own, which is simply untrue. Caught in the
+   * 2026-08-30 bot playtest.
+   */
+  function relicBlockReason(relicId: string): string | null {
+    if (hasValidRelicTarget(build, relicId)) return null;
+    if (build.board.length === 0) return 'no rats to carry it — recruit one first';
+    // Some rat lacks this relic, so the blocker must be the cap rather than
+    // duplication. Distinguishing on "lacks it" (not on "is full") keeps the
+    // two branches exhaustive whichever way the predicate is extended later.
+    const someoneLacksIt = build.board.some((u) => !u.relicIds.includes(relicId));
+    return someoneLacksIt
+      ? `no rat has room — each carries at most ${MAX_RELICS_PER_UNIT} trinkets`
+      : 'every rat already carries this';
+  }
+
   function canPinRelicTo(unit: { relicIds: string[] }): boolean {
     if (pendingRelic === null) return false;
     const slot = build.shop.slots[pendingRelic];
@@ -1691,12 +1713,14 @@
     if (RELIC_DEFS[slot.relicId].scope === 'team') {
       if (applyAndAutoReroll(buyRelic(build, i))) inspect = null;
     } else if (!hasValidRelicTarget(build, slot.relicId)) {
-      // Every board rat already carries it (or the board is empty) — arming
-      // "pick a rat to carry it" here would soft-lock, since every possible
-      // tap would fail buyRelic's per-rat check with nothing to clear
-      // pendingRelic. The card's disabled state should already prevent this
-      // click, but guard here too in case it's ever called another way.
-      notice = 'every rat already carries this';
+      // No rat can legally take it — either every one already carries it, or
+      // every one is at the trinket cap, or the board is empty. Arming "pick a
+      // rat to carry it" here would soft-lock, since every possible tap would
+      // fail buyRelic's per-rat check with nothing to clear pendingRelic. The
+      // card's disabled state should already prevent this click, but guard
+      // here too in case it's ever called another way. `relicBlockReason`
+      // picks the message so this path and the card warning cannot drift.
+      notice = relicBlockReason(slot.relicId) ?? 'no rat can carry this';
     } else {
       // Unit relics need a target: close the card, arm the pick-a-rat mode.
       // Only one armed-selection mode at a time — arming this one clears
@@ -2474,7 +2498,7 @@
               <button onclick={() => (inspect = null)}>close</button>
             </div>
             {#if owned}<div class="card-warn">the horde already carries one</div>
-            {:else if noTarget}<div class="card-warn">every rat already carries this</div>
+            {:else if noTarget}<div class="card-warn">{relicBlockReason(relic.id)}</div>
             {:else if !afford}<div class="card-warn">not enough scrap</div>{/if}
           {/if}
         {:else if ins.area === 'board'}
