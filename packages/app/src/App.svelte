@@ -1003,16 +1003,24 @@
       return `While it's alive, keeps the frontmost ${foe} rotting at ${poisonStacksForTier(1)} poison (★2 ${poisonStacksForTier(2)} · ★3 ${poisonStacksForTier(3)}) — a refresh each clash tick, not a stack, so it never climbs past that, and it follows whichever ${foe} is currently at the front. Stops topping up once it falls, though poison already on a target doesn't fade with it.`;
     }
     if (e.kind === 'backlineDamage') {
-      // Merge scaling grows target count, not per-hit damage (issue #86
-      // follow-up) — see `backlineTargetsForTier`'s doc comment in
-      // data/units.ts for why the exponential attack curve is deliberately
-      // left out here. Per-hit damage is the unit's CURRENT attack (base +
-      // relics + team-attack pool + any runtime buffs — see the
-      // `backlineDamage` case in sim.ts's `applyEffect`), not a flat number:
-      // a buffed Slink-Rat/MBP Rat hits harder here too, so the copy must
-      // say "current attack," never bake in the def's base stat.
+      // Merging grows BOTH the target count (`backlineTargetsForTier`, 1/2/3)
+      // and the per-hit damage — but the per-hit curve is LINEAR (`* tier`),
+      // deliberately not `tierAttackMultiplier`'s 3^(tier-1). See
+      // `backlineTargetsForTier`'s doc comment in data/units.ts.
+      //
+      // That makes "its current attack" the WRONG phrase here, which is what
+      // this copy used to say. The unit's displayed attack stat carries the
+      // exponential curve, so at ★3 the card read 27 while the sim landed 9 —
+      // a 3x over-promise (and a 9x one before the per-hit curve existed at
+      // all). Quote the real per-hit number instead, computed from the same
+      // `def.attack * tier` the `backlineDamage` case in sim.ts uses.
+      //
+      // Relic/team/runtime attack bonuses ARE added on top by the sim (a
+      // buffed sniper does hit harder), so the sentence says "plus" rather
+      // than presenting these as the final figure.
       const targets = (t: number) => backlineTargetsForTier(t);
-      return `At the start of every wave, if not at the front, strikes the first ${foe} for its current attack (★2 hits the first ${targets(2)} ${foes} for its current attack each · ★3 hits the first ${targets(3)} ${foes} for its current attack each) — separate hits, landed before that wave's clashing even begins, with no retaliation. At the front, it just fights normally.`;
+      const perHit = (t: number) => (def?.attack ?? 0) * t;
+      return `At the start of every wave, if not at the front, strikes the first ${foe} for ${perHit(1)} (★2 hits the first ${targets(2)} ${foes} for ${perHit(2)} each · ★3 hits the first ${targets(3)} ${foes} for ${perHit(3)} each), plus whatever its trinkets and warren buffs add — separate hits, landed before that wave's clashing even begins, with no retaliation. At the front, it just fights normally.`;
     }
     let what = '';
     switch (e.kind) {
