@@ -1,5 +1,10 @@
 name: Deploy to GitHub Pages
 
+# WRAD1 is retired (2026-11-06). The game is no longer built: both channels
+# serve the static redirect in retired/ (see retired/README.md).
+#   prod /we-ride-at-dawn/      -> https://jelledenmark.github.io/we-ride-at-dawn-2/
+#   dev  /we-ride-at-dawn/dev/  -> https://jelledenmark.github.io/we-ride-at-dawn-2/dev/
+
 on:
   push:
     branches: [master, dev]
@@ -19,38 +24,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: master
-          path: prod
-      - uses: actions/checkout@v4
-        with:
-          ref: dev
-          path: dev
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
       - uses: actions/configure-pages@v5
         with:
           enablement: true
-      - name: Build prod (master)
-        working-directory: prod
-        env:
-          VITE_CHANNEL: prod
+      - name: Assemble redirect site
         run: |
-          npm ci
-          npm run build
-      - name: Build dev (dev branch)
-        working-directory: dev
-        env:
-          VITE_CHANNEL: dev
-        run: |
-          npm ci
-          npm run build
-      - name: Assemble site (prod at /, dev at /dev/)
-        run: |
-          mkdir -p site/dev
-          cp -r prod/packages/app/dist/. site/
-          cp -r dev/packages/app/dist/. site/dev/
+          set -euo pipefail
+          emit() { # $1 = output dir, $2 = redirect target
+            mkdir -p "$1"
+            for f in index.html 404.html; do
+              sed "s#__TARGET__#$2#g" "retired/$f" > "$1/$f"
+            done
+            cp retired/sw.js "$1/sw.js"
+            echo "$GITHUB_SHA" > "$1/version.txt"
+          }
+          emit site     https://jelledenmark.github.io/we-ride-at-dawn-2/
+          emit site/dev https://jelledenmark.github.io/we-ride-at-dawn-2/dev/
+          find site -type f | sort
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site

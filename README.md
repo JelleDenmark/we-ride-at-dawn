@@ -1,3 +1,5 @@
+> **Retired 2026-11-06.** This game is no longer served. Both channels redirect to its successor, We Ride at Dawn 2: https://jelledenmark.github.io/we-ride-at-dawn-2/ (repo `JelleDenmark/we-ride-at-dawn-2`). See `retired/README.md`.
+
 # We Ride at Dawn
 
 A grimy dark-fantasy idle auto-battler. Build a horde of rats; it auto-rides a gauntlet every hour and hauls back scrap by how deep it pushed. See [`CONTEXT.md`](./CONTEXT.md) for the domain glossary (Wave, Depth, Ride, Season, Archetype, etc.) — read it before touching game logic so terminology stays consistent.

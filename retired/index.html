@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>We Ride at Dawn has moved</title>
+<meta http-equiv="refresh" content="3; url=__TARGET__">
+<link rel="canonical" href="__TARGET__">
+<style>
+  :root { --bg: #0d0b09; --fg: #e8dcc8; --muted: #9a8c76; --accent: #d4a24c; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
+    font-family: Georgia, 'Times New Roman', serif; }
+  main { min-height: 100%; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; text-align: center; padding: 24px 16px; box-sizing: border-box; }
+  h1 { font-size: 1.6rem; margin: 0 0 12px; }
+  p { color: var(--muted); max-width: 32rem; line-height: 1.5; margin: 0 0 20px; }
+  a.go { display: inline-block; padding: 14px 22px; border: 1px solid var(--accent);
+    color: var(--accent); text-decoration: none; font-size: 1.1rem; border-radius: 4px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>The horde has ridden on.</h1>
+  <p>We Ride at Dawn is retired. Its successor, <strong>We Ride at Dawn 2</strong>, is a nightly
+     rat-board league: every board duels every other board at 22:00, most points by Sunday wins.</p>
+  <a class="go" href="__TARGET__">Ride to We Ride at Dawn 2 &rarr;</a>
+</main>
+<script>
+  // Tear down the old game's service worker and caches so an installed copy
+  // stops serving the retired build offline, then move on.
+  (async () => {
+    try {
+      if ('serviceWorker' in navigator) {
+        // Same origin as WRAD2 (jelledenmark.github.io): only touch WRAD1's
+        // own registrations (/we-ride-at-dawn/ and /we-ride-at-dawn/dev/).
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs
+          .filter((r) => /\/we-ride-at-dawn\/(dev\/)?$/.test(new URL(r.scope).pathname))
+          .map((r) => r.unregister()));
+      }
+      if (window.caches) {
+        const keys = await caches.keys();
+        await Promise.all(keys.filter((k) => k.startsWith('wrad-')) // WRAD1's cacheId; WRAD2 uses 'wrad2-'
+          .map((k) => caches.delete(k)));
+      }
+    } catch (e) { /* best effort */ }
+    location.replace('__TARGET__');
+  })();
+</script>
+</body>
+</html>
